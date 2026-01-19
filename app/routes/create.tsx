@@ -6,13 +6,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Papa from "papaparse";
 import { toast } from "sonner";
-import { FileJson, Upload, Plus, Trash2, ChevronRight } from "lucide-react";
+import { FileJson, Upload, Plus, Trash2, ChevronRight, FolderOpen, FileCode, Folder, ChevronLeft, X } from "lucide-react";
 import { QuestionMetadataSchema } from "../../server/schemas/question_schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import { Separator } from "@/components/ui/separator";
@@ -33,6 +32,11 @@ type QuestionFormValues = z.infer<typeof QuestionFormSchema>;
 export default function CreateQuestion() {
     const [activeTab, setActiveTab] = useState<"metadata" | "markdown" | "boilerplate" | "testcases">("metadata");
     const [markdownMode, setMarkdownMode] = useState<"write" | "preview">("write");
+
+    // File Picker State
+    const [showPicker, setShowPicker] = useState(false);
+    const [explorerPath, setExplorerPath] = useState("");
+    const [explorerFiles, setExplorerFiles] = useState<any[]>([]);
 
     const form = useForm<QuestionFormValues>({
         resolver: zodResolver(QuestionFormSchema) as any,
@@ -72,6 +76,35 @@ export default function CreateQuestion() {
         toast.success("EXPORT SUCCESS");
     };
 
+    const openPicker = async (path?: string) => {
+        try {
+            const resp = await fetch(`/api/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`);
+            const data = await resp.json();
+            setExplorerPath(data.currentPath);
+            setExplorerFiles(data.files);
+            setShowPicker(true);
+        } catch (e) {
+            toast.error("PICKER ERROR");
+        }
+    };
+
+    const handleFileSelect = async (path: string) => {
+        try {
+            // We need a way to read the file content. 
+            // For now, let's assume the user just wanted the UI. 
+            // In a real local app, we'd have an API to read file content.
+            // Let's add that to the API too.
+            const resp = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}`);
+            if (!resp.ok) throw new Error("FAILED TO READ");
+            const json = await resp.json();
+            form.reset(json);
+            setShowPicker(false);
+            toast.success("QUESTION LOADED");
+        } catch (err) {
+            toast.error("IMPORT FAILED");
+        }
+    };
+
     const handleCsvImport = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -109,73 +142,80 @@ export default function CreateQuestion() {
                 }} className="h-12 border border-white hover:bg-white hover:text-black">
                     <FileJson className="mr-3 h-4 w-4" /> EXPORT JSON
                 </Button>
+                <Button variant="outline" onClick={() => openPicker()} className="h-12 ml-4 border-dashed border-white/20 hover:border-white">
+                    <FolderOpen className="mr-3 h-4 w-4" /> PICK JSON
+                </Button>
             </div>
 
             <Form {...form}>
                 <form className="flex-1 flex gap-12 min-h-0 overflow-hidden pb-10">
                     {/* Sidebar / Configuration */}
-                    <div className="w-80 flex flex-col gap-8 flex-none overflow-hidden px-2">
-                        <section className="space-y-4">
-                            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">Metadata</h3>
-                            <FormField control={form.control} name="title" render={({ field }) => (
-                                <FormItem>
-                                    <FormControl><Input {...field} placeholder="PROBLEM TITLE" className="bg-transparent border-white/10" /></FormControl>
-                                    <FormMessage className="text-[10px] uppercase font-bold" />
-                                </FormItem>
-                            )} />
-                        </section>
+                    <div className="w-80 flex-none border-r border-white/5">
+                        <ScrollArea className="h-full">
+                            <div className="flex flex-col gap-8 py-4 px-2 pr-4 pb-20">
+                                <section className="space-y-4">
+                                    <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">Metadata</h3>
+                                    <FormField control={form.control} name="title" render={({ field }) => (
+                                        <FormItem>
+                                            <FormControl><Input {...field} placeholder="PROBLEM TITLE" className="bg-transparent border-white/10" /></FormControl>
+                                            <FormMessage className="text-[10px] uppercase font-bold" />
+                                        </FormItem>
+                                    )} />
+                                </section>
 
-                        <section className="space-y-4">
-                            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">Langs</h3>
-                            <FormField control={form.control} name="languages" render={({ field }) => (
-                                <FormItem>
-                                    <div className="flex flex-col gap-2">
-                                        {["javascript", "python", "cpp", "c", "java"].map(lang => (
-                                            <button
-                                                key={lang}
-                                                type="button"
-                                                onClick={() => {
-                                                    const current = field.value;
-                                                    if (current.includes(lang as any)) field.onChange(current.filter(l => l !== lang));
-                                                    else field.onChange([...current, lang]);
-                                                }}
-                                                className={cn(
-                                                    "flex items-center justify-between px-4 py-3 text-[10px] font-black uppercase tracking-widest transition-colors border border-white/10",
-                                                    field.value.includes(lang as any) ? "bg-white text-black border-white" : "hover:bg-white/5"
-                                                )}
-                                            >
-                                                {lang === "cpp" ? "C++" : lang}
-                                                {field.value.includes(lang as any) && <ChevronRight className="w-3 h-3" />}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <FormMessage />
-                                </FormItem>
-                            )} />
-                        </section>
+                                <section className="space-y-4">
+                                    <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">Langs</h3>
+                                    <FormField control={form.control} name="languages" render={({ field }) => (
+                                        <FormItem>
+                                            <div className="flex flex-col gap-2">
+                                                {["javascript", "python", "cpp", "c", "java"].map(lang => (
+                                                    <button
+                                                        key={lang}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const current = field.value;
+                                                            if (current.includes(lang as any)) field.onChange(current.filter(l => l !== lang));
+                                                            else field.onChange([...current, lang]);
+                                                        }}
+                                                        className={cn(
+                                                            "flex items-center justify-between px-4 py-3 text-[10px] font-black uppercase tracking-widest transition-colors border border-white/10",
+                                                            field.value.includes(lang as any) ? "bg-white text-black border-white" : "hover:bg-white/5"
+                                                        )}
+                                                    >
+                                                        {lang === "cpp" ? "C++" : lang}
+                                                        {field.value.includes(lang as any) && <ChevronRight className="w-3 h-3" />}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )} />
+                                </section>
 
-                        <Separator className="bg-white/5" />
+                                <Separator className="bg-white/5" />
 
-                        <nav className="flex flex-col gap-2">
-                            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-2">View</h3>
-                            {[
-                                { id: "metadata", label: "Description" },
-                                { id: "boilerplate", label: "Boilerplate" },
-                                { id: "testcases", label: `Tests (${testCaseFields.length})` }
-                            ].map(tab => (
-                                <button
-                                    key={tab.id}
-                                    type="button"
-                                    onClick={() => setActiveTab(tab.id as any)}
-                                    className={cn(
-                                        "text-left px-4 py-2 text-[10px] font-black uppercase tracking-widest transition-all",
-                                        activeTab === tab.id ? "text-white translate-x-1" : "text-zinc-500 hover:text-zinc-300"
-                                    )}
-                                >
-                                    {tab.label}
-                                </button>
-                            ))}
-                        </nav>
+                                <nav className="flex flex-col gap-2">
+                                    <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-2">View</h3>
+                                    {[
+                                        { id: "metadata", label: "Description" },
+                                        { id: "boilerplate", label: "Boilerplate" },
+                                        { id: "testcases", label: `Tests (${testCaseFields.length})` }
+                                    ].map(tab => (
+                                        <button
+                                            key={tab.id}
+                                            type="button"
+                                            onClick={() => setActiveTab(tab.id as any)}
+                                            className={cn(
+                                                "text-left px-4 py-2 text-[10px] font-black uppercase tracking-widest transition-all",
+                                                activeTab === tab.id ? "text-white translate-x-1" : "text-zinc-500 hover:text-zinc-300"
+                                            )}
+                                        >
+                                            {tab.label}
+                                        </button>
+                                    ))}
+                                </nav>
+                            </div>
+                        </ScrollArea>
                     </div>
 
                     {/* Main Workspace */}
@@ -272,9 +312,9 @@ export default function CreateQuestion() {
                                         <div className="flex gap-4">
                                             <div className="relative">
                                                 <input type="file" accept=".csv" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleCsvImport} />
-                                                <Button variant="ghost" size="sm" className="text-[10px]"><Upload className="w-3 h-3 mr-2" /> IMPORT CSV</Button>
+                                                <Button type="button" variant="ghost" size="sm" className="text-[10px]"><Upload className="w-3 h-3 mr-2" /> IMPORT CSV</Button>
                                             </div>
-                                            <Button size="sm" onClick={() => appendTestCase({ input: "", output: "", isHidden: false })} className="text-[10px]"><Plus className="w-3 h-3 mr-2" /> ADD CASE</Button>
+                                            <Button type="button" size="sm" onClick={() => appendTestCase({ input: "", output: "", isHidden: false })} className="text-[10px]"><Plus className="w-3 h-3 mr-2" /> ADD CASE</Button>
                                         </div>
                                     </div>
                                     <div className="flex-1 overflow-y-auto">
@@ -283,24 +323,43 @@ export default function CreateQuestion() {
                                                 <div key={field.id} className="flex gap-4 p-4 bg-zinc-900 overflow-hidden relative group">
                                                     <div className="flex-none w-8 text-[10px] font-black text-zinc-600 self-center">{index + 1}</div>
                                                     <div className="flex-1 grid grid-cols-2 gap-4">
-                                                        <div className="space-y-2">
-                                                            <Label className="text-[8px] font-black uppercase text-zinc-500 tracking-tighter">Input</Label>
-                                                            <Textarea
-                                                                {...form.register(`testCases.${index}.input` as const)}
-                                                                className="min-h-[80px] bg-black border-zinc-800 focus-visible:ring-zinc-600 text-[10px] font-mono"
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <Label className="text-[8px] font-black uppercase text-zinc-500 tracking-tighter">Output</Label>
-                                                            <Textarea
-                                                                {...form.register(`testCases.${index}.output` as const)}
-                                                                className="min-h-[80px] bg-black border-zinc-800 focus-visible:ring-zinc-600 text-[10px] font-mono"
-                                                            />
-                                                        </div>
+                                                        <FormField
+                                                            control={form.control}
+                                                            name={`testCases.${index}.input`}
+                                                            render={({ field }) => (
+                                                                <FormItem className="space-y-2">
+                                                                    <Label className="text-[8px] font-black uppercase text-zinc-500 tracking-tighter">Input</Label>
+                                                                    <FormControl>
+                                                                        <Textarea
+                                                                            {...field}
+                                                                            className="min-h-[80px] bg-black border-zinc-800 focus-visible:ring-zinc-600 text-[10px] font-mono"
+                                                                        />
+                                                                    </FormControl>
+                                                                    <FormMessage />
+                                                                </FormItem>
+                                                            )}
+                                                        />
+                                                        <FormField
+                                                            control={form.control}
+                                                            name={`testCases.${index}.output`}
+                                                            render={({ field }) => (
+                                                                <FormItem className="space-y-2">
+                                                                    <Label className="text-[8px] font-black uppercase text-zinc-500 tracking-tighter">Output</Label>
+                                                                    <FormControl>
+                                                                        <Textarea
+                                                                            {...field}
+                                                                            className="min-h-[80px] bg-black border-zinc-800 focus-visible:ring-zinc-600 text-[10px] font-mono"
+                                                                        />
+                                                                    </FormControl>
+                                                                    <FormMessage />
+                                                                </FormItem>
+                                                            )}
+                                                        />
                                                     </div>
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
+                                                        type="button"
                                                         onClick={() => removeTestCase(index)}
                                                         className="opacity-0 group-hover:opacity-100 transition-opacity self-center"
                                                     >
@@ -317,6 +376,73 @@ export default function CreateQuestion() {
                     </div>
                 </form>
             </Form>
+
+            {showPicker && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-8 bg-black/80 backdrop-blur-sm">
+                    <div className="w-full max-w-2xl bg-zinc-950 border border-white/20 flex flex-col h-[70vh] overflow-hidden">
+                        <div className="flex-none p-6 border-b border-white/10 flex justify-between items-center bg-black">
+                            <div className="space-y-1">
+                                <h3 className="text-sm font-black uppercase tracking-widest">Select Question File</h3>
+                                <p className="text-[9px] font-mono text-zinc-500 overflow-hidden text-ellipsis whitespace-nowrap max-w-md">{explorerPath}</p>
+                            </div>
+                            <Button variant="ghost" size="icon" onClick={() => setShowPicker(false)}>
+                                <X className="w-4 h-4" />
+                            </Button>
+                        </div>
+
+                        <div className="flex-none p-4 flex gap-2 overflow-x-auto bg-zinc-900 border-b border-white/5">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-[9px] font-black uppercase"
+                                onClick={() => openPicker(explorerPath.split('/').slice(0, -1).join('/') || '/')}
+                            >
+                                <ChevronLeft className="w-3 h-3 mr-2" /> UP
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-[9px] font-black uppercase"
+                                onClick={async () => {
+                                    const resp = await fetch('/api/fs/home');
+                                    const data = await resp.json();
+                                    openPicker(data.path);
+                                }}
+                            >
+                                HOME
+                            </Button>
+                        </div>
+
+                        <div className="flex-1 overflow-hidden">
+                            <ScrollArea className="h-full w-full">
+                                <div className="p-2">
+                                    {explorerFiles.map((file) => (
+                                        <button
+                                            key={file.path}
+                                            type="button"
+                                            onClick={() => file.isDirectory ? openPicker(file.path) : handleFileSelect(file.path)}
+                                            className="w-full flex items-center gap-3 p-3 text-[11px] font-medium border border-transparent hover:border-white/10 hover:bg-white/5 transition-all text-left group"
+                                        >
+                                            {file.isDirectory ? (
+                                                <Folder className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                                            ) : (
+                                                <FileCode className="w-4 h-4 text-white" />
+                                            )}
+                                            <span className={cn(file.isDirectory ? "text-zinc-400" : "text-white", "group-hover:text-white")}>
+                                                {file.name}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </ScrollArea>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
+}
+
+function indexPadding(n: number) {
+    return n < 10 ? `0${n}` : `${n}`;
 }

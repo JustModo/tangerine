@@ -1,10 +1,10 @@
 import * as React from "react"
 import { GripVerticalIcon } from "lucide-react"
-import {
-  Panel,
-  PanelGroup,
-  PanelResizeHandle,
-} from "react-resizable-panels"
+import * as ResizablePanels from "react-resizable-panels"
+
+const PanelGroup = ResizablePanels.PanelGroup
+const Panel = ResizablePanels.Panel
+const PanelResizeHandle = ResizablePanels.PanelResizeHandle
 
 import { cn } from "~/lib/utils"
 

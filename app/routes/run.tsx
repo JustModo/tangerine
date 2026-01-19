@@ -270,10 +270,10 @@ export default function Runner() {
             </ResizablePanelGroup>
             {showPicker && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-8 bg-black/80 backdrop-blur-sm">
-                    <div className="w-full max-w-2xl bg-zinc-950 border border-white/20 flex flex-col max-h-[70vh]">
+                    <div className="w-full max-w-2xl bg-zinc-950 border border-white/20 flex flex-col h-[70vh] overflow-hidden">
                         <div className="flex-none p-6 border-b border-white/10 flex justify-between items-center bg-black">
                             <div className="space-y-1">
-                                <h3 className="text-sm font-black uppercase tracking-widest">Select Source File</h3>
+                                <h3 className="text-sm font-black uppercase tracking-widest">Select Question File</h3>
                                 <p className="text-[9px] font-mono text-zinc-500 overflow-hidden text-ellipsis whitespace-nowrap max-w-md">{explorerPath}</p>
                             </div>
                             <Button variant="ghost" size="icon" onClick={() => setShowPicker(false)}>
@@ -304,26 +304,29 @@ export default function Runner() {
                             </Button>
                         </div>
 
-                        <ScrollArea className="flex-1">
-                            <div className="p-2">
-                                {explorerFiles.map((file) => (
-                                    <button
-                                        key={file.path}
-                                        onClick={() => file.isDirectory ? openPicker(file.path) : handleFileSelect(file.path)}
-                                        className="w-full flex items-center gap-3 p-3 text-[11px] font-medium border border-transparent hover:border-white/10 hover:bg-white/5 transition-all text-left group"
-                                    >
-                                        {file.isDirectory ? (
-                                            <Folder className="w-4 h-4 text-zinc-500 group-hover:text-white" />
-                                        ) : (
-                                            <FileCode className="w-4 h-4 text-white" />
-                                        )}
-                                        <span className={cn(file.isDirectory ? "text-zinc-400" : "text-white", "group-hover:text-white")}>
-                                            {file.name}
-                                        </span>
-                                    </button>
-                                ))}
-                            </div>
-                        </ScrollArea>
+                        <div className="flex-1 overflow-hidden">
+                            <ScrollArea className="h-full w-full">
+                                <div className="p-2">
+                                    {explorerFiles.map((file) => (
+                                        <button
+                                            key={file.path}
+                                            type="button"
+                                            onClick={() => file.isDirectory ? openPicker(file.path) : handleFileSelect(file.path)}
+                                            className="w-full flex items-center gap-3 p-3 text-[11px] font-medium border border-transparent hover:border-white/10 hover:bg-white/5 transition-all text-left group"
+                                        >
+                                            {file.isDirectory ? (
+                                                <Folder className="w-4 h-4 text-zinc-500 group-hover:text-white" />
+                                            ) : (
+                                                <FileCode className="w-4 h-4 text-white" />
+                                            )}
+                                            <span className={cn(file.isDirectory ? "text-zinc-400" : "text-white", "group-hover:text-white")}>
+                                                {file.name}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </ScrollArea>
+                        </div>
                     </div>
                 </div>
             )}
