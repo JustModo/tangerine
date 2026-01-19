@@ -1,87 +1,48 @@
-# Welcome to React Router!
+# Tangerine
 
-A modern, production-ready template for building full-stack React applications using React Router.
+Tangerine is a professional development tool for creating and executing local coding challenges. It provides a secure environment for test case verification using hashed outputs and a minimalist interface for question management.
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/remix-run/react-router-templates/tree/main/default)
+## Core Features
 
-## Features
+### Question Creator
+- Markdown-based problem description with live preview.
+- Multi-language support including C, C++, Java, JavaScript, and Python.
+- Integrated boilerplate code management per language.
+- CSV import for bulk test case loading.
 
-- 🚀 Server-side rendering
-- ⚡️ Hot Module Replacement (HMR)
-- 📦 Asset bundling and optimization
-- 🔄 Data loading and mutations
-- 🔒 TypeScript by default
-- 🎉 TailwindCSS for styling
-- 📖 [React Router docs](https://reactrouter.com/)
+### Security and Hashing
+- Automated SHA-256 hashing of test case outputs.
+- Encrypted verification: Expected outputs are never stored in plain text or exposed to the runner.
+- Secure local file system browsing for source file selection.
 
-## Getting Started
+### Runner
+- Real-time execution and stdout tracking.
+- Automated verification against hashed expectations.
+- High-performance execution with support for multiple runtimes.
+
+## Setup
+
+### Prerequisites
+- Node.js (Latest LTS recommended)
+- Local compilers/runtimes for targeted languages (gcc, g++, python3, java)
 
 ### Installation
-
-Install the dependencies:
-
 ```bash
 npm install
 ```
 
 ### Development
-
-Start the development server with HMR:
-
 ```bash
 npm run dev
 ```
 
-Your application will be available at `http://localhost:5173`.
-
-## Building for Production
-
-Create a production build:
-
+### Production Build
 ```bash
 npm run build
 ```
 
-## Deployment
-
-### Docker Deployment
-
-To build and run using Docker:
-
-```bash
-docker build -t my-app .
-
-# Run the container
-docker run -p 3000:3000 my-app
-```
-
-The containerized application can be deployed to any platform that supports Docker, including:
-
-- AWS ECS
-- Google Cloud Run
-- Azure Container Apps
-- Digital Ocean App Platform
-- Fly.io
-- Railway
-
-### DIY Deployment
-
-If you're familiar with deploying Node applications, the built-in app server is production-ready.
-
-Make sure to deploy the output of `npm run build`
-
-```
-├── package.json
-├── package-lock.json (or pnpm-lock.yaml, or bun.lockb)
-├── build/
-│   ├── client/    # Static assets
-│   └── server/    # Server-side code
-```
-
-## Styling
-
-This template comes with [Tailwind CSS](https://tailwindcss.com/) already configured for a simple default starting experience. You can use whatever CSS framework you prefer.
-
----
-
-Built with ❤️ using React Router.
+## Architecture
+The application is built using a modern full-stack architecture:
+- **Frontend**: React Router v7 with Tailwind CSS.
+- **Backend**: Express-based Node.js server for file system and code execution services.
+- **Styling**: Strict monochrome design system for high-contrast visibility.
