@@ -3,6 +3,7 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import crypto from "crypto";
 import { type ExecutionResult } from "../schemas/question_schema";
 
 const execAsync = promisify(exec);
@@ -12,6 +13,13 @@ const execAsync = promisify(exec);
  */
 function normalizeOutput(output: string): string {
     return output.trim().replace(/\r\n/g, "\n");
+}
+
+/**
+ * Hashes normalized output.
+ */
+function hashOutput(output: string): string {
+    return crypto.createHash("sha256").update(normalizeOutput(output)).digest("hex");
 }
 
 export async function runCode(
@@ -69,9 +77,9 @@ export async function runCode(
             } else if (result.isTimeout) {
                 status = "TIMEOUT";
             } else {
-                const normalizedActual = normalizeOutput(result.stdout || "");
-                const normalizedExpected = normalizeOutput(testCase.output);
-                if (normalizedActual !== normalizedExpected) {
+                const actualHash = hashOutput(result.stdout || "");
+                const expectedHash = testCase.output.trim(); // Stored as hash in JSON
+                if (actualHash !== expectedHash) {
                     status = "FAILED";
                 }
             }

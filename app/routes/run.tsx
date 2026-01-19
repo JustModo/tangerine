@@ -164,7 +164,7 @@ export default function Runner() {
                         <Button
                             variant="outline"
                             className="h-12 border-dashed border-white/20 hover:border-white text-[10px]"
-                            onClick={() => openPicker(codePath || undefined)}
+                            onClick={() => openPicker()}
                         >
                             PICK SOURCE
                         </Button>
@@ -175,7 +175,7 @@ export default function Runner() {
                             value={selectedLanguage}
                             onChange={e => setSelectedLanguage(e.target.value)}
                         >
-                            {question.languages.map(l => <option key={l} value={l} className="bg-black">{l === "cpp" ? "C++" : l}</option>)}
+                            {question.languages.map(l => <option key={l} value={l} className="bg-black">{l === "cpp" ? "c++" : l}</option>)}
                         </select>
                     )}
                     <Button onClick={runTests} disabled={!question || !codePath || isRunning} className="h-12 px-10 border border-white hover:bg-white hover:text-black">
@@ -245,10 +245,11 @@ export default function Runner() {
                                                 <TableCell className="p-4">
                                                     <div className="space-y-2 opacity-60 group-hover:opacity-100 transition-opacity">
                                                         <div className="text-[9px] font-mono"><span className="text-zinc-600">IN:</span> {tc.input.substring(0, 100)}</div>
-                                                        {res?.status === "FAILED" && (
-                                                            <div className="flex flex-col gap-1 border-l border-red-500/20 pl-3">
-                                                                <div className="text-[9px] font-mono text-red-500/80"><span className="font-bold">EXPECT:</span> {res.expectedOutput}</div>
-                                                                <div className="text-[9px] font-mono text-red-500"><span className="font-bold">ACTUAL:</span> {res.actualOutput}</div>
+                                                        {res?.actualOutput && (
+                                                            <div className={cn("border-l pl-3", res.status === "PASSED" ? "border-green-500/20" : "border-red-500/20")}>
+                                                                <div className={cn("text-[9px] font-mono", res.status === "PASSED" ? "text-green-500/80" : "text-red-500")}>
+                                                                    <span className="font-bold uppercase tracking-tighter mr-2">Stdout:</span> {res.actualOutput}
+                                                                </div>
                                                             </div>
                                                         )}
                                                         {res?.status === "ERROR" && <div className="text-[9px] font-mono text-orange-500 pl-3 border-l border-orange-500/20">{res.error}</div>}

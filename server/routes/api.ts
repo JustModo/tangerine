@@ -17,7 +17,7 @@ router.get("/languages", async (req, res) => {
 // FS Routes
 router.get("/fs/list", async (req, res) => {
     try {
-        const dirPath = (req.query.path as string) || process.cwd();
+        const dirPath = (req.query.path as string) || os.homedir();
         const result = await listDirectory(dirPath);
         res.json({ ...result, parent: getParentDir(result.currentPath) });
     } catch (err: any) {

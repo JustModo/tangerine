@@ -59,8 +59,30 @@ export default function CreateQuestion() {
         name: "boilerplates"
     });
 
-    const exportToJson = (data: QuestionFormValues) => {
-        const jsonString = JSON.stringify(data, null, 2);
+    async function hashString(str: string) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(str.trim().replace(/\r\n/g, "\n")); // Normalize before hashing
+        const hash = await crypto.subtle.digest("SHA-256", data);
+        return Array.from(new Uint8Array(hash))
+            .map(b => b.toString(16).padStart(2, "0"))
+            .join("");
+    }
+
+    const exportToJson = async (data: QuestionFormValues) => {
+        // Hash the outputs before export
+        const hashedTestCases = await Promise.all(
+            data.testCases.map(async (tc) => ({
+                ...tc,
+                output: await hashString(tc.output)
+            }))
+        );
+
+        const exportData = {
+            ...data,
+            testCases: hashedTestCases
+        };
+
+        const jsonString = JSON.stringify(exportData, null, 2);
         const blob = new Blob([jsonString], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
