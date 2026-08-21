@@ -9,7 +9,6 @@ from pydantic import BaseModel
 
 from app.curriculum.api.problem_sessions_router import router as problem_sessions_router
 from app.curriculum.api.router import router as curriculum_router
-from app.evaluation.api.router import router as evaluation_router
 from app.execution.api.router import router as execution_router
 from app.problems.api.router import router as problems_router
 from app.sessions.api.router import router as sessions_router
@@ -38,7 +37,6 @@ app.include_router(execution_router, prefix="/api")
 app.include_router(sessions_router, prefix="/api")
 app.include_router(curriculum_router, prefix="/api")
 app.include_router(users_router, prefix="/api")
-app.include_router(evaluation_router, prefix="/api")
 app.include_router(problem_sessions_router, prefix="/api")
 
 

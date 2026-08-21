@@ -7,8 +7,6 @@ from app.evaluation.domain.repository import EvaluationRepository
 from app.execution.domain.executor import CodeExecutor
 from app.execution.domain.models import ExecutionRequest, ExecutionStatus
 from app.execution.domain.models import TestCase as ExecutionTestCase
-from app.llm.domain.provider import LLMProvider
-from app.llm.graphs.coaching import generate_coaching_feedback
 from app.mastery.application.services import MasteryService
 from app.problems.domain.repository import ProblemRepository
 from app.shared.code_assembly import assemble_program
@@ -28,23 +26,20 @@ def _parse_runtime_ms(value: str | None) -> float | None:
 
 
 class EvaluationService:
-    """Evaluate pipeline (plan.md §16-18): deterministic hidden-test grading happens
-    first and unconditionally, never touching the LLM. Coaching feedback is a separate,
-    on-demand action (generate_feedback) the user opts into after seeing the graded
-    result — not generated automatically on every submit."""
+    """Evaluate pipeline (plan.md §16-18): deterministic hidden-test grading, start to
+    finish, with no LLM anywhere in it. Advice about a submission is the code helper
+    chat's job (app/curriculum/application/code_helper.py), not this service's."""
 
     def __init__(
         self,
         repository: EvaluationRepository,
         problem_repository: ProblemRepository,
         executor: CodeExecutor,
-        llm_provider: LLMProvider | None = None,
         mastery_service: MasteryService | None = None,
     ) -> None:
         self._repository = repository
         self._problem_repository = problem_repository
         self._executor = executor
-        self._llm_provider = llm_provider
         self._mastery_service = mastery_service
 
     async def evaluate(
@@ -101,28 +96,8 @@ class EvaluationService:
             total_tests=len(version.tests),
             runtime_ms=runtime_ms,
             memory_mb=memory_mb,
-            feedback=None,
             created_at=now,
             results=results,
         )
         await self._repository.save_evaluation(evaluation)
         return evaluation
-
-    async def generate_feedback(
-        self, title: str, passed: int, total: int, sample_failures: list[dict]
-    ) -> str | None:
-        """Coaching feedback, generated only when the user explicitly asks for it — never
-        as a side effect of grading. Real specifics, not just a pass count — the LLM can't
-        give useful, targeted feedback ("your loop mishandles input X") from a bare
-        "7/10 passed" any more than a human could, hence sample_failures."""
-        if self._llm_provider is None:
-            return None
-        try:
-            coaching = await generate_coaching_feedback(
-                self._llm_provider,
-                {"title": title, "passed": passed, "total": total, "sample_failures": sample_failures[:3]},
-            )
-            return coaching.assessment
-        except Exception:
-            logger.warning("Coaching feedback generation failed", exc_info=True)
-            return None

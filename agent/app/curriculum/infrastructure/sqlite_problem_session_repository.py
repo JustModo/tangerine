@@ -1,5 +1,6 @@
 import aiosqlite
 
+from app.curriculum.domain.problem_chat import ProblemChatMessage
 from app.curriculum.domain.problem_session import ProblemSession
 from app.shared.config import get_settings
 
@@ -46,6 +47,41 @@ class SqliteProblemSessionRepository:
             )
             row = await cursor.fetchone()
             return self._hydrate(row) if row else None
+
+    async def add_chat_message(self, message: ProblemChatMessage) -> None:
+        async with aiosqlite.connect(self._database_path) as db:
+            await db.execute(
+                "INSERT INTO problem_chat_messages "
+                "(id, problem_session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+                (
+                    message.id,
+                    message.problem_session_id,
+                    message.role,
+                    message.content,
+                    message.created_at.isoformat(),
+                ),
+            )
+            await db.commit()
+
+    async def list_chat_messages(self, problem_session_id: str) -> list[ProblemChatMessage]:
+        async with aiosqlite.connect(self._database_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM problem_chat_messages WHERE problem_session_id = ? "
+                "ORDER BY created_at ASC",
+                (problem_session_id,),
+            )
+            rows = await cursor.fetchall()
+            return [
+                ProblemChatMessage(
+                    id=row["id"],
+                    problem_session_id=row["problem_session_id"],
+                    role=row["role"],
+                    content=row["content"],
+                    created_at=row["created_at"],
+                )
+                for row in rows
+            ]
 
     def _hydrate(self, row: aiosqlite.Row) -> ProblemSession:
         return ProblemSession(

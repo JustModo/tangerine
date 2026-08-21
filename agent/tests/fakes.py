@@ -15,6 +15,9 @@ class FakeLLMProvider:
         # mirroring how the real control flow calls it once for the initial reply and
         # again for the closing reply after a tool call.
         self._chat_streams = list(chat_streams or [])
+        # Last ChatStreamRequest received — lets tests assert on what actually went to the
+        # model (e.g. that problem secrets never appear in the prompt).
+        self.last_chat_request: ChatStreamRequest | None = None
 
     async def generate_structured(
         self, request: StructuredGenerationRequest, response_model: type[BaseModel]
@@ -32,6 +35,7 @@ class FakeLLMProvider:
         return self._text_responses.pop(0)
 
     async def stream_chat(self, request: ChatStreamRequest):
+        self.last_chat_request = request
         if not self._chat_streams:
             raise AssertionError("FakeLLMProvider: no more chat streams queued")
         chunks = self._chat_streams.pop(0)

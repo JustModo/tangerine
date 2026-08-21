@@ -1,0 +1,138 @@
+import { useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Markdown } from "@/components/Markdown";
+import { apiFetch, apiJson } from "~/lib/api";
+import type { HelperContext, ProblemChatMessage } from "~/lib/types";
+
+/**
+ * Code review chat for one problem. The learner's code and last test run are read at send
+ * time through getContext() rather than passed as props — otherwise every keystroke in the
+ * editor would re-render this panel and its markdown.
+ */
+export function CodeHelperPanel({
+  problemSessionId,
+  getContext,
+}: {
+  problemSessionId: string;
+  getContext: () => HelperContext;
+}) {
+  const [messages, setMessages] = useState<ProblemChatMessage[]>([]);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  async function loadMessages() {
+    try {
+      setMessages(await apiJson<ProblemChatMessage[]>(`/api/problem-sessions/${problemSessionId}/chat`));
+    } catch {
+      // Non-critical — an empty history just means starting fresh.
+    }
+  }
+
+  useEffect(() => {
+    loadMessages();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [problemSessionId]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [messages.length, streamingText]);
+
+  async function send() {
+    if (!draft.trim() || sending) return;
+    const content = draft;
+    setDraft("");
+    setSending(true);
+    setStreamingText("");
+    try {
+      const { source_code, last_run } = getContext();
+      const response = await apiFetch(`/api/problem-sessions/${problemSessionId}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, source_code, last_run }),
+      });
+      if (!response.ok) return;
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          for (const line of decoder.decode(value).split("\n\n")) {
+            if (!line.startsWith("data: ")) continue;
+            const dataStr = line.replace("data: ", "");
+            if (dataStr === "{}" || !dataStr.trim()) continue;
+            let event: { type: string; delta?: string };
+            try {
+              event = JSON.parse(dataStr);
+            } catch {
+              continue;
+            }
+            if (event.type === "user_message") await loadMessages();
+            else if (event.type === "text_delta") setStreamingText((p) => p + (event.delta || ""));
+            else if (event.type === "done") await loadMessages();
+          }
+        }
+      }
+    } finally {
+      setSending(false);
+      setStreamingText("");
+    }
+  }
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
+        {messages.length === 0 && !streamingText && (
+          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            Ask about your code — a review, why a test failed, or a faster approach.
+          </p>
+        )}
+        {messages.map((message) => (
+          <div key={message.id}>
+            <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">
+              {message.role}
+            </p>
+            {message.role === "assistant" ? (
+              <Markdown className="prose-p:my-1">{message.content}</Markdown>
+            ) : (
+              <p className="text-sm text-zinc-300 whitespace-pre-wrap">{message.content}</p>
+            )}
+          </div>
+        ))}
+        {streamingText && (
+          <div>
+            <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">assistant</p>
+            <Markdown className="prose-p:my-1">{streamingText}</Markdown>
+          </div>
+        )}
+        {sending && !streamingText && (
+          <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
+        )}
+        <div ref={bottomRef} />
+      </div>
+      <div className="flex-none pt-3 flex items-end gap-2 border-t border-white/10">
+        <Textarea
+          rows={1}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Ask about your code..."
+          className="flex-1 resize-none min-h-0 py-2 text-sm leading-6"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
+        />
+        <Button size="sm" onClick={send} disabled={sending}>
+          ASK
+        </Button>
+      </div>
+    </div>
+  );
+}

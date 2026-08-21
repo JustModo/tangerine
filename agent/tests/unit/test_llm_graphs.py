@@ -1,10 +1,8 @@
 import pytest
 
-from app.llm.graphs.coaching import generate_coaching_feedback
 from app.llm.graphs.curriculum import generate_curriculum
 from app.llm.graphs.problem import generate_problem
 from app.llm.infrastructure.gemini.mapping import SchemaValidationError
-from app.llm.schemas.coaching import CoachingFeedback
 from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
 from app.llm.schemas.problem import GeneratedExample, GeneratedProblem
 from tests.fakes import FakeLLMProvider
@@ -47,12 +45,3 @@ async def test_generate_problem_returns_structured_result() -> None:
     result = await generate_problem(provider, "prefix-sum", "python", "easy")
 
     assert result.title == "Static Range Sum"
-
-
-async def test_generate_coaching_feedback_returns_structured_result() -> None:
-    feedback = CoachingFeedback(assessment="Solid, but scans per query.", focus_areas=["prefix arrays"])
-    provider = FakeLLMProvider(structured_responses=[feedback])
-
-    result = await generate_coaching_feedback(provider, {"passed": 10, "total": 10})
-
-    assert result.assessment.startswith("Solid")

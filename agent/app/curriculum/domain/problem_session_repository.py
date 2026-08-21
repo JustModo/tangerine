@@ -1,5 +1,6 @@
 from typing import Protocol
 
+from app.curriculum.domain.problem_chat import ProblemChatMessage
 from app.curriculum.domain.problem_session import ProblemSession
 
 
@@ -9,3 +10,7 @@ class ProblemSessionRepository(Protocol):
     async def get(self, session_id: str) -> ProblemSession | None: ...
 
     async def get_by_node(self, lesson_node_id: str) -> ProblemSession | None: ...
+
+    async def add_chat_message(self, message: ProblemChatMessage) -> None: ...
+
+    async def list_chat_messages(self, problem_session_id: str) -> list[ProblemChatMessage]: ...

@@ -45,6 +45,23 @@ export interface TestResult {
 export interface EvaluationResult {
   passed_tests: number;
   total_tests: number;
-  feedback?: string | null;
   results: TestResult[];
+}
+
+export interface ProblemChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+/** What the helper chat sends alongside a question — read fresh at send time. */
+export interface HelperContext {
+  source_code: string;
+  last_run: {
+    kind: "run" | "submit";
+    passed: number;
+    total: number;
+    results: TestResult[];
+  } | null;
 }

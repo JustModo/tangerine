@@ -5,8 +5,9 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { LessonNotesPanel } from "@/components/LessonNotesPanel";
+import { CodeHelperPanel } from "./CodeHelperPanel";
 import { cn } from "~/lib/utils";
-import type { ProblemDetail } from "~/lib/types";
+import type { HelperContext, ProblemDetail } from "~/lib/types";
 
 function HintList({ hints }: { hints: string[] }) {
   const [revealed, setRevealed] = useState(0);
@@ -44,18 +45,30 @@ function HintList({ hints }: { hints: string[] }) {
 export function ProblemPanel({
   problem,
   lessonNodeId,
+  problemSessionId,
+  getContext,
 }: {
   problem: ProblemDetail;
   lessonNodeId?: string;
+  problemSessionId?: string;
+  getContext?: () => HelperContext;
 }) {
-  const [tab, setTab] = useState<"statement" | "notes">("statement");
-  // Mount the notes panel only once Notes is first opened (so never-opened notes cost zero
-  // tokens), then keep it mounted-but-hidden so toggling back and forth never refetches.
+  const [tab, setTab] = useState<"statement" | "notes" | "helper">("statement");
+  // Mount the notes/helper panels only once first opened (so never-opened tabs cost zero
+  // tokens), then keep them mounted-but-hidden so toggling never refetches or loses a draft.
   const [notesMounted, setNotesMounted] = useState(false);
+  const [helperMounted, setHelperMounted] = useState(false);
+  const tabs: ("statement" | "notes" | "helper")[] = [
+    "statement",
+    ...(lessonNodeId ? (["notes"] as const) : []),
+    ...(problemSessionId && getContext ? (["helper"] as const) : []),
+  ];
 
   return (
-    <ScrollArea className="h-full bg-zinc-950 border-r border-white/10">
-      <div className="p-8 space-y-6">
+    // Fixed header + a single scrolling region below it. The helper tab fills that region
+    // exactly, so only its message list scrolls — the panel itself never does.
+    <div className="h-full flex flex-col bg-zinc-950 border-r border-white/10">
+      <div className="flex-none px-8 pt-8 pb-4 space-y-4">
         <div className="space-y-3">
           <h1 className="text-2xl font-black tracking-tighter uppercase">{problem.title}</h1>
           <div className="flex flex-wrap gap-2">
@@ -71,15 +84,16 @@ export function ProblemPanel({
 
         <Separator className="bg-white/10" />
 
-        {lessonNodeId && (
+        {tabs.length > 1 && (
           <div className="flex items-center gap-4">
-            {(["statement", "notes"] as const).map((value) => (
+            {tabs.map((value) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => {
                   setTab(value);
                   if (value === "notes") setNotesMounted(true);
+                  if (value === "helper") setHelperMounted(true);
                 }}
                 className={cn(
                   "text-[10px] font-bold uppercase tracking-widest transition-colors",
@@ -91,14 +105,24 @@ export function ProblemPanel({
             ))}
           </div>
         )}
+      </div>
 
+      <div className="flex-1 min-h-0">
+        {helperMounted && problemSessionId && getContext && (
+          <div className={tab === "helper" ? "h-full px-8 pb-8" : "hidden"}>
+            <CodeHelperPanel problemSessionId={problemSessionId} getContext={getContext} />
+          </div>
+        )}
+
+        <ScrollArea className={tab === "helper" ? "hidden" : "h-full"}>
+          <div className="px-8 pb-8">
         {notesMounted && lessonNodeId && (
           <div className={tab === "notes" ? "" : "hidden"}>
             <LessonNotesPanel lessonNodeId={lessonNodeId} />
           </div>
         )}
 
-        <div className={tab === "notes" ? "hidden" : "space-y-6"}>
+        <div className={tab === "statement" ? "space-y-6" : "hidden"}>
         <Markdown>{problem.statement_md}</Markdown>
 
         {problem.constraints && (
@@ -144,7 +168,9 @@ export function ProblemPanel({
 
         <HintList hints={problem.hints} />
         </div>
+          </div>
+        </ScrollArea>
       </div>
-    </ScrollArea>
+    </div>
   );
 }

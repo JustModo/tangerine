@@ -67,6 +67,14 @@ class SqliteLessonPlanRepository:
         placeholders = ",".join("?" for _ in keep_ids) or "NULL"
 
         async with aiosqlite.connect(self._database_path) as db:
+            # Helper-chat rows first — they hang off problem_sessions, so deleting the
+            # sessions before them would orphan the conversation.
+            await db.execute(
+                f"DELETE FROM problem_chat_messages WHERE problem_session_id IN ("
+                f"  SELECT id FROM problem_sessions WHERE lesson_node_id IN ("
+                f"    SELECT id FROM lesson_nodes WHERE lesson_plan_id = ? AND id NOT IN ({placeholders})))",
+                (lesson_plan_id, *keep_ids),
+            )
             await db.execute(
                 f"DELETE FROM problem_sessions WHERE lesson_node_id IN ("
                 f"  SELECT id FROM lesson_nodes WHERE lesson_plan_id = ? AND id NOT IN ({placeholders}))",

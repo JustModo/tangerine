@@ -26,9 +26,11 @@ class SqliteEvaluationRepository:
     async def save_evaluation(self, evaluation: Evaluation) -> None:
         async with aiosqlite.connect(self._database_path) as db:
             await db.execute(
+                # evaluations.feedback still exists in the schema with no NOT NULL — it's
+                # simply no longer written now that coaching text lives in the helper chat.
                 "INSERT INTO evaluations "
                 "(id, submission_id, passed_tests, total_tests, runtime_ms, memory_mb, "
-                "complexity_verdict, feedback, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "complexity_verdict, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     evaluation.id,
                     evaluation.submission_id,
@@ -37,7 +39,6 @@ class SqliteEvaluationRepository:
                     evaluation.runtime_ms,
                     evaluation.memory_mb,
                     evaluation.complexity_verdict,
-                    evaluation.feedback,
                     evaluation.created_at.isoformat(),
                 ),
             )

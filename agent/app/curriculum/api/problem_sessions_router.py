@@ -1,8 +1,12 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.curriculum.application.code_helper import CodeHelperService
 from app.curriculum.application.problem_sessions import ProblemSessionService
+from app.curriculum.domain.problem_chat import ProblemChatMessage
 from app.curriculum.domain.problem_session import ProblemSession
 from app.curriculum.infrastructure.sqlite_problem_session_repository import SqliteProblemSessionRepository
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
@@ -53,6 +57,43 @@ def get_service() -> ProblemSessionService:
 
 class SourceCodeBody(BaseModel):
     source_code: str
+
+
+def get_code_helper_service() -> CodeHelperService:
+    return CodeHelperService(
+        SqliteProblemSessionRepository(), SqliteProblemRepository(), GeminiProvider()
+    )
+
+
+class ChatMessageBody(BaseModel):
+    content: str
+    source_code: str = ""
+    # The client sends its own last-run results: per-test results are never persisted, so
+    # the server has no way to reconstruct what the learner is actually looking at.
+    last_run: dict | None = None
+
+
+@router.get("/{session_id}/chat")
+async def list_chat(
+    session_id: str, service: CodeHelperService = Depends(get_code_helper_service)
+) -> list[ProblemChatMessage]:
+    return await service.list_messages(session_id)
+
+
+@router.post("/{session_id}/chat")
+async def post_chat(
+    session_id: str,
+    body: ChatMessageBody,
+    service: CodeHelperService = Depends(get_code_helper_service),
+) -> StreamingResponse:
+    async def event_stream():
+        async for event in service.send_message(
+            session_id, body.content, body.source_code, body.last_run
+        ):
+            yield f"data: {json.dumps(event)}\n\n"
+        yield "event: done\ndata: {}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/by-node/{lesson_node_id}")
@@ -137,7 +178,6 @@ async def submit(
         SqliteEvaluationRepository(),
         problem_repo,
         CitronAdapter(),
-        GeminiProvider(),
         MasteryService(SqliteUserSkillStateRepository()),
     )
     try:

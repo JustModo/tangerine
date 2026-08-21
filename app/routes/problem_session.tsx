@@ -83,20 +83,6 @@ export default function ProblemSessionScreen() {
     });
   }
 
-  async function requestFeedback(payload: {
-    title: string;
-    passed: number;
-    total: number;
-    sample_failures: { input: string; actual_output?: string | null; error?: string | null }[];
-  }): Promise<string | null> {
-    const result = await apiJson<{ feedback: string | null }>("/api/evaluations/coach", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    return result.feedback;
-  }
-
   if (!session || !problem) {
     return (
       <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs uppercase tracking-widest">
@@ -119,8 +105,8 @@ export default function ProblemSessionScreen() {
           onAutosave={autosave}
           onRun={runCode}
           onSubmit={submitCode}
-          onRequestFeedback={requestFeedback}
           lessonNodeId={session.lesson_node_id}
+          problemSessionId={session.id}
         />
       </div>
     </div>

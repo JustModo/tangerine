@@ -21,7 +21,6 @@ class Evaluation(BaseModel):
     runtime_ms: float | None = None
     memory_mb: float | None = None  # peak across per-test memory_kb; null when the executor can't measure it (e.g. the local JS fallback)
     complexity_verdict: str | None = None  # no static complexity analyzer built yet — always null for now
-    feedback: str | None = None
     created_at: datetime
     # Per-test breakdown (input/status/actual_output) — never the expected output, since
     # problem_tests only ever stores its hash (plan.md §23's invariant). Not persisted —

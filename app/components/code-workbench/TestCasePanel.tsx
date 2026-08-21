@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, EyeOff, Loader2, MessageCircle, XCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { CheckCircle2, EyeOff, Loader2, XCircle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "~/lib/utils";
 import type { TestResult } from "~/lib/types";
@@ -16,11 +15,7 @@ interface TestCasePanelProps {
    * visible-example runs. Hidden/graded tests never have their expected value sent to
    * the client at all, so this stays empty for those. */
   expectedById?: Record<string, string>;
-  summary?: { passed: number; total: number; feedback?: string | null } | null;
-  /** Coaching feedback is generated on demand, not automatically on every submit — set
-   * only when a summary is present and feedback hasn't been fetched yet. */
-  onRequestFeedback?: () => void;
-  feedbackLoading?: boolean;
+  summary?: { passed: number; total: number } | null;
 }
 
 export function TestCasePanel({
@@ -30,8 +25,6 @@ export function TestCasePanel({
   hidden,
   expectedById,
   summary,
-  onRequestFeedback,
-  feedbackLoading,
 }: TestCasePanelProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -145,27 +138,6 @@ export function TestCasePanel({
           </div>
         )}
 
-        {summary?.feedback ? (
-          <p className="text-xs text-zinc-400 border-t border-white/10 pt-4">{summary.feedback}</p>
-        ) : (
-          summary &&
-          onRequestFeedback && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onRequestFeedback}
-              disabled={feedbackLoading}
-              className="w-full text-[10px]"
-            >
-              {feedbackLoading ? (
-                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <MessageCircle className="mr-2 h-3.5 w-3.5" />
-              )}
-              {feedbackLoading ? "Getting feedback..." : "Get Feedback"}
-            </Button>
-          )
-        )}
       </div>
     </ScrollArea>
   );

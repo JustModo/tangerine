@@ -1,23 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Play, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Separator } from "@/components/ui/separator";
 import { useStatus } from "~/lib/status";
 import { ApiError } from "~/lib/api";
-import type { EvaluationResult, ProblemDetail, TestResult } from "~/lib/types";
+import type { EvaluationResult, HelperContext, ProblemDetail, TestResult } from "~/lib/types";
 import { ProblemPanel } from "./ProblemPanel";
 import { MonacoEditor } from "./MonacoEditor";
 import { TestCasePanel, type TestPanelStatus } from "./TestCasePanel";
 
 const AUTOSAVE_DELAY_MS = 2000;
-
-interface FeedbackPayload {
-  title: string;
-  passed: number;
-  total: number;
-  sample_failures: { input: string; actual_output?: string | null; error?: string | null }[];
-}
 
 interface CodeWorkbenchProps {
   problem: ProblemDetail;
@@ -25,9 +18,10 @@ interface CodeWorkbenchProps {
   onAutosave?: (code: string) => void;
   onRun: (code: string) => AsyncGenerator<TestResult>;
   onSubmit: ((code: string) => Promise<EvaluationResult>) | null;
-  onRequestFeedback?: (payload: FeedbackPayload) => Promise<string | null>;
-  /** Enables the Notes tab. Absent in practice mode, which has no lesson node. */
+  /** Enable the Notes and Helper tabs. Both absent in practice mode, which has neither a
+   * lesson node nor a persisted problem session. */
   lessonNodeId?: string;
+  problemSessionId?: string;
 }
 
 export function CodeWorkbench({
@@ -36,21 +30,27 @@ export function CodeWorkbench({
   onAutosave,
   onRun,
   onSubmit,
-  onRequestFeedback,
   lessonNodeId,
+  problemSessionId,
 }: CodeWorkbenchProps) {
   const [code, setCode] = useState(initialCode);
   const [isRunning, setIsRunning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [panelStatus, setPanelStatus] = useState<TestPanelStatus>("idle");
   const [panelLabel, setPanelLabel] = useState("");
   const [panelResults, setPanelResults] = useState<TestResult[]>([]);
   const [panelHidden, setPanelHidden] = useState(false);
-  const [summary, setSummary] = useState<{ passed: number; total: number; feedback?: string | null } | null>(
-    null,
-  );
+  const [summary, setSummary] = useState<{ passed: number; total: number } | null>(null);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // The helper chat reads these through a stable getter instead of props — passing `code`
+  // down directly would re-render the chat (and its markdown) on every keystroke.
+  const codeRef = useRef(code);
+  codeRef.current = code;
+  const lastRunRef = useRef<HelperContext["last_run"]>(null);
+  const getHelperContext = useCallback<() => HelperContext>(
+    () => ({ source_code: codeRef.current, last_run: lastRunRef.current }),
+    [],
+  );
   const { showError } = useStatus();
   const expectedById = useMemo(
     () => Object.fromEntries(problem.examples.map((example) => [example.id, example.output])),
@@ -74,13 +74,21 @@ export function CodeWorkbench({
     setPanelLabel("Queued...");
     try {
       let first = true;
+      const collected: TestResult[] = [];
       for await (const result of onRun(code)) {
         if (first) {
           setPanelLabel("Executing...");
           first = false;
         }
         setPanelResults((prev) => [...prev, result]);
+        collected.push(result);
       }
+      lastRunRef.current = {
+        kind: "run",
+        passed: collected.filter((r) => r.status === "PASSED").length,
+        total: collected.length,
+        results: collected,
+      };
       setPanelStatus("done");
     } catch (err) {
       showError(err instanceof ApiError ? err.message : "Run failed");
@@ -101,7 +109,13 @@ export function CodeWorkbench({
     try {
       const evaluation = await onSubmit(code);
       setPanelResults(evaluation.results);
-      setSummary({ passed: evaluation.passed_tests, total: evaluation.total_tests, feedback: evaluation.feedback });
+      setSummary({ passed: evaluation.passed_tests, total: evaluation.total_tests });
+      lastRunRef.current = {
+        kind: "submit",
+        passed: evaluation.passed_tests,
+        total: evaluation.total_tests,
+        results: evaluation.results,
+      };
       setPanelStatus("done");
     } catch (err) {
       showError(err instanceof ApiError ? err.message : "Submission failed");
@@ -111,33 +125,17 @@ export function CodeWorkbench({
     }
   }
 
-  async function handleRequestFeedback() {
-    if (!onRequestFeedback || !summary) return;
-    setFeedbackLoading(true);
-    try {
-      const sampleFailures = panelResults
-        .filter((r) => r.status !== "PASSED")
-        .slice(0, 3)
-        .map((r) => ({ input: r.input, actual_output: r.actual_output, error: r.error }));
-      const feedback = await onRequestFeedback({
-        title: problem.title,
-        passed: summary.passed,
-        total: summary.total,
-        sample_failures: sampleFailures,
-      });
-      setSummary((prev) => (prev ? { ...prev, feedback } : prev));
-    } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Failed to get feedback");
-    } finally {
-      setFeedbackLoading(false);
-    }
-  }
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-black text-white">
       <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0">
         <ResizablePanel defaultSize={32} minSize={20}>
-          <ProblemPanel problem={problem} lessonNodeId={lessonNodeId} />
+          <ProblemPanel
+            problem={problem}
+            lessonNodeId={lessonNodeId}
+            problemSessionId={problemSessionId}
+            getContext={getHelperContext}
+          />
         </ResizablePanel>
         <ResizableHandle className="w-1 bg-white/5" />
         <ResizablePanel defaultSize={68} minSize={30}>
@@ -186,8 +184,6 @@ export function CodeWorkbench({
                   hidden={panelHidden}
                   expectedById={panelHidden ? undefined : expectedById}
                   summary={summary}
-                  onRequestFeedback={onRequestFeedback ? handleRequestFeedback : undefined}
-                  feedbackLoading={feedbackLoading}
                 />
               </div>
             </ResizablePanel>

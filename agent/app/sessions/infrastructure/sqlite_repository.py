@@ -66,6 +66,15 @@ class SqliteSessionRepository:
 
     async def delete(self, session_id: str) -> None:
         async with aiosqlite.connect(self._database_path) as db:
+            # Helper-chat rows first — they hang off problem_sessions, so deleting the
+            # sessions before them would orphan the conversation.
+            await db.execute(
+                "DELETE FROM problem_chat_messages WHERE problem_session_id IN ("
+                "  SELECT id FROM problem_sessions WHERE lesson_node_id IN ("
+                "    SELECT id FROM lesson_nodes WHERE lesson_plan_id IN ("
+                "      SELECT id FROM lesson_plans WHERE session_id = ?)))",
+                (session_id,),
+            )
             await db.execute(
                 "DELETE FROM problem_sessions WHERE lesson_node_id IN ("
                 "  SELECT id FROM lesson_nodes WHERE lesson_plan_id IN ("

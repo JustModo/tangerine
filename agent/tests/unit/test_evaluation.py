@@ -6,12 +6,11 @@ import pytest
 from app.evaluation.application.services import EvaluationService
 from app.evaluation.infrastructure.sqlite_repository import SqliteEvaluationRepository
 from app.execution.domain.models import ExecutionStatus, TestResult
-from app.llm.schemas.coaching import CoachingFeedback
 from app.problems.domain.models import Problem, ProblemStatus, ProblemTest, ProblemVersion
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.database import MIGRATIONS_DIR
 from app.shared.types import Language
-from tests.fakes import FakeCodeExecutor, FakeLLMProvider
+from tests.fakes import FakeCodeExecutor
 
 
 def _apply_migrations(db_path: str) -> None:
@@ -57,57 +56,24 @@ async def _seed_problem(db_path: str) -> str:
     return problem.id
 
 
-async def test_evaluate_persists_deterministic_result_without_auto_generating_feedback(
-    db_path: str,
-) -> None:
+async def test_evaluate_persists_deterministic_result(db_path: str) -> None:
     problem_id = await _seed_problem(db_path)
     code = "print(sum(int(x) for x in input().split()))"
 
     executor = FakeCodeExecutor(
         [TestResult(id="t1", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6")]
     )
-    # No responses queued — evaluate() must never call the LLM, grading is deterministic.
-    llm = FakeLLMProvider()
     service = EvaluationService(
-        SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor, llm
+        SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor
     )
 
     evaluation = await service.evaluate(problem_id, "local-user", Language.PYTHON, code)
 
     assert evaluation.passed_tests == 1
     assert evaluation.total_tests == 1
-    assert evaluation.feedback is None
 
 
-async def test_generate_feedback_returns_coaching_assessment_on_demand(db_path: str) -> None:
-    llm = FakeLLMProvider(
-        structured_responses=[CoachingFeedback(assessment="Nice work.", focus_areas=[])]
-    )
-    service = EvaluationService(
-        SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), FakeCodeExecutor([]), llm
-    )
-
-    feedback = await service.generate_feedback(
-        "Sum List", 1, 1, [{"input": "1 2 3", "actual_output": "6", "error": None}]
-    )
-
-    assert feedback == "Nice work."
-
-
-async def test_generate_feedback_returns_none_when_llm_unavailable(db_path: str) -> None:
-    service = EvaluationService(
-        SqliteEvaluationRepository(db_path),
-        SqliteProblemRepository(db_path),
-        FakeCodeExecutor([]),
-        llm_provider=None,
-    )
-
-    feedback = await service.generate_feedback("Sum List", 0, 1, [])
-
-    assert feedback is None
-
-
-async def test_evaluate_degrades_gracefully_when_llm_unavailable(db_path: str) -> None:
+async def test_evaluate_grades_a_failing_submission(db_path: str) -> None:
     problem_id = await _seed_problem(db_path)
     code = "print(sum(int(x) for x in input().split()))"
 
@@ -115,13 +81,12 @@ async def test_evaluate_degrades_gracefully_when_llm_unavailable(db_path: str) -
         [TestResult(id="t1", status=ExecutionStatus.FAILED, input="1 2 3", actual_output="7")]
     )
     service = EvaluationService(
-        SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor, llm_provider=None
+        SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor
     )
 
     evaluation = await service.evaluate(problem_id, "local-user", Language.PYTHON, code)
 
     assert evaluation.passed_tests == 0
-    assert evaluation.feedback is None
 
 
 async def test_evaluate_returns_per_test_results_for_debugging(db_path: str) -> None:
@@ -132,7 +97,7 @@ async def test_evaluate_returns_per_test_results_for_debugging(db_path: str) -> 
         [TestResult(id="t1", status=ExecutionStatus.FAILED, input="1 2 3", actual_output="7")]
     )
     service = EvaluationService(
-        SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor, llm_provider=None
+        SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor
     )
 
     evaluation = await service.evaluate(problem_id, "local-user", Language.PYTHON, code)
@@ -149,7 +114,7 @@ async def test_evaluate_computes_peak_memory_across_results(db_path: str) -> Non
         [TestResult(id="t1", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6", memory_kb=8192)]
     )
     service = EvaluationService(
-        SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor, llm_provider=None
+        SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor
     )
 
     evaluation = await service.evaluate(
