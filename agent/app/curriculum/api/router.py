@@ -61,6 +61,13 @@ async def create_plan(
     return await service.create_draft(body.session_id, body.topic, body.language, body.level)
 
 
+@router.get("")
+async def list_plans(
+    session_id: str, service: CurriculumService = Depends(get_service)
+) -> list[LessonPlan]:
+    return await service.list_for_session(session_id)
+
+
 @router.get("/{plan_id}")
 async def get_plan(
     plan_id: str, service: CurriculumService = Depends(get_service)

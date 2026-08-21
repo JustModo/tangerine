@@ -30,6 +30,8 @@ import {
 } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "~/lib/utils";
+import { useStatus } from "~/lib/status";
+import { ApiError, apiFetch, apiJson } from "~/lib/api";
 
 interface TestCaseSpec {
   id?: string;
@@ -65,6 +67,7 @@ export default function Runner() {
   const [showPicker, setShowPicker] = useState(false);
   const [explorerPath, setExplorerPath] = useState("");
   const [explorerFiles, setExplorerFiles] = useState<any[]>([]);
+  const { showError, setBusyMessage } = useStatus();
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -78,7 +81,7 @@ export default function Runner() {
         if (json.languages?.length > 0) setSelectedLanguage(json.languages[0]);
         toast.success("QUESTION LOADED");
       } catch (err) {
-        toast.error("PARSE FAILED");
+        showError("Failed to parse question file");
       }
     };
     reader.readAsText(file);
@@ -98,6 +101,7 @@ export default function Runner() {
   const runTests = async () => {
     if (!question || !codePath || !selectedLanguage) return;
     setIsRunning(true);
+    setBusyMessage("Running tests...");
     const initialResults: Record<string, TestResult> = {};
     question.testCases.forEach((tc) => {
       initialResults[tc.id || tc.input] = {
@@ -110,7 +114,7 @@ export default function Runner() {
     setResults(initialResults);
 
     try {
-      const response = await fetch("/api/execution/run", {
+      const response = await apiFetch("/api/execution/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -123,6 +127,10 @@ export default function Runner() {
           })),
         }),
       });
+      if (!response.ok) {
+        showError(`Run failed (${response.status})`);
+        return;
+      }
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -148,9 +156,10 @@ export default function Runner() {
         }
       }
     } catch (e) {
-      toast.error("RUN ERROR");
+      showError(e instanceof ApiError ? e.message : "Run failed");
     } finally {
       setIsRunning(false);
+      setBusyMessage(null);
     }
   };
 
@@ -179,15 +188,14 @@ export default function Runner() {
 
   const openPicker = async (path?: string) => {
     try {
-      const resp = await fetch(
+      const data = await apiJson<{ current_path: string; files: any[] }>(
         `/api/workspace/list${path ? `?path=${encodeURIComponent(path)}` : ""}`,
       );
-      const data = await resp.json();
       setExplorerPath(data.current_path);
       setExplorerFiles(data.files);
       setShowPicker(true);
     } catch (e) {
-      toast.error("PICKER ERROR");
+      showError(e instanceof ApiError ? e.message : "Failed to browse files");
     }
   };
 
@@ -451,9 +459,12 @@ export default function Runner() {
                 size="sm"
                 className="text-[9px] font-black uppercase"
                 onClick={async () => {
-                  const resp = await fetch("/api/workspace/home");
-                  const data = await resp.json();
-                  openPicker(data.path);
+                  try {
+                    const data = await apiJson<{ path: string }>("/api/workspace/home");
+                    openPicker(data.path);
+                  } catch (e) {
+                    showError(e instanceof ApiError ? e.message : "Failed to reach home directory");
+                  }
                 }}
               >
                 HOME

@@ -95,3 +95,23 @@ async def test_evaluate_degrades_gracefully_when_llm_unavailable(tmp_path: Path,
 
     assert evaluation.passed_tests == 0
     assert evaluation.feedback is None
+
+
+async def test_evaluate_returns_per_test_results_for_debugging(tmp_path: Path, db_path: str) -> None:
+    problem_id = await _seed_problem(db_path)
+    code_file = tmp_path / "solution.py"
+    code_file.write_text("print(sum(int(x) for x in input().split()) + 1)")  # off by one
+
+    executor = FakeCodeExecutor(
+        [TestResult(id="t1", status=ExecutionStatus.FAILED, input="1 2 3", actual_output="7")]
+    )
+    service = EvaluationService(
+        SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor, llm_provider=None
+    )
+
+    evaluation = await service.evaluate(problem_id, "local-user", Language.PYTHON, str(code_file))
+
+    assert len(evaluation.results) == 1
+    assert evaluation.results[0].input == "1 2 3"
+    assert evaluation.results[0].actual_output == "7"
+    assert evaluation.results[0].status == ExecutionStatus.FAILED

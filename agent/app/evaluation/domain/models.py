@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.execution.domain.models import TestResult
+
 
 class Submission(BaseModel):
     id: str
@@ -21,3 +23,8 @@ class Evaluation(BaseModel):
     complexity_verdict: str | None = None  # no static complexity analyzer built yet — always null for now
     feedback: str | None = None
     created_at: datetime
+    # Per-test breakdown (input/status/actual_output) — never the expected output, since
+    # problem_tests only ever stores its hash (plan.md §23's invariant). Not persisted —
+    # only returned in the direct /submit response, so it's there right when it matters
+    # for debugging, without adding a table for something that's cheap to just re-run.
+    results: list[TestResult] = []

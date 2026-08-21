@@ -7,6 +7,7 @@ from app.curriculum.application.services import CurriculumService
 from app.curriculum.domain.models import LessonPlanStatus
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
 from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
+from app.llm.schemas.intent import ClassifiedIntent, UserIntent
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.sessions.application.services import SessionService
 from app.sessions.domain.models import ChatRole
@@ -96,3 +97,42 @@ async def test_delete_session_cascades_to_chat_and_plans(db_path: str) -> None:
 
     assert await sessions.get_session(session.id) is None
     assert await curriculum.get(plan.id) is None
+
+
+async def test_unclear_intent_surfaces_a_real_clarifying_question(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    llm = FakeLLMProvider(
+        structured_responses=[
+            ClassifiedIntent(intent=UserIntent.UNCLEAR, clarifying_question="Beginner or interview-level?")
+        ]
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm)
+    session = await service.create_session(user.id)
+
+    await service.add_message(session.id, ChatRole.USER, "I want to get better at DSA")
+
+    fetched = await service.get_session(session.id)
+    assert fetched is not None
+    assert len(fetched.messages) == 2
+    assert fetched.messages[0].role == ChatRole.USER
+    assert fetched.messages[1].role == ChatRole.ASSISTANT
+    assert fetched.messages[1].content == "Beginner or interview-level?"
+
+
+async def test_learning_plan_intent_confirms_before_generating(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    llm = FakeLLMProvider(
+        structured_responses=[ClassifiedIntent(intent=UserIntent.LEARNING_PLAN, topic="prefix sums")]
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm)
+    session = await service.create_session(user.id)
+
+    await service.add_message(session.id, ChatRole.USER, "teach me prefix sums")
+
+    fetched = await service.get_session(session.id)
+    assert fetched is not None
+    assert len(fetched.messages) == 2
+    reply = fetched.messages[1]
+    assert reply.role == ChatRole.ASSISTANT
+    assert "prefix sums" in reply.content
+    assert "Generate Learning Plan" in reply.content

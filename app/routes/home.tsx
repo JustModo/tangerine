@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { useStatus } from "~/lib/status";
+import { ApiError, apiJson } from "~/lib/api";
 
 interface SessionSummary {
   id: string;
@@ -17,26 +18,32 @@ export default function Home() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const { showError, setBusyMessage } = useStatus();
 
-  function loadSessions() {
-    return fetch("/api/sessions")
-      .then((res) => res.json())
-      .then(setSessions)
-      .catch(() => toast.error("Failed to load sessions"))
-      .finally(() => setLoading(false));
+  async function loadSessions() {
+    try {
+      setSessions(await apiJson<SessionSummary[]>("/api/sessions"));
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to load sessions");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     loadSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function startNewSession() {
+    setBusyMessage("Creating session...");
     try {
-      const res = await fetch("/api/sessions", { method: "POST" });
-      const session = await res.json();
+      const session = await apiJson<{ id: string }>("/api/sessions", { method: "POST" });
       navigate(`/sessions/${session.id}`);
-    } catch {
-      toast.error("Failed to start a new session");
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to start a new session");
+    } finally {
+      setBusyMessage(null);
     }
   }
 
@@ -44,15 +51,14 @@ export default function Home() {
     e.preventDefault();
     e.stopPropagation();
     if (!confirm("Delete this session? This can't be undone.")) return;
+    setBusyMessage("Deleting session...");
     try {
-      const res = await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
-      if (!res.ok) {
-        toast.error("Failed to delete session");
-        return;
-      }
+      await apiJson(`/api/sessions/${sessionId}`, { method: "DELETE" });
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-    } catch {
-      toast.error("Failed to delete session");
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to delete session");
+    } finally {
+      setBusyMessage(null);
     }
   }
 

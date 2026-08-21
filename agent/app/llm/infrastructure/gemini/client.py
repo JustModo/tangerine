@@ -12,21 +12,24 @@ class GeminiClient:
     async def generate_json(
         self, *, model: str, system_prompt: str, user_prompt: str, response_schema: dict
     ) -> str:
-        response = await self._client.aio.models.generate_content(
+        # A fresh chat per call, not models.generate_content — the SDK warns that direct
+        # generate_content use isn't recommended for automatic function calling; we don't
+        # use tools here, but a single-turn chat is the SDK's own supported shape anyway.
+        chat = self._client.aio.chats.create(
             model=model,
-            contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 response_mime_type="application/json",
                 response_schema=response_schema,
             ),
         )
+        response = await chat.send_message(user_prompt)
         return response.text or ""
 
     async def generate_text(self, *, model: str, system_prompt: str, user_prompt: str) -> str:
-        response = await self._client.aio.models.generate_content(
+        chat = self._client.aio.chats.create(
             model=model,
-            contents=user_prompt,
             config=types.GenerateContentConfig(system_instruction=system_prompt),
         )
+        response = await chat.send_message(user_prompt)
         return response.text or ""

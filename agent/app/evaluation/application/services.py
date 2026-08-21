@@ -94,9 +94,23 @@ class EvaluationService:
         feedback = None
         if self._llm_provider is not None:
             try:
+                # Real specifics, not just a pass count — plan.md §17's own example payload
+                # includes inputs/outputs for exactly this reason: the LLM can't give
+                # useful, targeted feedback ("your loop mishandles input X") from a bare
+                # "7/10 passed" any more than a human could.
+                failures = [
+                    {"input": r.input, "actual_output": r.actual_output, "error": r.error}
+                    for r in results
+                    if r.status != ExecutionStatus.PASSED
+                ][:3]
                 coaching = await generate_coaching_feedback(
                     self._llm_provider,
-                    {"title": problem.title, "passed": passed, "total": len(version.tests)},
+                    {
+                        "title": problem.title,
+                        "passed": passed,
+                        "total": len(version.tests),
+                        "sample_failures": failures,
+                    },
                 )
                 feedback = coaching.assessment
             except Exception:
@@ -112,6 +126,7 @@ class EvaluationService:
             runtime_ms=runtime_ms,
             feedback=feedback,
             created_at=now,
+            results=results,
         )
         await self._repository.save_evaluation(evaluation)
         return evaluation

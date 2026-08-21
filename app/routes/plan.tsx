@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { toast } from "sonner";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useStatus } from "~/lib/status";
+import { ApiError, apiJson } from "~/lib/api";
 
 interface LessonNode {
   id: string;
@@ -24,14 +26,14 @@ export default function PlanScreen() {
   const [plan, setPlan] = useState<LessonPlan | null>(null);
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
+  const { showError, setBusyMessage } = useStatus();
 
   async function load() {
-    const res = await fetch(`/api/learning-plans/${id}`);
-    if (!res.ok) {
-      toast.error("Plan not found");
-      return;
+    try {
+      setPlan(await apiJson<LessonPlan>(`/api/learning-plans/${id}`));
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to load plan");
     }
-    setPlan(await res.json());
   }
 
   useEffect(() => {
@@ -41,30 +43,38 @@ export default function PlanScreen() {
 
   async function acceptPlan() {
     setBusy(true);
+    setBusyMessage("Accepting plan...");
     try {
-      await fetch(`/api/learning-plans/${id}/accept`, { method: "POST" });
+      await apiJson(`/api/learning-plans/${id}/accept`, { method: "POST" });
       await load();
-    } catch {
-      toast.error("Failed to accept plan");
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to accept plan");
     } finally {
       setBusy(false);
+      setBusyMessage(null);
     }
   }
 
   async function startNext() {
     setBusy(true);
+    // Staged, not real backend progress — the bank-hit path is instant, but a miss
+    // triggers generation + sandbox validation, which can take a few seconds.
+    setBusyMessage("Selecting problem...");
+    const generatingTimer = setTimeout(() => setBusyMessage("Generating problem..."), 1200);
+    const validatingTimer = setTimeout(() => setBusyMessage("Validating problem..."), 3500);
     try {
-      const res = await fetch(`/api/learning-plans/${id}/problems/next`, { method: "POST" });
-      if (!res.ok) {
-        toast.error("Failed to select a problem");
-        return;
-      }
-      const problemSession = await res.json();
+      const problemSession = await apiJson<{ id: string }>(
+        `/api/learning-plans/${id}/problems/next`,
+        { method: "POST" },
+      );
       navigate(`/problem-sessions/${problemSession.id}`);
-    } catch {
-      toast.error("Failed to select a problem");
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to select a problem");
     } finally {
+      clearTimeout(generatingTimer);
+      clearTimeout(validatingTimer);
       setBusy(false);
+      setBusyMessage(null);
     }
   }
 
@@ -77,9 +87,18 @@ export default function PlanScreen() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto w-full">
+    <div className="flex-1 min-h-0 overflow-y-auto w-full">
       <div className="max-w-2xl mx-auto flex flex-col gap-10 py-16 px-10">
         <div className="space-y-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="-ml-2 mb-2"
+            onClick={() => navigate(-1)}
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
           <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-[0.4em]">
             {plan.language} · {plan.level} · {plan.status}
           </p>

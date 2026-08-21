@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
-import { ChevronLeft, FileCode, Folder, Play, RefreshCcw, X } from "lucide-react";
+import { ArrowLeft, ChevronLeft, FileCode, Folder, Play, RefreshCcw, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,8 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "~/lib/utils";
+import { useStatus } from "~/lib/status";
+import { ApiError, apiFetch, apiJson } from "~/lib/api";
 
 interface ProblemSessionData {
   id: string;
@@ -52,10 +54,12 @@ interface EvaluationResult {
   passed_tests: number;
   total_tests: number;
   feedback?: string | null;
+  results: RunResult[];
 }
 
 export default function ProblemSessionScreen() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [session, setSession] = useState<ProblemSessionData | null>(null);
   const [problem, setProblem] = useState<ProblemDetail | null>(null);
   const [codePath, setCodePath] = useState("");
@@ -67,19 +71,17 @@ export default function ProblemSessionScreen() {
   const [showPicker, setShowPicker] = useState(false);
   const [explorerPath, setExplorerPath] = useState("");
   const [explorerFiles, setExplorerFiles] = useState<any[]>([]);
+  const { showError, setBusyMessage } = useStatus();
 
   async function load() {
-    const sessionRes = await fetch(`/api/problem-sessions/${id}`);
-    if (!sessionRes.ok) {
-      toast.error("Problem session not found");
-      return;
+    try {
+      const sessionData = await apiJson<ProblemSessionData>(`/api/problem-sessions/${id}`);
+      setSession(sessionData);
+      setCodePath(sessionData.code_path || "");
+      setProblem(await apiJson<ProblemDetail>(`/api/problems/${sessionData.problem_id}`));
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to load problem session");
     }
-    const sessionData = await sessionRes.json();
-    setSession(sessionData);
-    setCodePath(sessionData.code_path || "");
-
-    const problemRes = await fetch(`/api/problems/${sessionData.problem_id}`);
-    if (problemRes.ok) setProblem(await problemRes.json());
   }
 
   useEffect(() => {
@@ -89,34 +91,45 @@ export default function ProblemSessionScreen() {
 
   const openPicker = async (path?: string) => {
     try {
-      const resp = await fetch(`/api/workspace/list${path ? `?path=${encodeURIComponent(path)}` : ""}`);
-      const data = await resp.json();
+      const data = await apiJson<{ current_path: string; files: any[] }>(
+        `/api/workspace/list${path ? `?path=${encodeURIComponent(path)}` : ""}`,
+      );
       setExplorerPath(data.current_path);
       setExplorerFiles(data.files);
       setShowPicker(true);
-    } catch {
-      toast.error("PICKER ERROR");
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to browse files");
     }
   };
 
   async function selectSourceFile(path: string) {
-    setCodePath(path);
-    setShowPicker(false);
-    await fetch(`/api/problem-sessions/${id}/source`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code_path: path }),
-    });
+    try {
+      // Confirm the backend actually recorded it before treating it as selected —
+      // this used to be fire-and-forget, so a dropped connection left the UI showing a
+      // source file the server never knew about.
+      await apiJson(`/api/problem-sessions/${id}/source`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code_path: path }),
+      });
+      setCodePath(path);
+      setShowPicker(false);
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to set source file");
+    }
   }
 
   async function runVisibleTests() {
     if (!codePath) return;
     setIsRunning(true);
+    setBusyMessage("Running visible tests...");
     setResults({});
     try {
-      const response = await fetch(`/api/problem-sessions/${id}/run`, {
-        method: "POST",
-      });
+      const response = await apiFetch(`/api/problem-sessions/${id}/run`, { method: "POST" });
+      if (!response.ok) {
+        showError(`Run failed (${response.status})`);
+        return;
+      }
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       if (reader) {
@@ -135,33 +148,34 @@ export default function ProblemSessionScreen() {
           }
         }
       }
-    } catch {
-      toast.error("Run failed");
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Run failed");
     } finally {
       setIsRunning(false);
+      setBusyMessage(null);
     }
   }
 
   async function submit() {
     if (!codePath) return;
     setIsSubmitting(true);
+    setBusyMessage("Evaluating submission...");
     try {
-      const res = await fetch(`/api/problem-sessions/${id}/submit`, { method: "POST" });
-      if (!res.ok) {
-        toast.error("Submission failed");
-        return;
-      }
-      const evaluationData = await res.json();
+      const evaluationData = await apiJson<EvaluationResult>(
+        `/api/problem-sessions/${id}/submit`,
+        { method: "POST" },
+      );
       setEvaluation(evaluationData);
       toast.success(
         evaluationData.passed_tests === evaluationData.total_tests
           ? "All hidden tests passed!"
           : `${evaluationData.passed_tests}/${evaluationData.total_tests} hidden tests passed`,
       );
-    } catch {
-      toast.error("Submission failed");
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Submission failed");
     } finally {
       setIsSubmitting(false);
+      setBusyMessage(null);
     }
   }
 
@@ -177,11 +191,16 @@ export default function ProblemSessionScreen() {
     <div className="h-full flex flex-col overflow-hidden bg-black text-white px-10 pt-10">
       <div className="flex-none">
         <div className="flex items-center justify-between mb-8">
-          <div className="space-y-1">
-            <h1 className="text-4xl font-black tracking-tighter uppercase">{problem.title}</h1>
-            <p className="text-zinc-500 text-xs font-bold uppercase tracking-[0.2em]">
-              {problem.language} · {problem.difficulty}
-            </p>
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Back">
+              <ArrowLeft className="w-4 h-4" />
+            </Button>
+            <div className="space-y-1">
+              <h1 className="text-4xl font-black tracking-tighter uppercase">{problem.title}</h1>
+              <p className="text-zinc-500 text-xs font-bold uppercase tracking-[0.2em]">
+                {problem.language} · {problem.difficulty}
+              </p>
+            </div>
           </div>
         </div>
 
@@ -285,6 +304,36 @@ export default function ProblemSessionScreen() {
                   {evaluation.feedback && (
                     <p className="text-xs text-zinc-400">{evaluation.feedback}</p>
                   )}
+                  <div className="space-y-2 pt-2">
+                    {evaluation.results.map((result, index) => (
+                      <div
+                        key={result.id || index}
+                        className="border border-white/10 p-4 text-xs font-mono space-y-1"
+                      >
+                        <div>
+                          <span className="text-zinc-600">TEST {index + 1} · IN:</span>{" "}
+                          {result.input}
+                        </div>
+                        <div>
+                          <span className="text-zinc-600">STATUS:</span>{" "}
+                          <span
+                            className={cn(
+                              "font-black",
+                              result.status === "PASSED" && "text-green-500",
+                              result.status === "FAILED" && "text-red-500",
+                            )}
+                          >
+                            {result.status}
+                          </span>
+                        </div>
+                        {result.actual_output && (
+                          <div className="text-zinc-500">ACTUAL: {result.actual_output}</div>
+                        )}
+                        {result.error && <div className="text-red-500">ERROR: {result.error}</div>}
+                        <div className="text-zinc-700">EXPECTED: hidden</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </ScrollArea>
@@ -325,9 +374,12 @@ export default function ProblemSessionScreen() {
                 size="sm"
                 className="text-[9px] font-black uppercase"
                 onClick={async () => {
-                  const resp = await fetch("/api/workspace/home");
-                  const data = await resp.json();
-                  openPicker(data.path);
+                  try {
+                    const data = await apiJson<{ path: string }>("/api/workspace/home");
+                    openPicker(data.path);
+                  } catch (err) {
+                    showError(err instanceof ApiError ? err.message : "Failed to reach home directory");
+                  }
                 }}
               >
                 HOME

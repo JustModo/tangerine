@@ -66,6 +66,9 @@ class CurriculumService:
     async def get(self, plan_id: str) -> LessonPlan | None:
         return await self._repository.get(plan_id)
 
+    async def list_for_session(self, session_id: str) -> list[LessonPlan]:
+        return await self._repository.list_for_session(session_id)
+
     async def accept(self, plan_id: str) -> LessonPlan:
         plan = await self._repository.get(plan_id)
         if plan is None:
