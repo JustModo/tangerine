@@ -4,12 +4,6 @@ Tangerine is a professional development tool for creating and executing local co
 
 ## Core Features
 
-### Question Creator
-- Markdown-based problem description with live preview.
-- Multi-language support including C, C++, Java, JavaScript, and Python.
-- Integrated boilerplate code management per language.
-- CSV import for bulk test case loading.
-
 ### Security and Hashing
 - Automated SHA-256 hashing of test case outputs.
 - Encrypted verification: Expected outputs are never stored in plain text or exposed to the runner.

@@ -1,0 +1,13 @@
+from typing import Protocol
+
+from app.sessions.domain.models import ChatMessage, LearningSession
+
+
+class SessionRepository(Protocol):
+    async def create(self, session: LearningSession) -> None: ...
+
+    async def get(self, session_id: str) -> LearningSession | None: ...
+
+    async def list_for_user(self, user_id: str) -> list[LearningSession]: ...
+
+    async def add_message(self, message: ChatMessage) -> None: ...

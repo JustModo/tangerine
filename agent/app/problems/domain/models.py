@@ -1,0 +1,64 @@
+from datetime import datetime
+from enum import StrEnum
+
+from pydantic import BaseModel
+
+from app.shared.types import Language
+
+
+class ProblemStatus(StrEnum):
+    GENERATED = "GENERATED"
+    VALIDATING = "VALIDATING"
+    VALID = "VALID"
+    AVAILABLE = "AVAILABLE"
+    INVALID = "INVALID"
+
+
+class Skill(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+
+
+class ProblemExample(BaseModel):
+    id: str
+    input: str
+    output: str
+    explanation: str | None = None
+
+
+class ProblemTest(BaseModel):
+    id: str
+    input: str
+    output_hash: str
+    is_hidden: bool = True
+
+
+class ProblemVersion(BaseModel):
+    id: str
+    problem_id: str
+    version: int
+    statement_md: str
+    reference_solution: str
+    boilerplate: str = ""
+    examples: list[ProblemExample] = []
+    tests: list[ProblemTest] = []
+    created_at: datetime
+
+
+class Problem(BaseModel):
+    id: str
+    conceptual_id: str
+    title: str
+    language: Language
+    difficulty: str
+    status: ProblemStatus
+    skill_ids: list[str] = []
+    created_at: datetime
+
+
+class ProblemCriteria(BaseModel):
+    skill_id: str | None = None
+    language: Language | None = None
+    difficulty: str | None = None
+    exclude_problem_ids: list[str] = []

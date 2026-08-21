@@ -1,0 +1,38 @@
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+
+from app.evaluation.application.services import EvaluationService
+from app.evaluation.domain.models import Evaluation
+from app.evaluation.infrastructure.sqlite_repository import SqliteEvaluationRepository
+from app.execution.infrastructure.existing_sandbox_adapter import ExistingSandboxAdapter
+from app.llm.infrastructure.gemini.provider import GeminiProvider
+from app.mastery.application.services import MasteryService
+from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
+from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
+from app.shared.types import Language
+from app.users.domain.models import LOCAL_USER_ID
+
+router = APIRouter(prefix="/evaluations", tags=["evaluation"])
+
+
+def get_service() -> EvaluationService:
+    return EvaluationService(
+        SqliteEvaluationRepository(),
+        SqliteProblemRepository(),
+        ExistingSandboxAdapter(),
+        GeminiProvider(),
+        MasteryService(SqliteUserSkillStateRepository()),
+    )
+
+
+class EvaluateBody(BaseModel):
+    problem_id: str
+    language: Language
+    code_path: str
+
+
+@router.post("")
+async def evaluate(
+    body: EvaluateBody, service: EvaluationService = Depends(get_service)
+) -> Evaluation:
+    return await service.evaluate(body.problem_id, LOCAL_USER_ID, body.language, body.code_path)

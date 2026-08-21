@@ -2,7 +2,7 @@ import { Router } from "express";
 import { detectLanguages } from "../services/language_service";
 import { runCode } from "../services/runner_service";
 import { watchFile } from "../services/watcher_service";
-import { listDirectory, getParentDir, readFileContent } from "../services/fs_service";
+import { listDirectory, getParentDir } from "../services/fs_service";
 import { z } from "zod";
 import os from "os";
 
@@ -27,17 +27,6 @@ router.get("/fs/list", async (req, res) => {
 
 router.get("/fs/home", (req, res) => {
     res.json({ path: os.homedir() });
-});
-
-router.get("/fs/read", async (req, res) => {
-    try {
-        const filePath = req.query.path as string;
-        if (!filePath) return res.status(400).json({ error: "Missing path" });
-        const content = await readFileContent(filePath);
-        res.json(content);
-    } catch (err: any) {
-        res.status(500).json({ error: err.message });
-    }
 });
 
 // Watch File Route (SSE)

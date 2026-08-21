@@ -1,0 +1,28 @@
+import uuid
+
+import aiosqlite
+
+from app.shared.config import get_settings
+
+
+class SqliteSkillRepository:
+    def __init__(self, database_path: str | None = None) -> None:
+        self._database_path = database_path or get_settings().database_path
+
+    async def ensure_skill(self, name: str) -> str:
+        """Find-or-create a skill by name, returning its id."""
+        async with aiosqlite.connect(self._database_path) as db:
+            cursor = await db.execute("SELECT id FROM skills WHERE name = ?", (name,))
+            row = await cursor.fetchone()
+            if row:
+                return row[0]
+            skill_id = str(uuid.uuid4())
+            await db.execute("INSERT INTO skills (id, name) VALUES (?, ?)", (skill_id, name))
+            await db.commit()
+            return skill_id
+
+    async def get_name(self, skill_id: str) -> str | None:
+        async with aiosqlite.connect(self._database_path) as db:
+            cursor = await db.execute("SELECT name FROM skills WHERE id = ?", (skill_id,))
+            row = await cursor.fetchone()
+            return row[0] if row else None

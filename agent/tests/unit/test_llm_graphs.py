@@ -1,0 +1,67 @@
+import pytest
+
+from app.llm.graphs.coaching import generate_coaching_feedback
+from app.llm.graphs.curriculum import generate_curriculum
+from app.llm.graphs.intent import classify_intent
+from app.llm.graphs.problem import generate_problem
+from app.llm.infrastructure.gemini.mapping import SchemaValidationError
+from app.llm.schemas.coaching import CoachingFeedback
+from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
+from app.llm.schemas.intent import ClassifiedIntent, UserIntent
+from app.llm.schemas.problem import GeneratedExample, GeneratedProblem
+from tests.fakes import FakeLLMProvider
+
+
+async def test_classify_intent_returns_structured_result() -> None:
+    provider = FakeLLMProvider(
+        structured_responses=[ClassifiedIntent(intent=UserIntent.LEARNING_PLAN, topic="prefix sums")]
+    )
+    result = await classify_intent(provider, "teach me prefix sums")
+    assert result.intent == UserIntent.LEARNING_PLAN
+    assert result.topic == "prefix sums"
+
+
+async def test_generate_curriculum_retries_on_invalid_then_succeeds() -> None:
+    good = GeneratedCurriculum(
+        title="Prefix Sums",
+        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
+    )
+    provider = FakeLLMProvider(structured_responses=[SchemaValidationError("bad json"), good])
+
+    result = await generate_curriculum(provider, "prefix sums", "python", "beginner")
+
+    assert result.title == "Prefix Sums"
+    assert len(result.nodes) == 1
+
+
+async def test_generate_curriculum_gives_up_after_max_attempts() -> None:
+    provider = FakeLLMProvider(structured_responses=[SchemaValidationError("bad")] * 3)
+
+    with pytest.raises(SchemaValidationError):
+        await generate_curriculum(provider, "prefix sums", "python", "beginner")
+
+
+async def test_generate_problem_returns_structured_result() -> None:
+    problem = GeneratedProblem(
+        title="Static Range Sum",
+        statement_md="Given an array...",
+        difficulty="easy",
+        skills=["prefix-sum"],
+        boilerplate="def solve(nums): ...",
+        reference_solution="def solve(nums): return sum(nums)",
+        examples=[GeneratedExample(input="[1,2,3]", output="6")],
+    )
+    provider = FakeLLMProvider(structured_responses=[problem])
+
+    result = await generate_problem(provider, "prefix-sum", "python", "easy")
+
+    assert result.title == "Static Range Sum"
+
+
+async def test_generate_coaching_feedback_returns_structured_result() -> None:
+    feedback = CoachingFeedback(assessment="Solid, but scans per query.", focus_areas=["prefix arrays"])
+    provider = FakeLLMProvider(structured_responses=[feedback])
+
+    result = await generate_coaching_feedback(provider, {"passed": 10, "total": 10})
+
+    assert result.assessment.startswith("Solid")

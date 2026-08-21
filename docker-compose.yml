@@ -1,0 +1,24 @@
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      AGENT_URL: http://agent:8000
+    depends_on:
+      - agent
+
+  agent:
+    build: ./agent
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_PATH: /data/agent.db
+      NODE_SANDBOX_URL: http://web:3000
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      - agent-data:/data
+
+volumes:
+  agent-data:

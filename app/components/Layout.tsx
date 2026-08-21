@@ -11,7 +11,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         TANGERINE
                     </Link>
                     <nav className="flex items-center space-x-8 text-xs font-bold uppercase tracking-widest">
-                        <Link to="/create" className="hover:text-muted-foreground transition-colors">Create</Link>
                         <Link to="/run" className="hover:text-muted-foreground transition-colors">Runner</Link>
                     </nav>
                 </div>

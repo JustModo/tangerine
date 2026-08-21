@@ -49,8 +49,3 @@ export async function listDirectory(dirPath: string): Promise<{ files: FileInfo[
 export function getParentDir(dirPath: string): string {
     return path.dirname(dirPath);
 }
-
-export async function readFileContent(filePath: string): Promise<any> {
-    const content = await fs.readFile(filePath, "utf-8");
-    return JSON.parse(content);
-}

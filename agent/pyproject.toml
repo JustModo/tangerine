@@ -1,0 +1,27 @@
+[project]
+name = "agent"
+version = "0.1.0"
+description = "Tangerine AI DSA learning agent backend"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic-settings>=2.6",
+    "aiosqlite>=0.20",
+    "httpx>=0.27",
+    "langgraph>=1.2.11",
+    "google-genai>=2.19.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
