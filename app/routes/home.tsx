@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { Trash2 } from "lucide-react";
+import { ListTree, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiJson } from "~/lib/api";
 
@@ -14,15 +13,42 @@ interface SessionSummary {
   messages: { content: string }[];
 }
 
+interface LessonPlanSummary {
+  id: string;
+  topic: string;
+  status: string;
+  version: number;
+}
+
 export default function Home() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [plansBySession, setPlansBySession] = useState<Record<string, LessonPlanSummary | undefined>>({});
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const { showError, setBusyMessage } = useStatus();
 
   async function loadSessions() {
     try {
-      setSessions(await apiJson<SessionSummary[]>("/api/sessions"));
+      const data = await apiJson<SessionSummary[]>("/api/sessions");
+      setSessions(data);
+      // One lookup per session to know whether it already has a plan — a session with a
+      // plan should lead with "continue learning", not "continue chat".
+      const entries = await Promise.all(
+        data.map(async (session) => {
+          try {
+            const plans = await apiJson<LessonPlanSummary[]>(
+              `/api/learning-plans?session_id=${session.id}`,
+            );
+            const active =
+              plans.find((p) => p.status === "ACCEPTED") ??
+              [...plans].sort((a, b) => b.version - a.version)[0];
+            return [session.id, active] as const;
+          } catch {
+            return [session.id, undefined] as const;
+          }
+        }),
+      );
+      setPlansBySession(Object.fromEntries(entries));
     } catch (err) {
       showError(err instanceof ApiError ? err.message : "Failed to load sessions");
     } finally {
@@ -47,39 +73,21 @@ export default function Home() {
     }
   }
 
-  async function deleteSession(e: React.MouseEvent, sessionId: string) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!confirm("Delete this session? This can't be undone.")) return;
-    setBusyMessage("Deleting session...");
-    try {
-      await apiJson(`/api/sessions/${sessionId}`, { method: "DELETE" });
-      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-    } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Failed to delete session");
-    } finally {
-      setBusyMessage(null);
-    }
-  }
-
   return (
     <div className="flex-1 flex flex-col min-h-0 w-full">
-      <div className="max-w-3xl mx-auto w-full flex-none flex flex-col gap-10 px-10 pt-20 pb-10">
-        <div className="space-y-4 text-center">
-          <p className="text-3xl font-black tracking-tighter">TANGERINE</p>
-          <h1 className="text-7xl font-black tracking-tighter uppercase leading-none">
-            Learning<br />Sessions
-          </h1>
+      <div className="flex-none w-full px-6 py-3 flex items-center justify-between gap-4 border-b border-white/10 bg-black">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.5em] text-zinc-500">Tangerine</p>
+          <p className="text-sm font-bold uppercase tracking-wide">Learning Sessions</p>
         </div>
-
-        <Button className="tracking-[0.3em]" onClick={startNewSession}>
+        <Button size="sm" className="tracking-[0.3em]" onClick={startNewSession}>
           + NEW SESSION
         </Button>
       </div>
 
       <ScrollArea className="flex-1 min-h-0 px-10">
-        <div className="max-w-3xl mx-auto w-full flex flex-col gap-16 pb-16">
-          <div className="flex flex-col divide-y divide-white/5 border-t border-white/5">
+        <div className="max-w-3xl mx-auto w-full flex flex-col pb-16">
+          <div className="flex flex-col divide-y divide-white/5">
             {loading && (
               <p className="text-zinc-500 text-xs uppercase py-8 text-center">Loading...</p>
             )}
@@ -88,41 +96,30 @@ export default function Home() {
                 No sessions yet. Start one above.
               </p>
             )}
-            {sessions.map((session) => (
-              <Link
-                key={session.id}
-                to={`/sessions/${session.id}`}
-                className="py-6 flex items-center justify-between hover:bg-zinc-950 transition-colors px-4 group"
-              >
-                <div className="space-y-1 min-w-0">
-                  <p className="text-sm font-bold uppercase tracking-wide truncate">
-                    {session.messages[0]?.content || "Untitled session"}
-                  </p>
-                  <p className="text-zinc-500 text-[10px] uppercase tracking-widest">
-                    {session.status} · updated {new Date(session.updated_at).toLocaleString()}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 flex-none">
-                  <span className="text-xs uppercase tracking-widest text-zinc-500">Continue →</span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-500 hover:bg-red-950/30"
-                    onClick={(e) => deleteSession(e, session.id)}
-                    aria-label="Delete session"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              </Link>
-            ))}
-          </div>
-
-          <div className="flex justify-center flex-col items-center gap-10 opacity-30">
-            <Separator className="w-32 bg-white/20" />
-            <Link to="/run" className="text-[10px] font-black uppercase tracking-[1em] hover:text-white">
-              Test Runner
-            </Link>
+            {sessions.map((session) => {
+              const plan = plansBySession[session.id];
+              const primaryTo = plan ? `/plans/${plan.id}` : `/sessions/${session.id}`;
+              return (
+                <Link
+                  key={session.id}
+                  to={primaryTo}
+                  className="py-6 flex items-center justify-between gap-4 hover:bg-zinc-950 transition-colors px-4 group"
+                >
+                  <div className="space-y-1.5 min-w-0">
+                    <p className="text-sm font-bold uppercase tracking-wide truncate">
+                      {plan?.topic || session.messages[0]?.content || "Untitled session"}
+                    </p>
+                    <p className="text-zinc-500 text-[10px] uppercase tracking-widest">
+                      {session.status} · updated {new Date(session.updated_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-none text-zinc-500 group-hover:text-white transition-colors">
+                    {plan ? <ListTree className="w-4 h-4" /> : <MessageSquare className="w-4 h-4" />}
+                    <span className="text-xs uppercase tracking-widest">Continue</span>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </div>
       </ScrollArea>

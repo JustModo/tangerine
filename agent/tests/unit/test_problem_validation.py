@@ -84,3 +84,26 @@ async def test_generate_and_validate_marks_invalid_when_reference_solution_error
     )
     assert len(all_matching) == 1
     assert all_matching[0].status == ProblemStatus.INVALID
+
+
+async def test_generate_and_validate_marks_invalid_when_reference_solution_prints_nothing(
+    db_path: str,
+) -> None:
+    # A "successful" (PASSED-status) run that produces empty stdout is just as broken as
+    # an error — usually means the generated code is a bare class/function stub with no
+    # stdin/stdout driver. Letting this through would hash_output("") as the expected
+    # answer, so any equally-empty user submission would incorrectly pass too.
+    repo = SqliteProblemRepository(db_path)
+    llm = FakeLLMProvider(structured_responses=[_generated_problem()])
+    executor = FakeCodeExecutor(
+        [TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="")]
+    )
+    service = ProblemValidationService(repo, llm, executor, SqliteSkillRepository(db_path))
+
+    problem = await service.generate_and_validate("prefix-sum", Language.PYTHON, "easy")
+
+    assert problem is None
+    all_matching = await repo.list_by_skill(
+        (await SqliteSkillRepository(db_path).ensure_skill("prefix-sum"))
+    )
+    assert all_matching[0].status == ProblemStatus.INVALID

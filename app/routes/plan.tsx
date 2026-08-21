@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { ArrowLeft } from "lucide-react";
+import { CheckCircle2, Lock, MessageSquare, Play, RefreshCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/PageHeader";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiJson } from "~/lib/api";
+import { cn } from "~/lib/utils";
 
 interface LessonNode {
   id: string;
@@ -14,6 +16,7 @@ interface LessonNode {
 
 interface LessonPlan {
   id: string;
+  session_id: string;
   topic: string;
   language: string;
   level: string;
@@ -25,6 +28,7 @@ export default function PlanScreen() {
   const { id } = useParams();
   const [plan, setPlan] = useState<LessonPlan | null>(null);
   const [busy, setBusy] = useState(false);
+  const [revisitingNodeId, setRevisitingNodeId] = useState<string | null>(null);
   const navigate = useNavigate();
   const { showError, setBusyMessage } = useStatus();
 
@@ -78,6 +82,32 @@ export default function PlanScreen() {
     }
   }
 
+  async function revisitNode(nodeId: string) {
+    setRevisitingNodeId(nodeId);
+    try {
+      const problemSession = await apiJson<{ id: string }>(`/api/problem-sessions/by-node/${nodeId}`);
+      navigate(`/problem-sessions/${problemSession.id}`);
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to reopen this problem");
+    } finally {
+      setRevisitingNodeId(null);
+    }
+  }
+
+  async function deleteSession() {
+    if (!plan) return;
+    if (!confirm("Delete this session? This can't be undone.")) return;
+    setBusyMessage("Deleting session...");
+    try {
+      await apiJson(`/api/sessions/${plan.session_id}`, { method: "DELETE" });
+      navigate("/");
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to delete session");
+    } finally {
+      setBusyMessage(null);
+    }
+  }
+
   if (!plan) {
     return (
       <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs uppercase tracking-widest">
@@ -87,50 +117,109 @@ export default function PlanScreen() {
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto w-full">
-      <div className="max-w-2xl mx-auto flex flex-col gap-10 py-16 px-10">
-        <div className="space-y-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="-ml-2 mb-2"
-            onClick={() => navigate(-1)}
-            aria-label="Back"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-          <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-[0.4em]">
-            {plan.language} · {plan.level} · {plan.status}
-          </p>
-          <h1 className="text-4xl font-black tracking-tighter uppercase">{plan.topic}</h1>
-        </div>
+    <div className="flex-1 flex flex-col min-h-0 w-full">
+      <PageHeader
+        title={plan.topic}
+        subtitle={`${plan.language} · ${plan.level} · ${plan.status}`}
+        backTo="/"
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-zinc-400 hover:text-white"
+              onClick={() => navigate(`/sessions/${plan.session_id}`)}
+            >
+              <MessageSquare className="w-4 h-4 mr-2" /> CHAT
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-zinc-500 hover:text-red-500 hover:bg-red-950/30"
+              onClick={deleteSession}
+            >
+              <Trash2 className="w-4 h-4 mr-2" /> DELETE
+            </Button>
+          </>
+        }
+      />
+      <div className="flex-1 min-h-0 overflow-y-auto w-full">
+        <div className="max-w-3xl mx-auto flex flex-col gap-8 py-10 px-10">
+          <div className="relative flex flex-col border-t border-white/5">
+            {plan.nodes.length > 1 && (
+              <div className="absolute left-5 top-8 bottom-8 w-px bg-white/10" />
+            )}
+            {plan.nodes.map((node) => {
+              const isDone = node.status === "DONE";
+              const isLocked = node.status === "LOCKED";
+              const isActionable = node.status === "AVAILABLE" || node.status === "IN_PROGRESS";
+              return (
+                <div key={node.id} className={cn("relative flex items-center gap-4 py-3", isDone && "opacity-40")}>
+                  {isActionable ? (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={startNext}
+                      disabled={busy}
+                      aria-label="Start"
+                      className="relative z-10 border border-white/10 bg-black flex-none"
+                    >
+                      {busy ? (
+                        <RefreshCcw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Play className="w-4 h-4" />
+                      )}
+                    </Button>
+                  ) : isDone ? (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => revisitNode(node.id)}
+                      disabled={revisitingNodeId === node.id}
+                      aria-label="Revisit"
+                      className="relative z-10 border border-white/10 bg-black flex-none"
+                    >
+                      {revisitingNodeId === node.id ? (
+                        <RefreshCcw className="w-4 h-4 animate-spin text-zinc-600" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4 text-zinc-600" />
+                      )}
+                    </Button>
+                  ) : (
+                    <span className="relative z-10 w-10 h-10 border border-white/10 bg-black flex items-center justify-center flex-none">
+                      <Lock className="w-4 h-4 text-zinc-500" />
+                    </span>
+                  )}
+                  <div className="flex-1 min-w-0 flex items-center justify-between">
+                    <span className="text-sm font-bold uppercase tracking-wide truncate">
+                      {node.sequence_index + 1}. {node.skill_name || node.id}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-[10px] font-black uppercase tracking-widest flex-none",
+                        isDone && "text-zinc-600",
+                        isLocked && "text-zinc-500",
+                        node.status === "IN_PROGRESS" && "text-white",
+                        node.status === "AVAILABLE" && "text-zinc-300",
+                      )}
+                    >
+                      {node.status.replace("_", " ")}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+            {plan.nodes.length === 0 && (
+              <p className="text-zinc-500 text-xs uppercase py-8 text-center">No nodes yet.</p>
+            )}
+          </div>
 
-        <div className="flex flex-col divide-y divide-white/5 border-t border-b border-white/5">
-          {plan.nodes.map((node) => (
-            <div key={node.id} className="py-5 flex items-center justify-between">
-              <span className="text-sm font-bold uppercase tracking-wide">
-                {node.sequence_index + 1}. {node.skill_name || node.id}
-              </span>
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
-                {node.status}
-              </span>
-            </div>
-          ))}
-          {plan.nodes.length === 0 && (
-            <p className="text-zinc-500 text-xs uppercase py-8 text-center">No nodes yet.</p>
+          {plan.status === "DRAFT" && (
+            <Button className="tracking-[0.3em]" onClick={acceptPlan} disabled={busy}>
+              PROCEED
+            </Button>
           )}
         </div>
-
-        {plan.status === "DRAFT" && (
-          <Button className="tracking-[0.3em]" onClick={acceptPlan} disabled={busy}>
-            PROCEED
-          </Button>
-        )}
-        {plan.status === "ACCEPTED" && (
-          <Button className="tracking-[0.3em]" onClick={startNext} disabled={busy}>
-            START NEXT PROBLEM
-          </Button>
-        )}
       </div>
     </div>
   );

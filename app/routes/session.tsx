@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { ArrowLeft, ListTree, Loader2, Trash2 } from "lucide-react";
+import { ListTree, Loader2, Trash2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import { PageHeader } from "@/components/PageHeader";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiFetch, apiJson } from "~/lib/api";
 
@@ -149,96 +150,96 @@ export default function SessionChat() {
     plans.find((p) => p.status === "ACCEPTED") ?? [...plans].sort((a, b) => b.version - a.version)[0];
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 max-w-3xl mx-auto w-full">
-      <div className="flex-none px-10 py-4 flex items-center justify-between border-b border-white/10 gap-2">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Back">
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-          <p className="text-[10px] uppercase tracking-widest text-zinc-500">{session.status}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {activePlan && (
+    <div className="flex-1 flex flex-col min-h-0 w-full">
+      <PageHeader
+        subtitle={session.status}
+        backTo="/"
+        actions={
+          <>
+            {activePlan && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-zinc-400 hover:text-white"
+                onClick={() => navigate(`/plans/${activePlan.id}`)}
+              >
+                <ListTree className="w-4 h-4 mr-2" /> VIEW PLAN
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
-              className="text-zinc-400 hover:text-white"
-              onClick={() => navigate(`/plans/${activePlan.id}`)}
+              className="text-zinc-500 hover:text-red-500 hover:bg-red-950/30"
+              onClick={deleteSession}
             >
-              <ListTree className="w-4 h-4 mr-2" /> VIEW PLAN
+              <Trash2 className="w-4 h-4 mr-2" /> DELETE
             </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-zinc-500 hover:text-red-500 hover:bg-red-950/30"
-            onClick={deleteSession}
-          >
-            <Trash2 className="w-4 h-4 mr-2" /> DELETE
+          </>
+        }
+      />
+      <div className="flex-1 flex flex-col min-h-0 max-w-3xl mx-auto w-full">
+        <ScrollArea className="flex-1 min-h-0 px-10 py-10">
+          <div className="flex flex-col gap-6">
+            {session.messages.length === 0 && !streamingText && (
+              <p className="text-zinc-500 text-xs uppercase tracking-widest text-center py-10">
+                What do you want to learn?
+              </p>
+            )}
+            {session.messages.map((message) => (
+              <div
+                key={message.id}
+                className={message.role === "user" ? "self-end max-w-lg" : "self-start max-w-lg"}
+              >
+                <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">
+                  {message.role}
+                </p>
+                {message.role === "system" ? (
+                  <p className="text-xs italic text-zinc-500 px-1">{message.content}</p>
+                ) : (
+                  <div className="border border-white/10 rounded-md px-4 py-3 text-sm prose prose-invert prose-sm max-w-none prose-p:my-0">
+                    {message.role === "assistant" ? (
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                    ) : (
+                      message.content
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+            {toolLabel && (
+              <div className="self-start flex items-center gap-2 text-xs italic text-zinc-500 px-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                {toolLabel}
+              </div>
+            )}
+            {streamingText && (
+              <div className="self-start max-w-lg">
+                <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">assistant</p>
+                <div className="border border-white/10 rounded-md px-4 py-3 text-sm prose prose-invert prose-sm max-w-none prose-p:my-0">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingText}</ReactMarkdown>
+                </div>
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </div>
+        </ScrollArea>
+        <div className="flex-none px-10 py-6 border-t border-white/10 flex items-center gap-4">
+          <Textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Message..."
+            className="flex-1 resize-none min-h-0 h-10 py-2"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+          />
+          <Button onClick={sendMessage} disabled={sending} className="tracking-[0.3em]">
+            SEND
           </Button>
         </div>
-      </div>
-      <ScrollArea className="flex-1 min-h-0 px-10 py-10">
-        <div className="flex flex-col gap-6">
-          {session.messages.length === 0 && !streamingText && (
-            <p className="text-zinc-500 text-xs uppercase tracking-widest text-center py-10">
-              What do you want to learn?
-            </p>
-          )}
-          {session.messages.map((message) => (
-            <div
-              key={message.id}
-              className={message.role === "user" ? "self-end max-w-lg" : "self-start max-w-lg"}
-            >
-              <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">
-                {message.role}
-              </p>
-              {message.role === "system" ? (
-                <p className="text-xs italic text-zinc-500 px-1">{message.content}</p>
-              ) : (
-                <div className="border border-white/10 rounded-md px-4 py-3 text-sm prose prose-invert prose-sm max-w-none prose-p:my-0">
-                  {message.role === "assistant" ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-                  ) : (
-                    message.content
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-          {toolLabel && (
-            <div className="self-start flex items-center gap-2 text-xs italic text-zinc-500 px-1">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              {toolLabel}
-            </div>
-          )}
-          {streamingText && (
-            <div className="self-start max-w-lg">
-              <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">assistant</p>
-              <div className="border border-white/10 rounded-md px-4 py-3 text-sm prose prose-invert prose-sm max-w-none prose-p:my-0">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingText}</ReactMarkdown>
-              </div>
-            </div>
-          )}
-          <div ref={bottomRef} />
-        </div>
-      </ScrollArea>
-      <div className="flex-none px-10 py-6 border-t border-white/10 flex items-center gap-4">
-        <Textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Message..."
-          className="flex-1 resize-none min-h-0 h-10 py-2"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              sendMessage();
-            }
-          }}
-        />
-        <Button onClick={sendMessage} disabled={sending} className="tracking-[0.3em]">
-          SEND
-        </Button>
       </div>
     </div>
   );

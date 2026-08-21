@@ -55,16 +55,17 @@ async def _seed_problem(db_path: str) -> str:
     return problem.id
 
 
-async def test_evaluate_persists_deterministic_result_and_coaching_feedback(db_path: str) -> None:
+async def test_evaluate_persists_deterministic_result_without_auto_generating_feedback(
+    db_path: str,
+) -> None:
     problem_id = await _seed_problem(db_path)
     code = "print(sum(int(x) for x in input().split()))"
 
     executor = FakeCodeExecutor(
         [TestResult(id="t1", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6")]
     )
-    llm = FakeLLMProvider(
-        structured_responses=[CoachingFeedback(assessment="Nice work.", focus_areas=[])]
-    )
+    # No responses queued — evaluate() must never call the LLM, grading is deterministic.
+    llm = FakeLLMProvider()
     service = EvaluationService(
         SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor, llm
     )
@@ -73,7 +74,35 @@ async def test_evaluate_persists_deterministic_result_and_coaching_feedback(db_p
 
     assert evaluation.passed_tests == 1
     assert evaluation.total_tests == 1
-    assert evaluation.feedback == "Nice work."
+    assert evaluation.feedback is None
+
+
+async def test_generate_feedback_returns_coaching_assessment_on_demand(db_path: str) -> None:
+    llm = FakeLLMProvider(
+        structured_responses=[CoachingFeedback(assessment="Nice work.", focus_areas=[])]
+    )
+    service = EvaluationService(
+        SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), FakeCodeExecutor([]), llm
+    )
+
+    feedback = await service.generate_feedback(
+        "Sum List", 1, 1, [{"input": "1 2 3", "actual_output": "6", "error": None}]
+    )
+
+    assert feedback == "Nice work."
+
+
+async def test_generate_feedback_returns_none_when_llm_unavailable(db_path: str) -> None:
+    service = EvaluationService(
+        SqliteEvaluationRepository(db_path),
+        SqliteProblemRepository(db_path),
+        FakeCodeExecutor([]),
+        llm_provider=None,
+    )
+
+    feedback = await service.generate_feedback("Sum List", 0, 1, [])
+
+    assert feedback is None
 
 
 async def test_evaluate_degrades_gracefully_when_llm_unavailable(db_path: str) -> None:

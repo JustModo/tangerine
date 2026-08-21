@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, EyeOff, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, EyeOff, Loader2, MessageCircle, XCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "~/lib/utils";
 import type { TestResult } from "~/lib/types";
@@ -11,10 +12,27 @@ interface TestCasePanelProps {
   runningLabel: string;
   results: TestResult[];
   hidden: boolean;
+  /** Real expected output per test id — only meaningful (and only ever passed) for
+   * visible-example runs. Hidden/graded tests never have their expected value sent to
+   * the client at all, so this stays empty for those. */
+  expectedById?: Record<string, string>;
   summary?: { passed: number; total: number; feedback?: string | null } | null;
+  /** Coaching feedback is generated on demand, not automatically on every submit — set
+   * only when a summary is present and feedback hasn't been fetched yet. */
+  onRequestFeedback?: () => void;
+  feedbackLoading?: boolean;
 }
 
-export function TestCasePanel({ status, runningLabel, results, hidden, summary }: TestCasePanelProps) {
+export function TestCasePanel({
+  status,
+  runningLabel,
+  results,
+  hidden,
+  expectedById,
+  summary,
+  onRequestFeedback,
+  feedbackLoading,
+}: TestCasePanelProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -56,8 +74,6 @@ export function TestCasePanel({ status, runningLabel, results, hidden, summary }
             </span>
           </div>
         )}
-        {summary?.feedback && <p className="text-xs text-zinc-400">{summary.feedback}</p>}
-
         <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(6.5rem, 1fr))" }}>
           {results.map((result, index) => {
             const passed = result.status === "PASSED";
@@ -98,9 +114,15 @@ export function TestCasePanel({ status, runningLabel, results, hidden, summary }
             </div>
             <div>
               <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Expected</span>
-              <pre className="mt-1 font-mono text-[13px] bg-zinc-900 border border-white/10 rounded-md p-3 text-zinc-600 italic">
-                hidden
-              </pre>
+              {hidden ? (
+                <pre className="mt-1 font-mono text-[13px] bg-zinc-900 border border-white/10 rounded-md p-3 text-zinc-600 italic">
+                  hidden
+                </pre>
+              ) : (
+                <pre className="mt-1 font-mono text-[13px] bg-zinc-900 border border-white/10 rounded-md p-3 whitespace-pre-wrap">
+                  {expectedById?.[selected.id] ?? <span className="italic text-zinc-600">—</span>}
+                </pre>
+              )}
             </div>
             <div>
               <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Your Output</span>
@@ -121,6 +143,28 @@ export function TestCasePanel({ status, runningLabel, results, hidden, summary }
               </div>
             )}
           </div>
+        )}
+
+        {summary?.feedback ? (
+          <p className="text-xs text-zinc-400 border-t border-white/10 pt-4">{summary.feedback}</p>
+        ) : (
+          summary &&
+          onRequestFeedback && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRequestFeedback}
+              disabled={feedbackLoading}
+              className="w-full text-[10px]"
+            >
+              {feedbackLoading ? (
+                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <MessageCircle className="mr-2 h-3.5 w-3.5" />
+              )}
+              {feedbackLoading ? "Getting feedback..." : "Get Feedback"}
+            </Button>
+          )
         )}
       </div>
     </ScrollArea>

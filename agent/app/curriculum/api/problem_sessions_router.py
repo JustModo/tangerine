@@ -54,6 +54,18 @@ class SourceCodeBody(BaseModel):
     source_code: str
 
 
+@router.get("/by-node/{lesson_node_id}")
+async def get_session_for_node(
+    lesson_node_id: str, service: ProblemSessionService = Depends(get_service)
+) -> ProblemSession:
+    """Lets a learner revisit a completed lesson node's problem — the node's most recent
+    session, even after it's been marked DONE, rather than only ever creating new ones."""
+    session = await service.get_for_node(lesson_node_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="No problem session for this lesson node")
+    return session
+
+
 @router.get("/{session_id}")
 async def get_session(
     session_id: str, service: ProblemSessionService = Depends(get_service)

@@ -28,8 +28,9 @@ def _parse_runtime_ms(value: str | None) -> float | None:
 
 class EvaluationService:
     """Evaluate pipeline (plan.md §16-18): deterministic hidden-test grading happens
-    first and unconditionally; LLM coaching is a best-effort addition on top — a failed
-    or unconfigured LLM never blocks the deterministic result from coming back."""
+    first and unconditionally, never touching the LLM. Coaching feedback is a separate,
+    on-demand action (generate_feedback) the user opts into after seeing the graded
+    result — not generated automatically on every submit."""
 
     def __init__(
         self,
@@ -92,33 +93,6 @@ class EvaluationService:
                         "Mastery update failed for user %s skill %s", user_id, skill_id, exc_info=True
                     )
 
-        feedback = None
-        if self._llm_provider is not None:
-            try:
-                # Real specifics, not just a pass count — plan.md §17's own example payload
-                # includes inputs/outputs for exactly this reason: the LLM can't give
-                # useful, targeted feedback ("your loop mishandles input X") from a bare
-                # "7/10 passed" any more than a human could.
-                failures = [
-                    {"input": r.input, "actual_output": r.actual_output, "error": r.error}
-                    for r in results
-                    if r.status != ExecutionStatus.PASSED
-                ][:3]
-                coaching = await generate_coaching_feedback(
-                    self._llm_provider,
-                    {
-                        "title": problem.title,
-                        "passed": passed,
-                        "total": len(version.tests),
-                        "sample_failures": failures,
-                    },
-                )
-                feedback = coaching.assessment
-            except Exception:
-                logger.warning(
-                    "Coaching feedback failed for submission %s", submission.id, exc_info=True
-                )
-
         evaluation = Evaluation(
             id=str(uuid.uuid4()),
             submission_id=submission.id,
@@ -126,9 +100,28 @@ class EvaluationService:
             total_tests=len(version.tests),
             runtime_ms=runtime_ms,
             memory_mb=memory_mb,
-            feedback=feedback,
+            feedback=None,
             created_at=now,
             results=results,
         )
         await self._repository.save_evaluation(evaluation)
         return evaluation
+
+    async def generate_feedback(
+        self, title: str, passed: int, total: int, sample_failures: list[dict]
+    ) -> str | None:
+        """Coaching feedback, generated only when the user explicitly asks for it — never
+        as a side effect of grading. Real specifics, not just a pass count — the LLM can't
+        give useful, targeted feedback ("your loop mishandles input X") from a bare
+        "7/10 passed" any more than a human could, hence sample_failures."""
+        if self._llm_provider is None:
+            return None
+        try:
+            coaching = await generate_coaching_feedback(
+                self._llm_provider,
+                {"title": title, "passed": passed, "total": total, "sample_failures": sample_failures[:3]},
+            )
+            return coaching.assessment
+        except Exception:
+            logger.warning("Coaching feedback generation failed", exc_info=True)
+            return None

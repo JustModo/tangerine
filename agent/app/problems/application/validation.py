@@ -72,8 +72,13 @@ class ProblemValidationService:
         )
         results = [result async for result in self._executor.execute(request)]
 
+        # A reference solution that "succeeds" but prints nothing is just as broken as one
+        # that errors — no legitimate DSA answer is an empty string, and an empty-output
+        # test silently hashes to hash_output(""), which would let ANY equally-empty
+        # submission pass. Catch it here rather than let it reach a real user.
         broken = len(results) != len(generated.examples) or any(
-            r.status in (ExecutionStatus.ERROR, ExecutionStatus.TIMEOUT) for r in results
+            r.status in (ExecutionStatus.ERROR, ExecutionStatus.TIMEOUT) or not (r.actual_output or "").strip()
+            for r in results
         )
         if broken:
             return await self._mark_invalid(problem)

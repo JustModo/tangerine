@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router";
-import { ArrowLeft } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useParams } from "react-router";
 import { CodeWorkbench } from "@/components/code-workbench/CodeWorkbench";
+import { PageHeader } from "@/components/PageHeader";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiFetch, apiJson } from "~/lib/api";
 import type { EvaluationResult, ProblemDetail, TestResult } from "~/lib/types";
@@ -10,13 +9,13 @@ import type { EvaluationResult, ProblemDetail, TestResult } from "~/lib/types";
 interface ProblemSessionData {
   id: string;
   problem_id: string;
+  lesson_plan_id: string | null;
   source_code: string | null;
   status: string;
 }
 
 export default function ProblemSessionScreen() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const [session, setSession] = useState<ProblemSessionData | null>(null);
   const [problem, setProblem] = useState<ProblemDetail | null>(null);
   const { showError } = useStatus();
@@ -83,6 +82,20 @@ export default function ProblemSessionScreen() {
     });
   }
 
+  async function requestFeedback(payload: {
+    title: string;
+    passed: number;
+    total: number;
+    sample_failures: { input: string; actual_output?: string | null; error?: string | null }[];
+  }): Promise<string | null> {
+    const result = await apiJson<{ feedback: string | null }>("/api/evaluations/coach", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return result.feedback;
+  }
+
   if (!session || !problem) {
     return (
       <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs uppercase tracking-widest">
@@ -93,11 +106,11 @@ export default function ProblemSessionScreen() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      <div className="flex-none px-4 py-2 flex items-center gap-2 border-b border-white/10 bg-black">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Back">
-          <ArrowLeft className="w-4 h-4" />
-        </Button>
-      </div>
+      <PageHeader
+        title={problem.title}
+        subtitle={`${problem.language} · ${problem.difficulty}`}
+        backTo={session.lesson_plan_id ? `/plans/${session.lesson_plan_id}` : undefined}
+      />
       <div className="flex-1 min-h-0">
         <CodeWorkbench
           problem={problem}
@@ -105,6 +118,7 @@ export default function ProblemSessionScreen() {
           onAutosave={autosave}
           onRun={runCode}
           onSubmit={submitCode}
+          onRequestFeedback={requestFeedback}
         />
       </div>
     </div>

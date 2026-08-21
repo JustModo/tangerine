@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Play, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -12,18 +12,34 @@ import { TestCasePanel, type TestPanelStatus } from "./TestCasePanel";
 
 const AUTOSAVE_DELAY_MS = 2000;
 
+interface FeedbackPayload {
+  title: string;
+  passed: number;
+  total: number;
+  sample_failures: { input: string; actual_output?: string | null; error?: string | null }[];
+}
+
 interface CodeWorkbenchProps {
   problem: ProblemDetail;
   initialCode: string;
   onAutosave?: (code: string) => void;
   onRun: (code: string) => AsyncGenerator<TestResult>;
   onSubmit: ((code: string) => Promise<EvaluationResult>) | null;
+  onRequestFeedback?: (payload: FeedbackPayload) => Promise<string | null>;
 }
 
-export function CodeWorkbench({ problem, initialCode, onAutosave, onRun, onSubmit }: CodeWorkbenchProps) {
+export function CodeWorkbench({
+  problem,
+  initialCode,
+  onAutosave,
+  onRun,
+  onSubmit,
+  onRequestFeedback,
+}: CodeWorkbenchProps) {
   const [code, setCode] = useState(initialCode);
   const [isRunning, setIsRunning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [panelStatus, setPanelStatus] = useState<TestPanelStatus>("idle");
   const [panelLabel, setPanelLabel] = useState("");
   const [panelResults, setPanelResults] = useState<TestResult[]>([]);
@@ -33,6 +49,10 @@ export function CodeWorkbench({ problem, initialCode, onAutosave, onRun, onSubmi
   );
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const { showError } = useStatus();
+  const expectedById = useMemo(
+    () => Object.fromEntries(problem.examples.map((example) => [example.id, example.output])),
+    [problem.examples],
+  );
 
   useEffect(() => {
     if (!onAutosave) return;
@@ -88,6 +108,28 @@ export function CodeWorkbench({ problem, initialCode, onAutosave, onRun, onSubmi
     }
   }
 
+  async function handleRequestFeedback() {
+    if (!onRequestFeedback || !summary) return;
+    setFeedbackLoading(true);
+    try {
+      const sampleFailures = panelResults
+        .filter((r) => r.status !== "PASSED")
+        .slice(0, 3)
+        .map((r) => ({ input: r.input, actual_output: r.actual_output, error: r.error }));
+      const feedback = await onRequestFeedback({
+        title: problem.title,
+        passed: summary.passed,
+        total: summary.total,
+        sample_failures: sampleFailures,
+      });
+      setSummary((prev) => (prev ? { ...prev, feedback } : prev));
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to get feedback");
+    } finally {
+      setFeedbackLoading(false);
+    }
+  }
+
   return (
     <div className="h-full flex flex-col overflow-hidden bg-black text-white">
       <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0">
@@ -139,7 +181,10 @@ export function CodeWorkbench({ problem, initialCode, onAutosave, onRun, onSubmi
                   runningLabel={panelLabel}
                   results={panelResults}
                   hidden={panelHidden}
+                  expectedById={panelHidden ? undefined : expectedById}
                   summary={summary}
+                  onRequestFeedback={onRequestFeedback ? handleRequestFeedback : undefined}
+                  feedbackLoading={feedbackLoading}
                 />
               </div>
             </ResizablePanel>

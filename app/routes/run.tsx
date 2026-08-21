@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { FolderOpen, Hash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CodeWorkbench } from "@/components/code-workbench/CodeWorkbench";
+import { PageHeader } from "@/components/PageHeader";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiFetch } from "~/lib/api";
 import type { ProblemDetail, TestResult } from "~/lib/types";
@@ -99,34 +100,40 @@ export default function Runner() {
 
   if (!question) {
     return (
-      <div className="h-full flex flex-col items-center justify-center gap-6 bg-black text-white">
-        <div className="flex flex-col items-center gap-4 opacity-40">
-          <Hash className="w-12 h-12" />
-          <span className="text-[10px] font-black uppercase tracking-[0.5em]">System Idle</span>
-        </div>
-        <div className="relative group">
-          <input
-            type="file"
-            accept=".json"
-            className="absolute inset-0 opacity-0 cursor-pointer"
-            onChange={handleFileUpload}
-          />
-          <Button variant="outline" size="sm" className="h-10 text-[10px]">
-            <FolderOpen className="mr-2 h-4 w-4" /> OPEN JSON
-          </Button>
+      <div className="flex-1 flex flex-col min-h-0">
+        <PageHeader title="Test Runner" backTo="/" />
+        <div className="flex-1 flex flex-col items-center justify-center gap-6 bg-black text-white">
+          <div className="flex flex-col items-center gap-4 opacity-40">
+            <Hash className="w-12 h-12" />
+            <span className="text-[10px] font-black uppercase tracking-[0.5em]">System Idle</span>
+          </div>
+          <div className="relative group">
+            <input
+              type="file"
+              accept=".json"
+              className="absolute inset-0 opacity-0 cursor-pointer"
+              onChange={handleFileUpload}
+            />
+            <Button variant="outline" size="sm" className="h-10 text-[10px]">
+              <FolderOpen className="mr-2 h-4 w-4" /> OPEN JSON
+            </Button>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 min-h-0">
-      <CodeWorkbench
-        problem={toProblem(question, language)}
-        initialCode=""
-        onRun={runCode}
-        onSubmit={null}
-      />
+    <div className="flex-1 flex flex-col min-h-0">
+      <PageHeader title={question.title} subtitle="Test Runner" backTo="/" />
+      <div className="flex-1 min-h-0">
+        <CodeWorkbench
+          problem={toProblem(question, language)}
+          initialCode=""
+          onRun={runCode}
+          onSubmit={null}
+        />
+      </div>
     </div>
   );
 }

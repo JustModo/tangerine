@@ -17,6 +17,7 @@ class ProblemSession(BaseModel):
 
     id: str
     lesson_node_id: str
+    lesson_plan_id: str | None = None  # nullable only for rows created before this field existed
     problem_id: str
     user_id: str
     source_code: str | None = None

@@ -71,6 +71,7 @@ class ProblemSessionService:
         session = ProblemSession(
             id=str(uuid.uuid4()),
             lesson_node_id=node.id,
+            lesson_plan_id=plan.id,
             problem_id=problem.id,
             user_id=user_id,
             status=ProblemSessionStatus.NOT_STARTED,
@@ -102,6 +103,9 @@ class ProblemSessionService:
 
     async def get(self, session_id: str) -> ProblemSession | None:
         return await self._session_repository.get(session_id)
+
+    async def get_for_node(self, lesson_node_id: str) -> ProblemSession | None:
+        return await self._session_repository.get_by_node(lesson_node_id)
 
     async def save_code(self, session_id: str, source_code: str) -> ProblemSession:
         session = await self._require(session_id)
