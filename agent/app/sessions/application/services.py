@@ -18,9 +18,14 @@ from app.shared.types import Language
 
 logger = logging.getLogger(__name__)
 
+# Every turn resends the whole history, so an uncapped transcript makes cost grow
+# quadratically over a session and eventually just fails on the context limit. The tail is
+# what the model actually needs — this is a chat about what to learn next, not a document.
+MAX_HISTORY_TURNS = 20
+
 
 class SessionService:
-    """Session/chat persistence (plan.md §71-75). Chat is not the memory system — but a
+    """Session/chat persistence. Chat is not the memory system — but a
     user message now gets a real, streamed assistant reply: the model itself decides,
     from conversation context, when to call the generate_learning_plan tool (no manual
     button, no static templated reply) — see add_message/_stream_reply."""
@@ -69,7 +74,7 @@ class SessionService:
             ChatTurn(role="user" if m.role == ChatRole.USER else "assistant", content=m.content)
             for m in (existing.messages if existing else [])
             if m.role in (ChatRole.USER, ChatRole.ASSISTANT)
-        ]
+        ][-MAX_HISTORY_TURNS:]
 
         user_message = ChatMessage(
             id=str(uuid.uuid4()),
@@ -91,11 +96,11 @@ class SessionService:
             except Exception:
                 logger.warning("Failed to check for an existing plan for session %s", session_id, exc_info=True)
 
-        try:
-            async for event in self._stream_reply(session_id, history, content, existing_plan):
-                yield event
-        except Exception:
-            logger.warning("Chat stream failed for session %s", session_id, exc_info=True)
+        # Deliberately NOT caught here: app/shared/sse.py logs it and emits a terminal
+        # error frame. Swallowing it used to close the stream cleanly with no reply, which
+        # the client could not distinguish from the assistant choosing to say nothing.
+        async for event in self._stream_reply(session_id, history, content, existing_plan):
+            yield event
 
     async def _stream_reply(
         self, session_id: str, history: list[ChatTurn], message: str, existing_plan: bool
@@ -129,10 +134,14 @@ class SessionService:
             if chunk.done:
                 break
 
-        reply_text = "".join(text_parts).strip()
-        if reply_text:
-            reply = await self._persist_assistant_reply(session_id, reply_text)
-            yield {"type": "done", "message_id": reply.id, "content": reply_text}
+        # A blank completion (safety stop, or a tool call that matched no handler) would
+        # otherwise end the stream with no assistant turn at all — same blank screen as a
+        # crash. Persist a real reply so the transcript stays a conversation.
+        reply_text = "".join(text_parts).strip() or (
+            "I didn't manage to put together a reply there. Could you rephrase that?"
+        )
+        reply = await self._persist_assistant_reply(session_id, reply_text)
+        yield {"type": "done", "message_id": reply.id, "content": reply_text}
 
     async def _handle_generate_plan(
         self,

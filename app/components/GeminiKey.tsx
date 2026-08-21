@@ -3,6 +3,7 @@ import { RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiFetch, apiJson } from "~/lib/api";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 export interface GeminiKeyStatus {
   configured: boolean;
@@ -34,7 +35,7 @@ export function GeminiKeyForm({
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        setError(body?.detail ?? "Could not save that key.");
+        setError(body?.error ?? "Could not save that key.");
         return;
       }
       setApiKey("");
@@ -72,6 +73,7 @@ export function GeminiKeyForm({
 export function GeminiKeySettings() {
   const [status, setStatus] = useState<GeminiKeyStatus | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function load() {
     try {
@@ -87,8 +89,7 @@ export function GeminiKeySettings() {
 
   async function remove() {
     if (removing) return;
-    if (!confirm("Remove the stored Gemini API key? You'll have to enter it again to continue."))
-      return;
+    setConfirmOpen(false);
     setRemoving(true);
     try {
       setStatus(await apiJson<GeminiKeyStatus>("/api/setup/gemini-key", { method: "DELETE" }));
@@ -120,7 +121,7 @@ export function GeminiKeySettings() {
           <Button
             variant="outline"
             size="sm"
-            onClick={remove}
+            onClick={() => setConfirmOpen(true)}
             disabled={removing}
             className="text-[10px] flex-none"
           >
@@ -129,6 +130,14 @@ export function GeminiKeySettings() {
           </Button>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Remove the stored key?"
+        body="Tangerine can't reach Gemini until you enter a key again."
+        confirmLabel="Remove"
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={remove}
+      />
       {fromEnv ? (
         <p className="text-xs text-zinc-500">
           Environment keys take priority and can't be changed from here — edit the .env file

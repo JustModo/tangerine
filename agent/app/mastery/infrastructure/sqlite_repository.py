@@ -2,6 +2,7 @@ import aiosqlite
 
 from app.mastery.domain.models import UserSkillState
 from app.shared.config import get_settings
+from app.shared.database import connect
 
 
 class SqliteUserSkillStateRepository:
@@ -9,7 +10,7 @@ class SqliteUserSkillStateRepository:
         self._database_path = database_path or get_settings().database_path
 
     async def get(self, user_id: str, skill_id: str) -> UserSkillState | None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM user_skill_state WHERE user_id = ? AND skill_id = ?",
@@ -27,7 +28,7 @@ class SqliteUserSkillStateRepository:
             )
 
     async def save(self, state: UserSkillState) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             await db.execute(
                 "INSERT INTO user_skill_state (user_id, skill_id, mastery_score, streak, last_seen_at) "
                 "VALUES (?, ?, ?, ?, ?) "
@@ -44,7 +45,7 @@ class SqliteUserSkillStateRepository:
             await db.commit()
 
     async def list_for_user(self, user_id: str) -> list[UserSkillState]:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM user_skill_state WHERE user_id = ?", (user_id,)

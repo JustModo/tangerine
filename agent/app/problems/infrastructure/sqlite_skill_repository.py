@@ -1,8 +1,8 @@
 import uuid
 
-import aiosqlite
 
 from app.shared.config import get_settings
+from app.shared.database import connect
 
 
 class SqliteSkillRepository:
@@ -11,7 +11,7 @@ class SqliteSkillRepository:
 
     async def ensure_skill(self, name: str) -> str:
         """Find-or-create a skill by name, returning its id."""
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             cursor = await db.execute("SELECT id FROM skills WHERE name = ?", (name,))
             row = await cursor.fetchone()
             if row:
@@ -22,7 +22,7 @@ class SqliteSkillRepository:
             return skill_id
 
     async def get_name(self, skill_id: str) -> str | None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             cursor = await db.execute("SELECT name FROM skills WHERE id = ?", (skill_id,))
             row = await cursor.fetchone()
             return row[0] if row else None

@@ -11,6 +11,7 @@ from app.problems.domain.models import (
     ProblemVersion,
 )
 from app.shared.config import get_settings
+from app.shared.database import connect
 
 
 class SqliteProblemRepository:
@@ -20,7 +21,7 @@ class SqliteProblemRepository:
         self._database_path = database_path or get_settings().database_path
 
     async def get(self, problem_id: str) -> Problem | None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM problems WHERE id = ?", (problem_id,))
             row = await cursor.fetchone()
@@ -48,14 +49,14 @@ class SqliteProblemRepository:
 
         query += " WHERE " + " AND ".join(conditions) + " LIMIT 1"
 
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(query, params)
             row = await cursor.fetchone()
             return await self._hydrate(db, row) if row else None
 
     async def list_by_skill(self, skill_id: str) -> list[Problem]:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT DISTINCT p.* FROM problems p "
@@ -67,7 +68,7 @@ class SqliteProblemRepository:
             return [await self._hydrate(db, row) for row in rows]
 
     async def save(self, problem: Problem) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             await db.execute(
                 "INSERT INTO problems (id, conceptual_id, title, language, difficulty, status, tags_json, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
@@ -93,10 +94,10 @@ class SqliteProblemRepository:
             await db.commit()
 
     async def save_version(self, version: ProblemVersion) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             await db.execute(
                 "INSERT INTO problem_versions "
-                "(id, problem_id, version, statement_md, reference_solution, boilerplate, "
+                "(id, problem_id, version, statement_md, reference_solution, user_code, "
                 "pre_code, post_code, constraints, hints_json, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -128,7 +129,7 @@ class SqliteProblemRepository:
             await db.commit()
 
     async def get_latest_version(self, problem_id: str) -> ProblemVersion | None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM problem_versions WHERE problem_id = ? ORDER BY version DESC LIMIT 1",
@@ -153,7 +154,7 @@ class SqliteProblemRepository:
                 version=row["version"],
                 statement_md=row["statement_md"],
                 reference_solution=row["reference_solution"],
-                user_code=row["boilerplate"],
+                user_code=row["user_code"],
                 pre_code=row["pre_code"],
                 post_code=row["post_code"],
                 constraints=row["constraints"],

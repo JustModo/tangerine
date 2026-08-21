@@ -26,7 +26,7 @@ def _parse_runtime_ms(value: str | None) -> float | None:
 
 
 class EvaluationService:
-    """Evaluate pipeline (plan.md §16-18): deterministic hidden-test grading, start to
+    """Evaluate pipeline: deterministic hidden-test grading, start to
     finish, with no LLM anywhere in it. Advice about a submission is the code helper
     chat's job (app/curriculum/application/code_helper.py), not this service's."""
 

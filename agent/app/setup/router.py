@@ -36,7 +36,7 @@ async def validate_gemini_key(api_key: str) -> None:
 
 @router.get("/gemini-key")
 async def get_gemini_key() -> dict:
-    return gemini_key_status()
+    return await gemini_key_status()
 
 
 @router.put("/gemini-key")
@@ -46,13 +46,13 @@ async def put_gemini_key(body: GeminiKeyBody) -> dict:
     except ValueError as exc:
         # Nothing is written on failure — an invalid key must never displace a working one.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    set_gemini_api_key(body.api_key.strip())
-    return gemini_key_status()
+    await set_gemini_api_key(body.api_key.strip())
+    return await gemini_key_status()
 
 
 @router.delete("/gemini-key")
 async def delete_gemini_key() -> dict:
     """Forgets the stored key. A key coming from the environment can't be removed from the
     browser — the response's `source` tells the caller which case they're in."""
-    clear_gemini_api_key()
-    return gemini_key_status()
+    await clear_gemini_api_key()
+    return await gemini_key_status()

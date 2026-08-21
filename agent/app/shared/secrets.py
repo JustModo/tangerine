@@ -10,7 +10,7 @@ from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.shared.config import get_settings
-from app.shared.database import get_connection
+from app.shared.database import connect
 
 GEMINI_API_KEY = "gemini_api_key"
 
@@ -30,12 +30,10 @@ def _fernet() -> Fernet:
     return Fernet(path.read_bytes())
 
 
-def read_secret(key: str) -> str | None:
-    conn = get_connection()
-    try:
-        row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
-    finally:
-        conn.close()
+async def read_secret(key: str) -> str | None:
+    async with connect() as db:
+        cursor = await db.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+        row = await cursor.fetchone()
     if row is None:
         return None
     try:
@@ -46,48 +44,42 @@ def read_secret(key: str) -> str | None:
         return None
 
 
-def write_secret(key: str, value: str) -> None:
+async def write_secret(key: str, value: str) -> None:
     encrypted = _fernet().encrypt(value.encode()).decode()
-    conn = get_connection()
-    try:
-        conn.execute(
+    async with connect() as db:
+        await db.execute(
             "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now')) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
             (key, encrypted),
         )
-        conn.commit()
-    finally:
-        conn.close()
+        await db.commit()
 
 
-def delete_secret(key: str) -> None:
-    conn = get_connection()
-    try:
-        conn.execute("DELETE FROM app_settings WHERE key = ?", (key,))
-        conn.commit()
-    finally:
-        conn.close()
+async def delete_secret(key: str) -> None:
+    async with connect() as db:
+        await db.execute("DELETE FROM app_settings WHERE key = ?", (key,))
+        await db.commit()
 
 
-def get_gemini_api_key() -> str | None:
+async def get_gemini_api_key() -> str | None:
     """Resolved at every call — deliberately not cached, so a key saved through the setup
     screen takes effect on the very next request with no restart. Env wins so that a dev
     .env keeps working exactly as before."""
-    return get_settings().gemini_api_key or read_secret(GEMINI_API_KEY)
+    return get_settings().gemini_api_key or await read_secret(GEMINI_API_KEY)
 
 
-def set_gemini_api_key(value: str) -> None:
-    write_secret(GEMINI_API_KEY, value)
+async def set_gemini_api_key(value: str) -> None:
+    await write_secret(GEMINI_API_KEY, value)
 
 
-def clear_gemini_api_key() -> None:
-    delete_secret(GEMINI_API_KEY)
+async def clear_gemini_api_key() -> None:
+    await delete_secret(GEMINI_API_KEY)
 
 
-def gemini_key_status() -> dict[str, object]:
+async def gemini_key_status() -> dict[str, object]:
     """Safe to serialise to the browser — the plaintext key never leaves this module."""
     env_key = get_settings().gemini_api_key
-    key = env_key or read_secret(GEMINI_API_KEY)
+    key = env_key or await read_secret(GEMINI_API_KEY)
     return {
         "configured": bool(key),
         "source": ("env" if env_key else "stored") if key else None,

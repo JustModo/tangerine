@@ -1,4 +1,3 @@
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,9 +17,9 @@ from app.problems.domain.models import (
     ProblemVersion,
 )
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
-from app.shared.database import MIGRATIONS_DIR
 from app.shared.errors import NotFoundError
 from app.shared.types import Language
+from tests.db import apply_migrations, seed_lesson_node
 from tests.fakes import FakeLLMProvider
 
 REFERENCE_SOLUTION = "SECRET_REFERENCE_print(sum(nums))"
@@ -29,18 +28,11 @@ PRE_CODE = "SECRET_PRE_nums = list(map(int, input().split()))"
 POST_CODE = "SECRET_POST_print(solve(nums))"
 
 
-def _apply_migrations(db_path: str) -> None:
-    conn = sqlite3.connect(db_path)
-    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
-        conn.executescript(path.read_text())
-    conn.commit()
-    conn.close()
-
-
 @pytest.fixture
 def db_path(tmp_path: Path) -> str:
     path = str(tmp_path / "test.db")
-    _apply_migrations(path)
+    apply_migrations(path)
+    seed_lesson_node(path, "n1")
     return path
 
 
@@ -173,3 +165,22 @@ async def test_helper_404s_for_unknown_problem_session(db_path: str) -> None:
     with pytest.raises(NotFoundError):
         async for _ in service.send_message("nope", "hi", ""):
             pass
+
+
+async def test_helper_chat_endpoint_404s_over_http(db_path: str, monkeypatch) -> None:
+    """The service-level NotFoundError is not enough on its own: raised from inside the
+    generator it would arrive after a 200 status line, as a broken stream."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.shared.config import get_settings
+
+    monkeypatch.setenv("DATABASE_PATH", db_path)
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/problem-sessions/does-not-exist/chat",
+            json={"content": "hi", "source_code": ""},
+        )
+    assert response.status_code == 404
+    get_settings.cache_clear()

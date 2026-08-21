@@ -11,6 +11,8 @@ from app.llm.prompts.code_helper import CODE_HELPER_SYSTEM_PROMPT, code_helper_c
 from app.problems.domain.repository import ProblemRepository
 from app.shared.errors import NotFoundError
 
+MAX_HISTORY_TURNS = 20
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,6 +31,11 @@ class CodeHelperService:
         self._session_repository = session_repository
         self._problem_repository = problem_repository
         self._llm_provider = llm_provider
+
+    async def get_session(self, problem_session_id: str):
+        """Lets the route reject an unknown session with a real 404, before the streaming
+        response has committed a 200 status line."""
+        return await self._session_repository.get(problem_session_id)
 
     async def list_messages(self, problem_session_id: str) -> list[ProblemChatMessage]:
         return await self._session_repository.list_chat_messages(problem_session_id)
@@ -49,10 +56,12 @@ class CodeHelperService:
         if problem is None or version is None:
             raise NotFoundError(f"Problem {session.problem_id} not found")
 
+        # Capped for the same reason as the main chat, and more urgently: each turn also
+        # re-sends the full statement, the learner's whole file and the last test run.
         history = [
             ChatTurn(role=message.role, content=message.content)
             for message in await self._session_repository.list_chat_messages(problem_session_id)
-        ]
+        ][-MAX_HISTORY_TURNS:]
 
         now = datetime.now(timezone.utc)
         user_message = ProblemChatMessage(

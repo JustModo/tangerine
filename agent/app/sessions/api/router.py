@@ -1,4 +1,3 @@
-import json
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
@@ -12,6 +11,7 @@ from app.sessions.application.services import SessionService
 from app.sessions.domain.models import LearningSession
 from app.sessions.infrastructure.sqlite_repository import SqliteSessionRepository
 from app.users.domain.models import LOCAL_USER_ID
+from app.shared.sse import sse_stream
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -64,9 +64,9 @@ async def post_message(
     if await service.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    async def event_stream():
-        async for event in service.add_message(session_id, body.content):
-            yield f"data: {json.dumps(event)}\n\n"
-        yield "event: done\ndata: {}\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    stream = sse_stream(
+        service.add_message(session_id, body.content),
+        context=f"chat session={session_id}",
+        error_message="The assistant couldn't finish that reply. Try sending it again.",
+    )
+    return StreamingResponse(stream, media_type="text/event-stream")

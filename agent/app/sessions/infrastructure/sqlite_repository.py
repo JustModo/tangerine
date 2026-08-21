@@ -2,6 +2,7 @@ import aiosqlite
 
 from app.sessions.domain.models import ChatMessage, LearningSession
 from app.shared.config import get_settings
+from app.shared.database import connect
 
 
 class SqliteSessionRepository:
@@ -9,7 +10,7 @@ class SqliteSessionRepository:
         self._database_path = database_path or get_settings().database_path
 
     async def create(self, session: LearningSession) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             await db.execute(
                 "INSERT INTO learning_sessions (id, user_id, status, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -24,7 +25,7 @@ class SqliteSessionRepository:
             await db.commit()
 
     async def get(self, session_id: str) -> LearningSession | None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM learning_sessions WHERE id = ?", (session_id,)
@@ -35,7 +36,7 @@ class SqliteSessionRepository:
             return await self._hydrate(db, row)
 
     async def list_for_user(self, user_id: str) -> list[LearningSession]:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM learning_sessions WHERE user_id = ? ORDER BY updated_at DESC",
@@ -45,7 +46,7 @@ class SqliteSessionRepository:
             return [await self._hydrate(db, row) for row in rows]
 
     async def add_message(self, message: ChatMessage) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             await db.execute(
                 "INSERT INTO chat_messages (id, session_id, role, content, intent, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
@@ -65,7 +66,7 @@ class SqliteSessionRepository:
             await db.commit()
 
     async def delete(self, session_id: str) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             # Helper-chat rows first — they hang off problem_sessions, so deleting the
             # sessions before them would orphan the conversation.
             await db.execute(

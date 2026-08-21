@@ -7,6 +7,7 @@ import { LessonNotesPanel } from "@/components/LessonNotesPanel";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiJson } from "~/lib/api";
 import { cn } from "~/lib/utils";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 interface LessonNode {
   id: string;
@@ -31,6 +32,7 @@ export default function PlanScreen() {
   const [busy, setBusy] = useState(false);
   const [revisitingNodeId, setRevisitingNodeId] = useState<string | null>(null);
   const [notesNodeId, setNotesNodeId] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const navigate = useNavigate();
   const { showError, setBusyMessage } = useStatus();
 
@@ -84,7 +86,6 @@ export default function PlanScreen() {
 
   async function deleteSession() {
     if (!plan) return;
-    if (!confirm("Delete this session? This can't be undone.")) return;
     setBusyMessage("Deleting session...");
     try {
       await apiJson(`/api/sessions/${plan.session_id}`, { method: "DELETE" });
@@ -118,7 +119,7 @@ export default function PlanScreen() {
               variant="ghost"
               size="sm"
               className="text-zinc-500 hover:text-red-500 hover:bg-red-950/30"
-              onClick={deleteSession}
+              onClick={() => setConfirmOpen(true)}
             >
               <Trash2 className="w-4 h-4 mr-2" /> DELETE
             </Button>
@@ -226,6 +227,17 @@ export default function PlanScreen() {
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Delete this session?"
+        body="Its plan, problems and chat history go with it. This can't be undone."
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          deleteSession();
+        }}
+      />
+
     </div>
   );
 }

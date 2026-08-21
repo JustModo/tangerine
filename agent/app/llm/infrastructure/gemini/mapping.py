@@ -5,7 +5,7 @@ from pydantic import BaseModel, ValidationError
 
 class SchemaValidationError(Exception):
     """Raised when a raw LLM response fails schema (Pydantic) validation — the
-    generate/validate boundary from plan.md §20-21."""
+    generate/validate boundary."""
 
 
 def parse_structured_response(raw_text: str, response_model: type[BaseModel]) -> BaseModel:

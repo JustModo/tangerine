@@ -1,17 +1,17 @@
 import uuid
 
-import aiosqlite
 
 from app.problems.application.services import ProblemSelectionService
 from app.problems.application.validation import ProblemValidationService
 from app.problems.domain.models import ProblemCriteria
 from app.shared.config import get_settings
+from app.shared.database import connect
 from app.shared.types import Language
 
 
 class PrefetchService:
     """Kicks off generation for a likely-next skill in the background, so the bank
-    already has a match by the time the user reaches it (plan.md §37). generation_jobs
+    already has a match by the time the user reaches it. generation_jobs
     tracks status and prevents duplicate concurrent generation for the same target."""
 
     def __init__(
@@ -43,7 +43,7 @@ class PrefetchService:
             await self._update_job(job_id, "FAILED", error=str(exc))
 
     async def _already_in_flight(self, skill_id: str, language: Language, difficulty: str) -> bool:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             cursor = await db.execute(
                 "SELECT 1 FROM generation_jobs WHERE skill_id = ? AND language = ? AND difficulty = ? "
                 "AND status IN ('RUNNING', 'SUCCEEDED') LIMIT 1",
@@ -54,7 +54,7 @@ class PrefetchService:
     async def _record_job(
         self, job_id: str, skill_id: str, language: Language, difficulty: str, status: str
     ) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             await db.execute(
                 "INSERT INTO generation_jobs (id, skill_id, language, difficulty, status) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -65,7 +65,7 @@ class PrefetchService:
     async def _update_job(
         self, job_id: str, status: str, problem_id: str | None = None, error: str | None = None
     ) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             await db.execute(
                 "UPDATE generation_jobs SET status = ?, problem_id = ?, error = ?, "
                 "updated_at = datetime('now') WHERE id = ?",

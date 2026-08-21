@@ -3,6 +3,7 @@ import aiosqlite
 from app.curriculum.domain.problem_chat import ProblemChatMessage
 from app.curriculum.domain.problem_session import ProblemSession
 from app.shared.config import get_settings
+from app.shared.database import connect
 
 
 class SqliteProblemSessionRepository:
@@ -10,7 +11,7 @@ class SqliteProblemSessionRepository:
         self._database_path = database_path or get_settings().database_path
 
     async def save(self, session: ProblemSession) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             await db.execute(
                 "INSERT INTO problem_sessions "
                 "(id, lesson_node_id, lesson_plan_id, problem_id, user_id, source_code, status, created_at, updated_at) "
@@ -32,14 +33,14 @@ class SqliteProblemSessionRepository:
             await db.commit()
 
     async def get(self, session_id: str) -> ProblemSession | None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM problem_sessions WHERE id = ?", (session_id,))
             row = await cursor.fetchone()
             return self._hydrate(row) if row else None
 
     async def get_by_node(self, lesson_node_id: str) -> ProblemSession | None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM problem_sessions WHERE lesson_node_id = ? ORDER BY created_at DESC LIMIT 1",
@@ -49,7 +50,7 @@ class SqliteProblemSessionRepository:
             return self._hydrate(row) if row else None
 
     async def add_chat_message(self, message: ProblemChatMessage) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             await db.execute(
                 "INSERT INTO problem_chat_messages "
                 "(id, problem_session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -64,7 +65,7 @@ class SqliteProblemSessionRepository:
             await db.commit()
 
     async def list_chat_messages(self, problem_session_id: str) -> list[ProblemChatMessage]:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM problem_chat_messages WHERE problem_session_id = ? "

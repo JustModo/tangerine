@@ -24,7 +24,7 @@ def _difficulty_label(rating: int) -> str:
 
 class CurriculumService:
     """Lesson plan creation and per-node lesson notes. A plan's nodes are populated
-    immediately via the curriculum LangGraph (plan.md §22/76 Graph B) and are usable right
+    immediately via the curriculum LangGraph and are usable right
     away — there's no accept step, and the most recently created plan is the active one."""
 
     def __init__(

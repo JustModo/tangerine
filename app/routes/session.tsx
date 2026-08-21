@@ -7,7 +7,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/PageHeader";
 import { useStatus } from "~/lib/status";
-import { ApiError, apiFetch, apiJson } from "~/lib/api";
+import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 interface ChatMessage {
   id: string;
@@ -36,6 +37,7 @@ export default function SessionChat() {
   const [sending, setSending] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [toolLabel, setToolLabel] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const { showError, setBusyMessage } = useStatus();
@@ -94,36 +96,19 @@ export default function SessionChat() {
         return;
       }
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value);
-          for (const line of chunk.split("\n\n")) {
-            if (!line.startsWith("data: ")) continue;
-            const dataStr = line.replace("data: ", "");
-            if (dataStr === "{}" || !dataStr.trim()) continue;
-            let event: { type: string; delta?: string; label?: string };
-            try {
-              event = JSON.parse(dataStr);
-            } catch {
-              continue;
-            }
-            if (event.type === "user_message") {
-              await loadSession();
-            } else if (event.type === "text_delta") {
-              setStreamingText((prev) => prev + (event.delta || ""));
-            } else if (event.type === "tool_start") {
-              setToolLabel(event.label || "Working...");
-            } else if (event.type === "done") {
-              await loadSession();
-              await loadPlans();
-            }
-          }
+      const pending: Promise<unknown>[] = [];
+      await consumeSSE(response, (event) => {
+        if (event.type === "user_message") {
+          pending.push(loadSession());
+        } else if (event.type === "text_delta") {
+          setStreamingText((prev) => prev + ((event.delta as string) || ""));
+        } else if (event.type === "tool_start") {
+          setToolLabel((event.label as string) || "Working...");
+        } else if (event.type === "done") {
+          pending.push(loadSession(), loadPlans());
         }
-      }
+      });
+      await Promise.all(pending);
     } catch (err) {
       showError(err instanceof ApiError ? err.message : "Failed to send message");
     } finally {
@@ -134,7 +119,6 @@ export default function SessionChat() {
   }
 
   async function deleteSession() {
-    if (!confirm("Delete this session? This can't be undone.")) return;
     setBusyMessage("Deleting session...");
     try {
       await apiJson(`/api/sessions/${id}`, { method: "DELETE" });
@@ -172,7 +156,7 @@ export default function SessionChat() {
               variant="ghost"
               size="sm"
               className="text-zinc-500 hover:text-red-500 hover:bg-red-950/30"
-              onClick={deleteSession}
+              onClick={() => setConfirmOpen(true)}
             >
               <Trash2 className="w-4 h-4 mr-2" /> DELETE
             </Button>
@@ -246,6 +230,17 @@ export default function SessionChat() {
           </Button>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Delete this session?"
+        body="Its plan, problems and chat history go with it. This can't be undone."
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          deleteSession();
+        }}
+      />
+
     </div>
   );
 }

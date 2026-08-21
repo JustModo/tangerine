@@ -13,7 +13,7 @@ class ProblemSessionStatus(StrEnum):
 
 class ProblemSession(BaseModel):
     """Ties a lesson node's attempt to a selected/generated problem and the user's local
-    source file (plan.md §68)."""
+    source file."""
 
     id: str
     lesson_node_id: str

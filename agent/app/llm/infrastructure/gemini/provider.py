@@ -21,17 +21,17 @@ class GeminiProvider:
         self._client = client
         self._default_model = get_settings().llm_model
 
-    def _get_client(self) -> GeminiClient:
+    async def _get_client(self) -> GeminiClient:
         if self._client is None:
             # Resolved here rather than in __init__ so a key saved through the setup screen
             # is picked up by the next request without restarting the process.
-            self._client = GeminiClient(api_key=get_gemini_api_key())
+            self._client = GeminiClient(api_key=await get_gemini_api_key())
         return self._client
 
     async def generate_structured(
         self, request: StructuredGenerationRequest, response_model: type[T]
     ) -> T:
-        raw = await self._get_client().generate_json(
+        raw = await (await self._get_client()).generate_json(
             model=request.model or self._default_model,
             system_prompt=request.system_prompt,
             user_prompt=request.user_prompt,
@@ -40,14 +40,14 @@ class GeminiProvider:
         return parse_structured_response(raw, response_model)  # type: ignore[return-value]
 
     async def generate_text(self, request: TextGenerationRequest) -> str:
-        return await self._get_client().generate_text(
+        return await (await self._get_client()).generate_text(
             model=request.model or self._default_model,
             system_prompt=request.system_prompt,
             user_prompt=request.user_prompt,
         )
 
     async def stream_chat(self, request: ChatStreamRequest) -> AsyncIterator[ChatChunk]:
-        async for chunk in self._get_client().stream_chat(
+        async for chunk in (await self._get_client()).stream_chat(
             model=request.model or self._default_model,
             system_prompt=request.system_prompt,
             history=request.history,

@@ -7,4 +7,3 @@ LOCAL_USER_ID = "local-user"
 
 class User(BaseModel):
     id: str
-    email: str | None = None

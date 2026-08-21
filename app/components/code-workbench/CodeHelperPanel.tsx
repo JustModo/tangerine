@@ -3,7 +3,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Markdown } from "@/components/Markdown";
-import { apiFetch, apiJson } from "~/lib/api";
+import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
 import type { HelperContext, ProblemChatMessage } from "~/lib/types";
 
 /**
@@ -22,6 +22,7 @@ export function CodeHelperPanel({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [streamingText, setStreamingText] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   async function loadMessages() {
@@ -47,6 +48,7 @@ export function CodeHelperPanel({
     setDraft("");
     setSending(true);
     setStreamingText("");
+    setError(null);
     try {
       const { source_code, last_run } = getContext();
       const response = await apiFetch(`/api/problem-sessions/${problemSessionId}/chat`, {
@@ -54,30 +56,26 @@ export function CodeHelperPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content, source_code, last_run }),
       });
-      if (!response.ok) return;
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          for (const line of decoder.decode(value).split("\n\n")) {
-            if (!line.startsWith("data: ")) continue;
-            const dataStr = line.replace("data: ", "");
-            if (dataStr === "{}" || !dataStr.trim()) continue;
-            let event: { type: string; delta?: string };
-            try {
-              event = JSON.parse(dataStr);
-            } catch {
-              continue;
-            }
-            if (event.type === "user_message") await loadMessages();
-            else if (event.type === "text_delta") setStreamingText((p) => p + (event.delta || ""));
-            else if (event.type === "done") await loadMessages();
-          }
-        }
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        setError(body?.error ?? "The helper is unavailable right now.");
+        return;
       }
+
+      const pending: Promise<unknown>[] = [];
+      await consumeSSE(response, (event) => {
+        if (event.type === "text_delta") {
+          setStreamingText((p) => p + ((event.delta as string) || ""));
+        } else if (event.type === "user_message" || event.type === "done") {
+          pending.push(loadMessages());
+        }
+      });
+      await Promise.all(pending);
+    } catch (err) {
+      // A stream that ends without a reply must say so — silence reads as the helper
+      // choosing to ignore the question.
+      setError(err instanceof ApiError ? err.message : "The helper couldn't reply.");
+      await loadMessages();
     } finally {
       setSending(false);
       setStreamingText("");
@@ -109,6 +107,11 @@ export function CodeHelperPanel({
             <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">assistant</p>
             <Markdown className="prose-p:my-1">{streamingText}</Markdown>
           </div>
+        )}
+        {error && (
+          <p className="text-xs text-red-400 border border-red-500/30 rounded-md px-3 py-2">
+            {error}
+          </p>
         )}
         {sending && !streamingText && (
           <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />

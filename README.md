@@ -59,7 +59,7 @@ accepted and stored encrypted on the `agent-data` volume, so it survives restart
   LLM workflows (Gemini), code execution, and static file serving all in one process.
   See `agent/app/` for the feature-oriented module layout.
 - **Execution**: `CitronAdapter` only — every submission runs in the Citron sandbox
-  (nsjail isolation, see `API_DOCS.md`). Nothing executes learner code in the agent process.
+  (nsjail isolation). Nothing executes learner code in the agent process.
 - **Configuration**: fixed deployment settings live in `agent/app/shared/config.py` (env or
   compose); the Gemini key is user-supplied at runtime and stored encrypted in SQLite
   (`agent/app/shared/secrets.py`).

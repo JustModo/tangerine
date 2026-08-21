@@ -1,16 +1,36 @@
 import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
+
+import aiosqlite
 
 from app.shared.config import get_settings
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent.parent / "migrations"
 
+_PRAGMAS = (
+    "PRAGMA foreign_keys = ON",
+    "PRAGMA journal_mode = WAL",
+    "PRAGMA busy_timeout = 5000",
+)
+
 
 def get_connection() -> sqlite3.Connection:
-    settings = get_settings()
-    conn = sqlite3.connect(settings.database_path)
-    conn.execute("PRAGMA foreign_keys = ON")
+    """Synchronous connection — migrations only. Request paths use `connect()` instead."""
+    conn = sqlite3.connect(get_settings().database_path)
+    for pragma in _PRAGMAS:
+        conn.execute(pragma)
     return conn
+
+
+@asynccontextmanager
+async def connect(database_path: str | None = None):
+    """The async connection every repository must use. Drop-in for
+    `async with aiosqlite.connect(path) as db`, minus the missing pragmas."""
+    async with aiosqlite.connect(database_path or get_settings().database_path) as db:
+        for pragma in _PRAGMAS:
+            await db.execute(pragma)
+        yield db
 
 
 def run_migrations() -> list[str]:

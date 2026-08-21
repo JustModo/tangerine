@@ -3,8 +3,7 @@ from datetime import datetime, timezone
 from app.mastery.domain.models import UserSkillState
 from app.mastery.domain.repository import UserSkillStateRepository
 
-# Simple deterministic scoring (plan.md §28: "start with a simple deterministic scoring
-# algorithm... don't build an elaborate AI mastery system initially").
+# Simple deterministic scoring.
 _PASS_DELTA = 0.15
 _FAIL_DELTA = -0.1
 

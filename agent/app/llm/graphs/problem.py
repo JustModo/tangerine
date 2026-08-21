@@ -64,7 +64,7 @@ async def generate_problem(
     source_problem: str | None = None,
 ) -> GeneratedProblem:
     # NOTE: this produces validated content only. Running the reference solution through
-    # the sandbox and persisting problem_versions/tests is milestone 6's job (plan.md §22-23).
+    # the sandbox and persisting problem_versions/tests is milestone 6's job.
     # A pasted problem is one-of-a-kind — never cached under the generic skill key, which
     # would otherwise poison the bank with someone else's specific question.
     key = (

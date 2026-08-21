@@ -3,7 +3,7 @@ from app.problems.domain.repository import ProblemRepository
 
 
 class ProblemSelectionService:
-    """Bank-first problem lookup (plan.md §6-7). Generation fallback is wired in once
+    """Bank-first problem lookup. Generation fallback is wired in once
     the LangGraph problem-generation graph exists (milestone 5)."""
 
     def __init__(self, repository: ProblemRepository) -> None:

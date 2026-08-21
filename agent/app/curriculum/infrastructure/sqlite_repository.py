@@ -2,6 +2,7 @@ import aiosqlite
 
 from app.curriculum.domain.models import LessonNode, LessonNodeStatus, LessonPlan
 from app.shared.config import get_settings
+from app.shared.database import connect
 
 
 _UPSERT_NODE_SQL = (
@@ -33,7 +34,7 @@ class SqliteLessonPlanRepository:
         self._database_path = database_path or get_settings().database_path
 
     async def save(self, plan: LessonPlan) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             # lesson_plans.status still exists in the schema with a DEFAULT — it's simply no
             # longer read or written, so no migration was needed to drop the concept.
             await db.execute(
@@ -53,7 +54,7 @@ class SqliteLessonPlanRepository:
             await db.commit()
 
     async def save_nodes(self, nodes: list[LessonNode]) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             for node in nodes:
                 await db.execute(_UPSERT_NODE_SQL, _node_params(node))
             await db.commit()
@@ -66,7 +67,7 @@ class SqliteLessonPlanRepository:
         keep_ids = [node.id for node in nodes]
         placeholders = ",".join("?" for _ in keep_ids) or "NULL"
 
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             # Helper-chat rows first — they hang off problem_sessions, so deleting the
             # sessions before them would orphan the conversation.
             await db.execute(
@@ -89,14 +90,14 @@ class SqliteLessonPlanRepository:
             await db.commit()
 
     async def get(self, plan_id: str) -> LessonPlan | None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM lesson_plans WHERE id = ?", (plan_id,))
             row = await cursor.fetchone()
             return await self._hydrate(db, row) if row else None
 
     async def get_node(self, node_id: str) -> LessonNode | None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT n.*, s.name AS skill_name FROM lesson_nodes n "
@@ -119,14 +120,14 @@ class SqliteLessonPlanRepository:
             )
 
     async def update_node_status(self, node_id: str, status: LessonNodeStatus) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             await db.execute(
                 "UPDATE lesson_nodes SET status = ? WHERE id = ?", (status.value, node_id)
             )
             await db.commit()
 
     async def unlock_next_node(self, lesson_plan_id: str, completed_sequence_index: int) -> None:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             await db.execute(
                 "UPDATE lesson_nodes SET status = ? "
                 "WHERE lesson_plan_id = ? AND sequence_index = ? AND status = ?",
@@ -140,7 +141,7 @@ class SqliteLessonPlanRepository:
             await db.commit()
 
     async def list_for_session(self, session_id: str) -> list[LessonPlan]:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 # Newest first — the most recently generated plan is the session's active

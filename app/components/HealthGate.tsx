@@ -8,7 +8,11 @@ interface HealthResponse {
   services: { citron: boolean; gemini: boolean };
 }
 
-const POLL_INTERVAL_MS = 3000;
+// Fast while something is down (the user is watching and waiting), slow once everything
+// is up — the check still runs for the whole session so a service dying mid-session is
+// noticed, but at 30s it isn't hammering /health (and through it Citron) all day.
+const POLL_DEGRADED_MS = 3000;
+const POLL_HEALTHY_MS = 30000;
 
 export function HealthGate({ children }: { children: React.ReactNode }) {
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -32,9 +36,13 @@ export function HealthGate({ children }: { children: React.ReactNode }) {
   // dies mid-session is never noticed and every later request just fails.
   useEffect(() => {
     check();
-    timerRef.current = setInterval(check, POLL_INTERVAL_MS);
-    return () => clearInterval(timerRef.current);
   }, []);
+
+  useEffect(() => {
+    const interval = health?.status === "ok" ? POLL_HEALTHY_MS : POLL_DEGRADED_MS;
+    timerRef.current = setInterval(check, interval);
+    return () => clearInterval(timerRef.current);
+  }, [health?.status]);
 
   // Blank until the first check resolves — rendering the gate optimistically flashes
   // "Waiting for services" on every page load before /health has even answered.

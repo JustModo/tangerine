@@ -238,3 +238,35 @@ async def test_execute_passes_through_infra_detail_fields() -> None:
     assert results[0].exit_code == 0
     assert results[0].memory_kb == 9001
     assert results[0].status_description == "Wrong Answer"
+
+
+async def test_missing_testcase_results_surface_as_errors() -> None:
+    """A short response used to be silently truncated by zip(), so the learner saw fewer
+    cases than were submitted with nothing explaining the gap."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "compile": {"success": True},
+                "testcases": [{"status": {"id": 3}, "stdout": "6"}],  # only 1 of 3
+            },
+        )
+
+    adapter = CitronAdapter(
+        citron_url="http://citron.test", transport=httpx.MockTransport(handler)
+    )
+    request = ExecutionRequest(
+        language=Language.PYTHON,
+        code="print(1)",
+        test_cases=[
+            ExecutionTestCase(id=f"t{i}", input=str(i), output_hash=hash_output("6"))
+            for i in range(3)
+        ],
+    )
+    results = [r async for r in adapter.execute(request)]
+
+    assert len(results) == 3
+    assert results[0].status is ExecutionStatus.PASSED
+    assert [r.status for r in results[1:]] == [ExecutionStatus.ERROR, ExecutionStatus.ERROR]
+    assert "no result" in results[1].error

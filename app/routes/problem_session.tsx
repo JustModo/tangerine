@@ -3,7 +3,7 @@ import { useParams } from "react-router";
 import { CodeWorkbench } from "@/components/code-workbench/CodeWorkbench";
 import { PageHeader } from "@/components/PageHeader";
 import { useStatus } from "~/lib/status";
-import { ApiError, apiFetch, apiJson } from "~/lib/api";
+import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
 import type { EvaluationResult, ProblemDetail, TestResult } from "~/lib/types";
 
 interface ProblemSessionData {
@@ -57,22 +57,12 @@ export default function ProblemSessionScreen() {
     });
     if (!response.ok) throw new ApiError(`Run failed (${response.status})`, response.status);
 
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-    if (!reader) return;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      for (const line of chunk.split("\n\n")) {
-        if (!line.startsWith("data: ")) continue;
-        const dataStr = line.replace("data: ", "");
-        if (dataStr === "{}" || !dataStr.trim()) continue;
-        try {
-          yield JSON.parse(dataStr) as TestResult;
-        } catch {}
-      }
-    }
+    // Buffered rather than yielded frame-by-frame: consumeSSE is callback-based, and the
+    // sandbox returns every result in one response anyway, so nothing is lost — but an
+    // error frame now reaches the caller instead of the stream just ending.
+    const results: TestResult[] = [];
+    await consumeSSE(response, (event) => results.push(event as unknown as TestResult));
+    for (const result of results) yield result;
   }
 
   async function submitCode(code: string): Promise<EvaluationResult> {

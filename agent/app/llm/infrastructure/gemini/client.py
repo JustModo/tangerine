@@ -8,7 +8,7 @@ from app.llm.domain.requests import ChatChunk, ChatTurn, ToolCallResult, ToolDec
 
 class GeminiClient:
     """Thin wrapper around the Gemini SDK — isolates the actual API surface so the
-    rest of the app never imports google.genai directly (plan.md §49/80)."""
+    rest of the app never imports google.genai directly."""
 
     def __init__(self, api_key: str | None) -> None:
         self._client = genai.Client(api_key=api_key)

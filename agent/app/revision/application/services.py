@@ -8,8 +8,7 @@ _OVERDUE_DAYS = 7.0
 
 
 def suggest_difficulty(mastery_score: float | None, sequence_index: int) -> str:
-    """Feeds problem selection with a mastery-aware difficulty (plan.md §29's
-    "appropriate_difficulty" factor) instead of pure curriculum-position guessing."""
+    """Feeds problem selection with a mastery-aware difficulty instead of pure curriculum-position guessing."""
     if mastery_score is not None:
         if mastery_score < 0.3:
             return "easy"
@@ -24,7 +23,7 @@ def suggest_difficulty(mastery_score: float | None, sequence_index: int) -> str:
 
 
 class RevisionService:
-    """Priority = weak_skill + overdue_revision (plan.md §29), computed from the
+    """Priority = weak_skill + overdue_revision, computed from the
     deterministic mastery/user_skill_state — no LLM call needed for this."""
 
     def __init__(

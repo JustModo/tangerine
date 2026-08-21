@@ -1,4 +1,3 @@
-import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -29,6 +28,7 @@ from app.shared.code_assembly import assemble_program
 from app.shared.errors import NotFoundError
 from app.shared.hashing import hash_output
 from app.users.domain.models import LOCAL_USER_ID
+from app.shared.sse import sse_stream
 
 router = APIRouter(prefix="/problem-sessions", tags=["problem-sessions"])
 
@@ -86,14 +86,17 @@ async def post_chat(
     body: ChatMessageBody,
     service: CodeHelperService = Depends(get_code_helper_service),
 ) -> StreamingResponse:
-    async def event_stream():
-        async for event in service.send_message(
-            session_id, body.content, body.source_code, body.last_run
-        ):
-            yield f"data: {json.dumps(event)}\n\n"
-        yield "event: done\ndata: {}\n\n"
+    # Checked here, not inside the generator: once StreamingResponse starts, the status
+    # line is already 200 and a NotFoundError can only surface as a broken stream.
+    if await service.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="Problem session not found")
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    stream = sse_stream(
+        service.send_message(session_id, body.content, body.source_code, body.last_run),
+        context=f"code helper problem_session={session_id}",
+        error_message="The helper couldn't finish that reply. Try sending it again.",
+    )
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 
 @router.get("/by-node/{lesson_node_id}")
@@ -130,7 +133,7 @@ async def run(
     session_id: str, body: SourceCodeBody, service: ProblemSessionService = Depends(get_service)
 ) -> StreamingResponse:
     """Runs the problem's visible examples (not graded) — the "Run" action, distinct from
-    "Submit" which grades against hidden tests (plan.md §12, §16)."""
+    "Submit" which grades against hidden tests."""
     session = await service.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Problem session not found")
@@ -152,12 +155,13 @@ async def run(
         ],
     )
 
-    async def event_stream():
-        async for result in execution_service.run(request):
-            yield f"data: {result.model_dump_json()}\n\n"
-        yield "event: done\ndata: {}\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    stream = sse_stream(
+        execution_service.run(request),
+        context=f"run problem_session={session_id}",
+        encode=lambda result: f"data: {result.model_dump_json()}\n\n",
+        error_message="Couldn't run your code — the sandbox is unreachable.",
+    )
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 
 @router.post("/{session_id}/submit")

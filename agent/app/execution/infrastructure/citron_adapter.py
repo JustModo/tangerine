@@ -41,7 +41,7 @@ def _error_detail(
 
 
 class CitronAdapter:
-    """CodeExecutor implementation backed by Citron (see /API_DOCS.md) — a real isolated
+    """CodeExecutor implementation backed by Citron — a real isolated
     (nsjail) sandbox, replacing the bare child_process.spawn-based Node runner this app
     started with. Deliberately never sends Citron a real expected_output: Tangerine's own
     hash-based ground truth (app/shared/hashing.py) stays the single source of truth for
@@ -89,7 +89,20 @@ class CitronAdapter:
                 )
             return
 
-        for test_case, tc_result in zip(request.test_cases, data.get("testcases", [])):
+        # zip() alone would silently truncate to the shorter sequence, so a short reply
+        # from Citron would make test cases vanish with no explanation. Pad instead, and
+        # surface each missing one as an explicit ERROR.
+        returned = data.get("testcases") or []
+        padded = list(returned) + [None] * max(0, len(request.test_cases) - len(returned))
+        for test_case, tc_result in zip(request.test_cases, padded):
+            if tc_result is None:
+                yield TestResult(
+                    id=test_case.id,
+                    status=ExecutionStatus.ERROR,
+                    input=test_case.input,
+                    error="The sandbox returned no result for this test case.",
+                )
+                continue
             tc_status = tc_result.get("status") or {}
             status_id = tc_status.get("id")
             status_description = tc_status.get("description")

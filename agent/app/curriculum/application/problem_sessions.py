@@ -19,10 +19,44 @@ from app.shared.errors import NotFoundError
 logger = logging.getLogger(__name__)
 
 
+
+# asyncio only holds a WEAK reference to a running task, so a task whose only strong
+# reference is a local can be garbage-collected mid-flight — the exact case the asyncio
+# docs warn about, and why prefetch would work most of the time and inexplicably not the
+# rest. Keeping them here also gives shutdown something to cancel.
+_background_tasks: set[asyncio.Task] = set()
+
+PREFETCH_TIMEOUT_S = 180
+
+
+async def _guarded(coro) -> None:
+    async with asyncio.timeout(PREFETCH_TIMEOUT_S):
+        await coro
+
+
+def _spawn_prefetch(coro) -> asyncio.Task:
+    task = asyncio.create_task(_guarded(coro))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    task.add_done_callback(
+        lambda t: not t.cancelled()
+        and t.exception()
+        and logger.warning("Prefetch task failed", exc_info=t.exception())
+    )
+    return task
+
+
+async def cancel_background_tasks() -> None:
+    """Called from the app lifespan so a hung prefetch can't block shutdown."""
+    for task in list(_background_tasks):
+        task.cancel()
+    if _background_tasks:
+        await asyncio.gather(*_background_tasks, return_exceptions=True)
+
+
 class ProblemSessionService:
     """Selects/generates the problem for a lesson node, tracks the user's local source
-    file against it, and progresses the curriculum on a passing submission (plan.md §68,
-    §6-7's bank-first selection, §29's mastery-aware difficulty)."""
+    file against it, and progresses the curriculum on a passing submission."""
 
     def __init__(
         self,
@@ -113,13 +147,10 @@ class ProblemSessionService:
                     or next_node.skill_id
                 )
                 next_difficulty = suggest_difficulty(None, next_node.sequence_index)
-                task = asyncio.create_task(
+                _spawn_prefetch(
                     self._prefetch_service.prefetch(
                         next_node.skill_id, next_skill_name, plan.language, next_difficulty
                     )
-                )
-                task.add_done_callback(
-                    lambda t: t.exception() and logger.warning("Prefetch task failed", exc_info=t.exception())
                 )
 
         return session

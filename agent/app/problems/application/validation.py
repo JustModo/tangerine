@@ -17,9 +17,9 @@ from app.shared.types import Language
 
 class ProblemValidationService:
     """Generates a problem via the problem LangGraph, then proves it out against the real
-    sandbox before it can enter the selection pool (plan.md §22-23, §26). Expected test
+    sandbox before it can enter the selection pool. Expected test
     outputs always come from actually running the reference solution — never from the
-    LLM's claimed example output (plan.md §23)."""
+    LLM's claimed example output."""
 
     def __init__(
         self,
@@ -119,7 +119,7 @@ class ProblemValidationService:
                 for ex in generated.examples
             ],
             # Expected outputs always come from actually running the reference solution,
-            # never from the LLM's claimed output (plan.md §23) — and only ever as a hash.
+            # never from the LLM's claimed output — and only ever as a hash.
             tests=[
                 ProblemTest(
                     id=str(uuid.uuid4()),

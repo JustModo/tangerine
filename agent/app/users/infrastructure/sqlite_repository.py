@@ -1,6 +1,6 @@
-import aiosqlite
 
 from app.shared.config import get_settings
+from app.shared.database import connect
 from app.users.domain.models import LOCAL_USER_ID, User
 
 
@@ -9,9 +9,9 @@ class SqliteUserRepository:
         self._database_path = database_path or get_settings().database_path
 
     async def ensure_default_user(self) -> User:
-        async with aiosqlite.connect(self._database_path) as db:
+        async with connect(self._database_path) as db:
             await db.execute(
-                "INSERT OR IGNORE INTO users (id, email) VALUES (?, NULL)", (LOCAL_USER_ID,)
+                "INSERT OR IGNORE INTO users (id) VALUES (?)", (LOCAL_USER_ID,)
             )
             await db.commit()
         return User(id=LOCAL_USER_ID)

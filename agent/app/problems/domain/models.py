@@ -46,8 +46,8 @@ class ProblemVersion(BaseModel):
     # Run/Submit time (app/shared/code_assembly.py) before execution.
     pre_code: str = ""
     post_code: str = ""
-    # The ONLY code a learner ever sees or edits — just their function/class (was
-    # `boilerplate`, renamed since it's no longer a standalone runnable script).
+    # The ONLY code a learner ever sees or edits — just their function or class, not a
+    # standalone runnable script.
     user_code: str = ""
     constraints: str | None = None
     hints: list[str] = []

@@ -56,18 +56,17 @@ async def test_citron_ready_returns_false_on_non_200(monkeypatch):
         assert request.url.path == "/ready"
         return httpx.Response(503, json={"status": "unavailable"})
 
-    real_async_client = httpx.AsyncClient
+    # The probe client is a module-level singleton now (built once, not per request), so
+    # the transport is swapped on that instance rather than on httpx.AsyncClient.
     monkeypatch.setattr(
-        httpx,
-        "AsyncClient",
-        lambda *args, **kwargs: real_async_client(*args, transport=httpx.MockTransport(handler), **kwargs),
+        main_module, "_probe_client", httpx.AsyncClient(transport=httpx.MockTransport(handler))
     )
 
     assert await main_module._citron_ready() is False
     get_settings.cache_clear()
 
 
-def test_health_reports_gemini_ok_from_a_stored_key(tmp_path, monkeypatch):
+async def test_health_reports_gemini_ok_from_a_stored_key(tmp_path, monkeypatch):
     """The Docker path: no GEMINI_API_KEY in the environment, key entered through the UI."""
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("GEMINI_API_KEY", "")
@@ -80,7 +79,7 @@ def test_health_reports_gemini_ok_from_a_stored_key(tmp_path, monkeypatch):
 
     with TestClient(app) as client:
         assert client.get("/health").json()["services"]["gemini"] is False
-        set_gemini_api_key("stored-key")
+        await set_gemini_api_key("stored-key")
         assert client.get("/health").json()["services"]["gemini"] is True
 
     get_settings.cache_clear()

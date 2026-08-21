@@ -1,4 +1,3 @@
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -8,23 +7,16 @@ from app.evaluation.infrastructure.sqlite_repository import SqliteEvaluationRepo
 from app.execution.domain.models import ExecutionStatus, TestResult
 from app.problems.domain.models import Problem, ProblemStatus, ProblemTest, ProblemVersion
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
-from app.shared.database import MIGRATIONS_DIR
 from app.shared.types import Language
+from tests.db import apply_migrations, seed_users
 from tests.fakes import FakeCodeExecutor
-
-
-def _apply_migrations(db_path: str) -> None:
-    conn = sqlite3.connect(db_path)
-    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
-        conn.executescript(path.read_text())
-    conn.commit()
-    conn.close()
 
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> str:
     path = str(tmp_path / "test.db")
-    _apply_migrations(path)
+    apply_migrations(path)
+    seed_users(path, "local-user")
     return path
 
 

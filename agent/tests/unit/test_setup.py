@@ -27,10 +27,10 @@ def db(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
-def test_stored_key_round_trips_and_is_encrypted_at_rest(db):
-    set_gemini_api_key("AIza-super-secret-1234")
+async def test_stored_key_round_trips_and_is_encrypted_at_rest(db):
+    await set_gemini_api_key("AIza-super-secret-1234")
 
-    assert get_gemini_api_key() == "AIza-super-secret-1234"
+    assert await get_gemini_api_key() == "AIza-super-secret-1234"
 
     stored = sqlite3.connect(db).execute(
         "SELECT value FROM app_settings WHERE key = ?", (GEMINI_API_KEY,)
@@ -38,17 +38,17 @@ def test_stored_key_round_trips_and_is_encrypted_at_rest(db):
     assert "AIza-super-secret-1234" not in stored
 
 
-def test_env_key_wins_over_stored_key(db, monkeypatch):
-    set_gemini_api_key("stored-key")
+async def test_env_key_wins_over_stored_key(db, monkeypatch):
+    await set_gemini_api_key("stored-key")
     monkeypatch.setenv("GEMINI_API_KEY", "env-key")
     get_settings.cache_clear()
 
-    assert get_gemini_api_key() == "env-key"
-    assert gemini_key_status()["source"] == "env"
+    assert await get_gemini_api_key() == "env-key"
+    assert (await gemini_key_status())["source"] == "env"
 
 
-def test_status_never_exposes_the_key(db):
-    set_gemini_api_key("AIza-super-secret-1234")
+async def test_status_never_exposes_the_key(db):
+    await set_gemini_api_key("AIza-super-secret-1234")
 
     with TestClient(app) as client:
         response = client.get("/api/setup/gemini-key")
@@ -58,8 +58,8 @@ def test_status_never_exposes_the_key(db):
     assert response.json() == {"configured": True, "source": "stored", "masked": "...1234"}
 
 
-def test_rejected_key_is_not_stored(db, monkeypatch):
-    set_gemini_api_key("known-good-key")
+async def test_rejected_key_is_not_stored(db, monkeypatch):
+    await set_gemini_api_key("known-good-key")
 
     async def reject(api_key: str) -> None:
         raise ValueError("Gemini rejected that key.")
@@ -70,12 +70,12 @@ def test_rejected_key_is_not_stored(db, monkeypatch):
         response = client.put("/api/setup/gemini-key", json={"api_key": "bogus"})
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Gemini rejected that key."
+    assert response.json()["error"] == "Gemini rejected that key."
     # The previously working key must survive a failed attempt.
-    assert get_gemini_api_key() == "known-good-key"
+    assert await get_gemini_api_key() == "known-good-key"
 
 
-def test_accepted_key_is_stored(db, monkeypatch):
+async def test_accepted_key_is_stored(db, monkeypatch):
     async def accept(api_key: str) -> None:
         return None
 
@@ -87,21 +87,21 @@ def test_accepted_key_is_stored(db, monkeypatch):
     assert response.status_code == 200
     assert response.json()["configured"] is True
     # Whitespace from a paste is trimmed before both validation and storage.
-    assert get_gemini_api_key() == "AIza-new-key"
+    assert await get_gemini_api_key() == "AIza-new-key"
 
 
-def test_delete_forgets_a_stored_key(db):
-    set_gemini_api_key("AIza-super-secret-1234")
+async def test_delete_forgets_a_stored_key(db):
+    await set_gemini_api_key("AIza-super-secret-1234")
 
     with TestClient(app) as client:
         response = client.delete("/api/setup/gemini-key")
 
     assert response.status_code == 200
     assert response.json() == {"configured": False, "source": None, "masked": None}
-    assert get_gemini_api_key() is None
+    assert await get_gemini_api_key() is None
 
 
-def test_delete_cannot_remove_an_env_key(db, monkeypatch):
+async def test_delete_cannot_remove_an_env_key(db, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "env-key")
     get_settings.cache_clear()
 
@@ -110,4 +110,4 @@ def test_delete_cannot_remove_an_env_key(db, monkeypatch):
 
     # The env var still wins — the UI uses `source` to disable Remove in this case.
     assert response.json()["source"] == "env"
-    assert get_gemini_api_key() == "env-key"
+    assert await get_gemini_api_key() == "env-key"

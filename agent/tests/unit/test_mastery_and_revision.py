@@ -1,4 +1,3 @@
-import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -9,21 +8,15 @@ from app.mastery.domain.models import UserSkillState
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.revision.application.services import RevisionService, suggest_difficulty
-from app.shared.database import MIGRATIONS_DIR
-
-
-def _apply_migrations(db_path: str) -> None:
-    conn = sqlite3.connect(db_path)
-    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
-        conn.executescript(path.read_text())
-    conn.commit()
-    conn.close()
+from tests.db import apply_migrations, seed_skills, seed_users
 
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> str:
     path = str(tmp_path / "test.db")
-    _apply_migrations(path)
+    apply_migrations(path)
+    seed_users(path, "u1", "u2")
+    seed_skills(path, "s1", "s2", "s3")
     return path
 
 

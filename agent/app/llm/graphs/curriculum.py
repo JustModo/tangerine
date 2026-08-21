@@ -63,7 +63,7 @@ async def generate_curriculum(
     target_problem: str | None = None,
 ) -> GeneratedCurriculum:
     # Same (topic, language, level) always warrants the same curriculum — a safe, valuable
-    # cache candidate, unlike per-submission coaching feedback (plan.md §38).
+    # cache candidate, unlike per-submission coaching feedback.
     # A pasted target problem makes the curriculum one-of-a-kind, so it is never cached;
     # an explicit step count is part of the identity of the result, so it joins the key.
     key = (
