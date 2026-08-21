@@ -103,12 +103,12 @@ export default function PlanScreen() {
         </div>
 
         {plan.status === "DRAFT" && (
-          <Button className="h-14 text-xs tracking-[0.3em]" onClick={acceptPlan} disabled={busy}>
+          <Button className="tracking-[0.3em]" onClick={acceptPlan} disabled={busy}>
             PROCEED
           </Button>
         )}
         {plan.status === "ACCEPTED" && (
-          <Button className="h-14 text-xs tracking-[0.3em]" onClick={startNext} disabled={busy}>
+          <Button className="tracking-[0.3em]" onClick={startNext} disabled={busy}>
             START NEXT PROBLEM
           </Button>
         )}

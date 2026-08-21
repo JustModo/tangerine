@@ -37,6 +37,9 @@ class SessionService:
     async def list_sessions(self, user_id: str) -> list[LearningSession]:
         return await self._repository.list_for_user(user_id)
 
+    async def delete_session(self, session_id: str) -> None:
+        await self._repository.delete(session_id)
+
     async def add_message(self, session_id: str, role: ChatRole, content: str) -> ChatMessage:
         intent = None
         if role == ChatRole.USER and self._llm_provider is not None:

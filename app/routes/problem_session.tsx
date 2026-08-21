@@ -189,14 +189,14 @@ export default function ProblemSessionScreen() {
           <div className="flex-1 flex gap-2">
             <Input
               placeholder="FULL PATH TO SOURCE FILE"
-              className="flex-1 h-12 bg-zinc-950 border-white/10 font-bold uppercase tracking-widest text-[10px]"
+              className="flex-1 bg-zinc-950 border-white/10 font-bold uppercase tracking-widest text-[10px]"
               value={codePath}
               onChange={(e) => setCodePath(e.target.value)}
               onBlur={() => codePath && selectSourceFile(codePath)}
             />
             <Button
               variant="outline"
-              className="h-12 border-dashed border-white/20 hover:border-white text-[10px]"
+              className="border-dashed border-white/20 hover:border-white text-[10px]"
               onClick={() => openPicker()}
             >
               PICK SOURCE
@@ -206,7 +206,7 @@ export default function ProblemSessionScreen() {
             onClick={runVisibleTests}
             disabled={!codePath || isRunning}
             variant="outline"
-            className="h-12 px-8 text-[10px]"
+            className="text-[10px]"
           >
             {isRunning ? (
               <RefreshCcw className="mr-2 h-4 w-4 animate-spin" />
@@ -215,11 +215,7 @@ export default function ProblemSessionScreen() {
             )}
             RUN
           </Button>
-          <Button
-            onClick={submit}
-            disabled={!codePath || isSubmitting}
-            className="h-12 px-8 text-[10px] border border-white hover:bg-white hover:text-black"
-          >
+          <Button onClick={submit} disabled={!codePath || isSubmitting} className="text-[10px]">
             SUBMIT
           </Button>
         </div>

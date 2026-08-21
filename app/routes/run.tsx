@@ -227,13 +227,13 @@ export default function Runner() {
           <div className="flex-1 flex gap-2">
             <Input
               placeholder="FULL PATH TO SOURCE FILE"
-              className="flex-1 h-12 bg-zinc-950 border-white/10 font-bold uppercase tracking-widest text-[10px]"
+              className="flex-1 bg-zinc-950 border-white/10 font-bold uppercase tracking-widest text-[10px]"
               value={codePath}
               onChange={(e) => setCodePath(e.target.value)}
             />
             <Button
               variant="outline"
-              className="h-12 border-dashed border-white/20 hover:border-white text-[10px]"
+              className="border-dashed border-white/20 hover:border-white text-[10px]"
               onClick={() => openPicker()}
             >
               PICK SOURCE
@@ -241,7 +241,7 @@ export default function Runner() {
           </div>
           {question && (
             <select
-              className="bg-zinc-950 border border-white/10 px-6 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:ring-1 focus:ring-white"
+              className="h-10 bg-zinc-950 border border-white/10 px-6 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:ring-1 focus:ring-white"
               value={selectedLanguage}
               onChange={(e) => setSelectedLanguage(e.target.value)}
             >
@@ -252,11 +252,7 @@ export default function Runner() {
               ))}
             </select>
           )}
-          <Button
-            onClick={runTests}
-            disabled={!question || !codePath || isRunning}
-            className="h-12 px-10 border border-white hover:bg-white hover:text-black"
-          >
+          <Button onClick={runTests} disabled={!question || !codePath || isRunning}>
             {isRunning ? (
               <RefreshCcw className="mr-3 h-4 w-4 animate-spin" />
             ) : (

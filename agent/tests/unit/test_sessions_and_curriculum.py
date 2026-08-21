@@ -73,3 +73,26 @@ async def test_curriculum_accept_supersedes_previous_plan(db_path: str) -> None:
     refetched_a = await curriculum.get(plan_a.id)
     assert refetched_a is not None
     assert refetched_a.status == LessonPlanStatus.SUPERSEDED
+
+
+async def test_delete_session_cascades_to_chat_and_plans(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session(user.id)
+    await sessions.add_message(session.id, ChatRole.USER, "teach me prefix sums")
+
+    generated = GeneratedCurriculum(
+        title="Prefix Sums",
+        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
+    )
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path),
+        FakeLLMProvider(structured_responses=[generated]),
+        skill_repository=SqliteSkillRepository(db_path),
+    )
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+
+    await sessions.delete_session(session.id)
+
+    assert await sessions.get_session(session.id) is None
+    assert await curriculum.get(plan.id) is None

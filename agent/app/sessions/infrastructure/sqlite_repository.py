@@ -64,6 +64,24 @@ class SqliteSessionRepository:
             )
             await db.commit()
 
+    async def delete(self, session_id: str) -> None:
+        async with aiosqlite.connect(self._database_path) as db:
+            await db.execute(
+                "DELETE FROM problem_sessions WHERE lesson_node_id IN ("
+                "  SELECT id FROM lesson_nodes WHERE lesson_plan_id IN ("
+                "    SELECT id FROM lesson_plans WHERE session_id = ?))",
+                (session_id,),
+            )
+            await db.execute(
+                "DELETE FROM lesson_nodes WHERE lesson_plan_id IN ("
+                "  SELECT id FROM lesson_plans WHERE session_id = ?)",
+                (session_id,),
+            )
+            await db.execute("DELETE FROM lesson_plans WHERE session_id = ?", (session_id,))
+            await db.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+            await db.execute("DELETE FROM learning_sessions WHERE id = ?", (session_id,))
+            await db.commit()
+
     async def _hydrate(self, db: aiosqlite.Connection, row: aiosqlite.Row) -> LearningSession:
         cursor = await db.execute(
             "SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC",

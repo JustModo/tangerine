@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
+import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,6 +27,7 @@ export default function SessionChat() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [generatingPlan, setGeneratingPlan] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   async function loadSession() {
     const res = await fetch(`/api/sessions/${id}`);
@@ -40,6 +42,10 @@ export default function SessionChat() {
     loadSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [session?.messages.length]);
 
   async function sendMessage() {
     if (!draft.trim()) return;
@@ -80,6 +86,20 @@ export default function SessionChat() {
     }
   }
 
+  async function deleteSession() {
+    if (!confirm("Delete this session? This can't be undone.")) return;
+    try {
+      const res = await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        toast.error("Failed to delete session");
+        return;
+      }
+      navigate("/");
+    } catch {
+      toast.error("Failed to delete session");
+    }
+  }
+
   if (!session) {
     return (
       <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs uppercase tracking-widest">
@@ -94,7 +114,18 @@ export default function SessionChat() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 max-w-3xl mx-auto w-full">
-      <ScrollArea className="flex-1 px-10 py-10">
+      <div className="flex-none px-10 py-4 flex items-center justify-between border-b border-white/10">
+        <p className="text-[10px] uppercase tracking-widest text-zinc-500">{session.status}</p>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-zinc-500 hover:text-red-500 hover:bg-red-950/30"
+          onClick={deleteSession}
+        >
+          <Trash2 className="w-4 h-4 mr-2" /> DELETE
+        </Button>
+      </div>
+      <ScrollArea className="flex-1 min-h-0 px-10 py-10">
         <div className="flex flex-col gap-6">
           {session.messages.length === 0 && (
             <p className="text-zinc-500 text-xs uppercase tracking-widest text-center py-10">
@@ -120,7 +151,7 @@ export default function SessionChat() {
           {lastLearningPlanMessage && (
             <div className="self-center">
               <Button
-                className="h-12 px-8 text-xs tracking-[0.3em]"
+                className="tracking-[0.3em]"
                 onClick={() => generatePlan(lastLearningPlanMessage.content)}
                 disabled={generatingPlan}
               >
@@ -128,14 +159,15 @@ export default function SessionChat() {
               </Button>
             </div>
           )}
+          <div ref={bottomRef} />
         </div>
       </ScrollArea>
-      <div className="px-10 py-6 border-t border-white/10 flex gap-4">
+      <div className="flex-none px-10 py-6 border-t border-white/10 flex items-center gap-4">
         <Textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="I want to learn prefix sums..."
-          className="flex-1 resize-none h-14"
+          className="flex-1 resize-none min-h-0 h-10 py-2"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -143,7 +175,7 @@ export default function SessionChat() {
             }
           }}
         />
-        <Button className="h-14 px-8 text-xs tracking-[0.3em]" onClick={sendMessage} disabled={sending}>
+        <Button onClick={sendMessage} disabled={sending} className="tracking-[0.3em]">
           SEND
         </Button>
       </div>
