@@ -114,7 +114,7 @@ export default function ProblemSessionScreen() {
       <div className="flex-1 min-h-0">
         <CodeWorkbench
           problem={problem}
-          initialCode={session.source_code ?? problem.boilerplate}
+          initialCode={session.source_code ?? problem.user_code}
           onAutosave={autosave}
           onRun={runCode}
           onSubmit={submitCode}

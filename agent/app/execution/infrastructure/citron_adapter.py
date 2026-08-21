@@ -49,9 +49,9 @@ class CitronAdapter:
     Citron is used purely as an isolated execution engine here, not as the judge.
 
     Live-verified against the real `justmodo/citron:latest` image (PASSED/FAILED via our
-    own hash, real compile-error surfacing) — see CompositeExecutor for how it's wired
-    into the live routers (Citron for c/cpp/java/python; LocalSubprocessExecutor is the
-    JS fallback since Citron's languages.toml has no JS runtime registered)."""
+    own hash, real compile-error surfacing). The sole CodeExecutor in this app — Citron's
+    languages.toml covers exactly the four languages this app supports (c/cpp/java/python),
+    so no fallback/routing layer is needed."""
 
     def __init__(
         self,

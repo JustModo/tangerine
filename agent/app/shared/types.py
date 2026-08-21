@@ -2,19 +2,10 @@ from enum import StrEnum
 
 
 class Language(StrEnum):
-    """Mirrors web/server/schemas/question_schema.ts LanguageEnum — keep values in sync."""
+    """The four languages Citron's real languages.toml supports — execution is 100%
+    Citron-routed, so this list IS the set of languages this app can run at all."""
 
-    JAVASCRIPT = "javascript"
     PYTHON = "python"
     CPP = "cpp"
     C = "c"
     JAVA = "java"
-
-
-LANGUAGE_EXTENSIONS: dict[Language, str] = {
-    Language.PYTHON: "py",
-    Language.JAVASCRIPT: "js",
-    Language.CPP: "cpp",
-    Language.C: "c",
-    Language.JAVA: "java",
-}

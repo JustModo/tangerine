@@ -11,6 +11,7 @@ from app.llm.domain.provider import LLMProvider
 from app.llm.graphs.coaching import generate_coaching_feedback
 from app.mastery.application.services import MasteryService
 from app.problems.domain.repository import ProblemRepository
+from app.shared.code_assembly import assemble_program
 from app.shared.errors import NotFoundError
 from app.shared.types import Language
 
@@ -59,7 +60,7 @@ class EvaluationService:
 
         request = ExecutionRequest(
             language=language,
-            code=code,
+            code=assemble_program(version.pre_code, code, version.post_code),
             test_cases=[
                 ExecutionTestCase(id=test.id, input=test.input, output_hash=test.output_hash)
                 for test in version.tests

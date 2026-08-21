@@ -3,7 +3,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import "./monaco-setup";
 
 const MONACO_LANGUAGE: Record<string, string> = {
-  javascript: "javascript",
   python: "python",
   cpp: "cpp",
   c: "c",

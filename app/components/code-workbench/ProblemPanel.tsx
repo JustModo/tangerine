@@ -94,7 +94,7 @@ export function ProblemPanel({ problem }: { problem: ProblemDetail }) {
                     <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">
                       Explanation
                     </span>
-                    <p className="mt-1 text-zinc-400">{example.explanation}</p>
+                    <p className="mt-1 text-zinc-400 whitespace-pre-wrap">{example.explanation}</p>
                   </div>
                 )}
               </div>

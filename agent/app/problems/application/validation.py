@@ -10,6 +10,7 @@ from app.llm.infrastructure.cache import SqliteLLMCache
 from app.problems.domain.models import Problem, ProblemExample, ProblemStatus, ProblemTest, ProblemVersion
 from app.problems.domain.repository import ProblemRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
+from app.shared.code_assembly import assemble_program
 from app.shared.hashing import hash_output
 from app.shared.types import Language
 
@@ -60,9 +61,12 @@ class ProblemValidationService:
         if not generated.examples:
             return await self._mark_invalid(problem)
 
+        reference_program = assemble_program(
+            generated.pre_code, generated.reference_user_code, generated.post_code
+        )
         request = ExecutionRequest(
             language=language,
-            code=generated.reference_solution,
+            code=reference_program,
             # output_hash is irrelevant here — we only read back actual_output below,
             # never the PASS/FAIL verdict, since there's nothing trustworthy to compare against yet.
             test_cases=[
@@ -88,8 +92,10 @@ class ProblemValidationService:
             problem_id=problem.id,
             version=1,
             statement_md=generated.statement_md,
-            reference_solution=generated.reference_solution,
-            boilerplate=generated.boilerplate,
+            reference_solution=reference_program,
+            user_code=generated.user_code,
+            pre_code=generated.pre_code,
+            post_code=generated.post_code,
             constraints=generated.constraints,
             hints=generated.hints,
             examples=[

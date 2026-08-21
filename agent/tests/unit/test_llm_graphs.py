@@ -36,8 +36,10 @@ async def test_generate_problem_returns_structured_result() -> None:
         statement_md="Given an array...",
         difficulty="easy",
         skills=["prefix-sum"],
-        boilerplate="def solve(nums): ...",
-        reference_solution="def solve(nums): return sum(nums)",
+        pre_code="nums = list(map(int, input().split()))",
+        user_code="def solve(nums): pass",
+        post_code="print(solve(nums))",
+        reference_user_code="def solve(nums): return sum(nums)",
         examples=[GeneratedExample(input="[1,2,3]", output="6")],
     )
     provider = FakeLLMProvider(structured_responses=[problem])

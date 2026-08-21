@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from app.execution.infrastructure.composite_executor import CompositeExecutor
+from app.execution.infrastructure.citron_adapter import CitronAdapter
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.problems.application.services import ProblemSelectionService
@@ -21,7 +21,7 @@ def get_validation_service() -> ProblemValidationService:
     return ProblemValidationService(
         SqliteProblemRepository(),
         GeminiProvider(),
-        CompositeExecutor(),
+        CitronAdapter(),
         llm_cache=SqliteLLMCache(),
     )
 
@@ -49,7 +49,7 @@ class ProblemDetail(BaseModel):
     language: Language
     difficulty: str
     statement_md: str
-    boilerplate: str
+    user_code: str
     constraints: str | None
     hints: list[str]
     tags: list[str]
@@ -72,7 +72,7 @@ async def get_problem(
         language=problem.language,
         difficulty=problem.difficulty,
         statement_md=version.statement_md,
-        boilerplate=version.boilerplate,
+        user_code=version.user_code,
         constraints=version.constraints,
         hints=version.hints,
         tags=problem.tags,

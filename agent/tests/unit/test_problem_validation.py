@@ -36,8 +36,10 @@ def _generated_problem() -> GeneratedProblem:
         statement_md="Given an array, answer sum queries.",
         difficulty="easy",
         skills=["prefix-sum"],
-        boilerplate="def solve(nums): ...",
-        reference_solution="def solve(nums): return sum(nums)",
+        pre_code="nums = list(map(int, input().split()))",
+        user_code="def solve(nums): pass",
+        post_code="print(solve(nums))",
+        reference_user_code="def solve(nums): return sum(nums)",
         examples=[GeneratedExample(input="1 2 3", output="6")],
         constraints="1 <= len(nums) <= 10^5",
         hints=["Consider a running total."],
@@ -66,6 +68,10 @@ async def test_generate_and_validate_marks_available_on_success(db_path: str) ->
     assert version.constraints == "1 <= len(nums) <= 10^5"
     assert version.hints == ["Consider a running total."]
     assert problem.tags == ["prefix-sum", "arrays"]
+    # user_code persisted must be the STUB shown to learners, never the reference solution
+    assert version.user_code == "def solve(nums): pass"
+    assert version.pre_code == "nums = list(map(int, input().split()))"
+    assert version.post_code == "print(solve(nums))"
 
 
 async def test_generate_and_validate_marks_invalid_when_reference_solution_errors(db_path: str) -> None:

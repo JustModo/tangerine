@@ -12,7 +12,7 @@ from app.evaluation.infrastructure.sqlite_repository import SqliteEvaluationRepo
 from app.execution.application.services import ExecutionService
 from app.execution.domain.models import ExecutionRequest
 from app.execution.domain.models import TestCase as ExecutionTestCase
-from app.execution.infrastructure.composite_executor import CompositeExecutor
+from app.execution.infrastructure.citron_adapter import CitronAdapter
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.mastery.application.services import MasteryService
@@ -21,6 +21,7 @@ from app.problems.application.prefetch import PrefetchService
 from app.problems.application.services import ProblemSelectionService
 from app.problems.application.validation import ProblemValidationService
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
+from app.shared.code_assembly import assemble_program
 from app.shared.errors import NotFoundError
 from app.shared.hashing import hash_output
 from app.users.domain.models import LOCAL_USER_ID
@@ -32,7 +33,7 @@ def _build_validation_service() -> ProblemValidationService:
     return ProblemValidationService(
         SqliteProblemRepository(),
         GeminiProvider(),
-        CompositeExecutor(),
+        CitronAdapter(),
         llm_cache=SqliteLLMCache(),
     )
 
@@ -100,10 +101,10 @@ async def run(
     if problem is None or version is None:
         raise HTTPException(status_code=404, detail="Problem not found")
 
-    execution_service = ExecutionService(CompositeExecutor())
+    execution_service = ExecutionService(CitronAdapter())
     request = ExecutionRequest(
         language=problem.language,
-        code=body.source_code,
+        code=assemble_program(version.pre_code, body.source_code, version.post_code),
         test_cases=[
             ExecutionTestCase(id=example.id, input=example.input, output_hash=hash_output(example.output))
             for example in version.examples
@@ -135,7 +136,7 @@ async def submit(
     eval_service = EvaluationService(
         SqliteEvaluationRepository(),
         problem_repo,
-        CompositeExecutor(),
+        CitronAdapter(),
         GeminiProvider(),
         MasteryService(SqliteUserSkillStateRepository()),
     )

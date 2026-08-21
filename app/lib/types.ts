@@ -11,7 +11,7 @@ export interface ProblemDetail {
   language: string;
   difficulty: string;
   statement_md: string;
-  boilerplate: string;
+  user_code: string;
   constraints?: string | null;
   hints: string[];
   tags: string[];

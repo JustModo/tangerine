@@ -68,7 +68,9 @@ async def test_save_version_then_get_latest_version_round_trips_metadata(db_path
             version=1,
             statement_md="Find two numbers that sum to target.",
             reference_solution="...",
-            boilerplate="",
+            user_code="def solve(nums, target): pass",
+            pre_code="x = 1",
+            post_code="print(x)",
             constraints="1 <= n <= 10^5",
             hints=["Try a hash map.", "Look up target - x as you go."],
             created_at="2026-01-01T00:00:00",
@@ -79,6 +81,9 @@ async def test_save_version_then_get_latest_version_round_trips_metadata(db_path
     assert version is not None
     assert version.constraints == "1 <= n <= 10^5"
     assert version.hints == ["Try a hash map.", "Look up target - x as you go."]
+    assert version.user_code == "def solve(nums, target): pass"
+    assert version.pre_code == "x = 1"
+    assert version.post_code == "print(x)"
 
 
 async def test_find_suitable_excludes_unavailable_and_wrong_language(db_path: str) -> None:

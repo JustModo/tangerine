@@ -47,7 +47,9 @@ async def _seed_problem(db_path: str) -> str:
         version=1,
         statement_md="Sum the list.",
         reference_solution="print(sum(int(x) for x in input().split()))",
-        boilerplate="",
+        user_code="",
+        pre_code="",
+        post_code="",
         tests=[ProblemTest(id="t1", input="1 2 3", output_hash="expectedhash")],
         created_at="2026-01-01T00:00:00",
     )

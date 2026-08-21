@@ -28,7 +28,7 @@ function toProblem(question: QuestionExport, language: string): ProblemDetail {
     language,
     difficulty: "practice",
     statement_md: question.description,
-    boilerplate: "",
+    user_code: "",
     constraints: null,
     hints: [],
     tags: [],

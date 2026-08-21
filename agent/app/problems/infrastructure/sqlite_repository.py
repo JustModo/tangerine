@@ -97,15 +97,17 @@ class SqliteProblemRepository:
             await db.execute(
                 "INSERT INTO problem_versions "
                 "(id, problem_id, version, statement_md, reference_solution, boilerplate, "
-                "constraints, hints_json, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "pre_code, post_code, constraints, hints_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     version.id,
                     version.problem_id,
                     version.version,
                     version.statement_md,
                     version.reference_solution,
-                    version.boilerplate,
+                    version.user_code,
+                    version.pre_code,
+                    version.post_code,
                     version.constraints,
                     json.dumps(version.hints),
                     version.created_at.isoformat(),
@@ -151,7 +153,9 @@ class SqliteProblemRepository:
                 version=row["version"],
                 statement_md=row["statement_md"],
                 reference_solution=row["reference_solution"],
-                boilerplate=row["boilerplate"],
+                user_code=row["boilerplate"],
+                pre_code=row["pre_code"],
+                post_code=row["post_code"],
                 constraints=row["constraints"],
                 hints=json.loads(row["hints_json"] or "[]"),
                 created_at=row["created_at"],
