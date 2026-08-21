@@ -6,3 +6,4 @@ agent/.venv
 agent/static
 agent/*.db
 citron
+.env

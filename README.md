@@ -9,20 +9,19 @@ deterministic, hash-verified code execution and evaluation.
 ### Security and Hashing
 - Automated SHA-256 hashing of test case outputs.
 - Expected outputs are never stored in plain text or exposed to the runner.
-- Secure local file system browsing for source file selection.
-
 ### Runner
 - Real-time execution and stdout tracking.
 - Automated verification against hashed expectations.
-- Support for Python, JavaScript, C, C++, and Java.
+- Support for Python, C, C++, and Java — executed in the Citron sandbox.
 
 ## Setup
 
 ### Prerequisites
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/)
 - Node.js + pnpm (frontend build only — nothing Node-based runs at request time)
-- Local compilers/runtimes for targeted languages (gcc, g++, python3, java, node)
-- A `GEMINI_API_KEY` for curriculum/problem generation (see `agent/.env.example`)
+- A running [Citron](https://github.com/JustModo/citron) sandbox for code execution
+- A `GEMINI_API_KEY` for curriculum/problem generation — copy `.env.example` to `.env`
+  at the repo root. This file is for local development only; see below for Docker.
 
 ### Installation
 ```bash
@@ -48,6 +47,10 @@ Docker, which does the same thing in a single image:
 ```bash
 docker compose up --build
 ```
+The compose stack publishes **only** the web UI (`PORT`, default `8000`); the Citron
+sandbox runs on an internal network with no host binding. No `.env` is used — open the
+app and enter your Gemini API key when prompted. It's verified against Google before it's
+accepted and stored encrypted on the `agent-data` volume, so it survives restarts.
 
 ## Architecture
 - **Frontend**: React Router v7 in SPA mode (`ssr: false`) + Tailwind CSS — a plain
@@ -55,7 +58,9 @@ docker compose up --build
 - **Backend**: a single Python (FastAPI) agent — REST API, SQLite persistence, LangGraph
   LLM workflows (Gemini), code execution, and static file serving all in one process.
   See `agent/app/` for the feature-oriented module layout.
-- **Execution**: `LocalSubprocessExecutor` (direct subprocess, timeout-only) by default;
-  swap for `CitronAdapter` (real sandbox isolation, see `API_DOCS.md`) once Citron's own
-  image is buildable — both implement the same `CodeExecutor` interface.
+- **Execution**: `CitronAdapter` only — every submission runs in the Citron sandbox
+  (nsjail isolation, see `API_DOCS.md`). Nothing executes learner code in the agent process.
+- **Configuration**: fixed deployment settings live in `agent/app/shared/config.py` (env or
+  compose); the Gemini key is user-supplied at runtime and stored encrypted in SQLite
+  (`agent/app/shared/secrets.py`).
 - **Styling**: Strict monochrome design system for high-contrast visibility.

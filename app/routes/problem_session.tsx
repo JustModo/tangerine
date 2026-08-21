@@ -83,13 +83,7 @@ export default function ProblemSessionScreen() {
     });
   }
 
-  if (!session || !problem) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs uppercase tracking-widest">
-        Loading problem...
-      </div>
-    );
-  }
+  if (!session || !problem) return null;
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">

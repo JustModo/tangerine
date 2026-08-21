@@ -1,16 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, RefreshCcw, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { GeminiKeyForm } from "@/components/GeminiKey";
 
 interface HealthResponse {
   status: "ok" | "degraded";
   services: { citron: boolean; gemini: boolean };
 }
-
-const SERVICE_LABELS: Record<keyof HealthResponse["services"], { label: string; hint: string }> = {
-  citron: { label: "Citron sandbox", hint: "Citron unreachable — start the judge service and retry." },
-  gemini: { label: "Gemini API key", hint: "GEMINI_API_KEY not configured on the agent." },
-};
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -32,17 +28,27 @@ export function HealthGate({ children }: { children: React.ReactNode }) {
     }
   }
 
+  // Polls for the whole session, not just until the first "ok" — otherwise a service that
+  // dies mid-session is never noticed and every later request just fails.
   useEffect(() => {
     check();
     timerRef.current = setInterval(check, POLL_INTERVAL_MS);
     return () => clearInterval(timerRef.current);
   }, []);
 
-  useEffect(() => {
-    if (health?.status === "ok") clearInterval(timerRef.current);
-  }, [health?.status]);
+  // Blank until the first check resolves — rendering the gate optimistically flashes
+  // "Waiting for services" on every page load before /health has even answered.
+  if (health === null) return null;
+  if (health.status === "ok") return <>{children}</>;
 
-  if (health?.status === "ok") return <>{children}</>;
+  const services: { key: keyof HealthResponse["services"]; label: string; hint: string }[] = [
+    {
+      key: "citron",
+      label: "Citron sandbox",
+      hint: "Citron unreachable — start the judge service and retry.",
+    },
+    { key: "gemini", label: "Gemini API key", hint: "No API key configured yet." },
+  ];
 
   return (
     <div className="h-screen w-screen flex items-center justify-center bg-black text-white px-6">
@@ -52,22 +58,28 @@ export function HealthGate({ children }: { children: React.ReactNode }) {
           Tangerine needs these to be reachable before you can continue
         </p>
         <div className="space-y-2 text-left">
-          {(Object.keys(SERVICE_LABELS) as (keyof HealthResponse["services"])[]).map((key) => {
+          {services.map(({ key, label, hint }) => {
             const ok = health?.services?.[key] ?? false;
-            const meta = SERVICE_LABELS[key];
             return (
-              <div
-                key={key}
-                className="flex items-start gap-3 border border-white/10 rounded-md px-4 py-3"
-              >
+              <div key={key} className="flex items-start gap-3 border border-white/10 rounded-md px-4 py-3">
                 {ok ? (
                   <CheckCircle2 className="w-4 h-4 text-green-500 flex-none mt-0.5" />
                 ) : (
                   <XCircle className="w-4 h-4 text-red-500 flex-none mt-0.5" />
                 )}
-                <div>
-                  <p className="text-sm font-bold">{meta.label}</p>
-                  {!ok && <p className="text-xs text-zinc-500 mt-0.5">{meta.hint}</p>}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold">{label}</p>
+                  {!ok && key === "gemini" ? (
+                    <div className="mt-2 space-y-2">
+                      <p className="text-xs text-zinc-500">
+                        Paste a Gemini API key. It's verified against Google before it's
+                        saved, then stored encrypted on this machine.
+                      </p>
+                      <GeminiKeyForm onSaved={check} />
+                    </div>
+                  ) : (
+                    !ok && <p className="text-xs text-zinc-500 mt-0.5">{hint}</p>
+                  )}
                 </div>
               </div>
             );

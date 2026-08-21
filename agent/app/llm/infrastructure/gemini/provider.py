@@ -6,6 +6,7 @@ from app.llm.domain.requests import ChatChunk, ChatStreamRequest, StructuredGene
 from app.llm.infrastructure.gemini.client import GeminiClient
 from app.llm.infrastructure.gemini.mapping import parse_structured_response
 from app.shared.config import get_settings
+from app.shared.secrets import get_gemini_api_key
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -18,13 +19,13 @@ class GeminiProvider:
 
     def __init__(self, client: GeminiClient | None = None) -> None:
         self._client = client
-        settings = get_settings()
-        self._api_key = settings.gemini_api_key
-        self._default_model = settings.llm_model
+        self._default_model = get_settings().llm_model
 
     def _get_client(self) -> GeminiClient:
         if self._client is None:
-            self._client = GeminiClient(api_key=self._api_key)
+            # Resolved here rather than in __init__ so a key saved through the setup screen
+            # is picked up by the next request without restarting the process.
+            self._client = GeminiClient(api_key=get_gemini_api_key())
         return self._client
 
     async def generate_structured(

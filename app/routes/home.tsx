@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { ListTree, MessageSquare } from "lucide-react";
+import { ListTree, MessageSquare, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiJson } from "~/lib/api";
+import { GeminiKeySettings } from "@/components/GeminiKey";
 
 interface SessionSummary {
   id: string;
@@ -22,6 +23,7 @@ export default function Home() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [plansBySession, setPlansBySession] = useState<Record<string, LessonPlanSummary | undefined>>({});
   const [loading, setLoading] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const navigate = useNavigate();
   const { showError, setBusyMessage } = useStatus();
 
@@ -76,17 +78,34 @@ export default function Home() {
           <p className="text-[10px] font-black uppercase tracking-[0.5em] text-zinc-500">Tangerine</p>
           <p className="text-sm font-bold uppercase tracking-wide">Learning Sessions</p>
         </div>
-        <Button size="sm" className="tracking-[0.3em]" onClick={startNewSession}>
-          + NEW SESSION
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Settings"
+            aria-expanded={settingsOpen}
+            onClick={() => setSettingsOpen((open) => !open)}
+            className={settingsOpen ? "text-white" : "text-zinc-500 hover:text-white"}
+          >
+            <Settings className="w-4 h-4" />
+          </Button>
+          <Button size="sm" className="tracking-[0.3em]" onClick={startNewSession}>
+            + NEW SESSION
+          </Button>
+        </div>
       </div>
+
+      {settingsOpen && (
+        <div className="flex-none w-full border-b border-white/10 bg-zinc-950 px-10 py-5">
+          <div className="max-w-3xl mx-auto w-full">
+            <GeminiKeySettings />
+          </div>
+        </div>
+      )}
 
       <ScrollArea className="flex-1 min-h-0 px-10">
         <div className="max-w-3xl mx-auto w-full flex flex-col pb-16">
           <div className="flex flex-col divide-y divide-white/5">
-            {loading && (
-              <p className="text-zinc-500 text-xs uppercase py-8 text-center">Loading...</p>
-            )}
             {!loading && sessions.length === 0 && (
               <p className="text-zinc-500 text-xs uppercase py-8 text-center">
                 No sessions yet. Start one above.

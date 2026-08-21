@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 import app.main as main_module
 from app.main import app
 from app.shared.config import get_settings
+from app.shared.secrets import set_gemini_api_key
 
 
 def test_health_reports_ok_when_citron_ready_and_gemini_configured(tmp_path, monkeypatch):
@@ -63,4 +64,23 @@ async def test_citron_ready_returns_false_on_non_200(monkeypatch):
     )
 
     assert await main_module._citron_ready() is False
+    get_settings.cache_clear()
+
+
+def test_health_reports_gemini_ok_from_a_stored_key(tmp_path, monkeypatch):
+    """The Docker path: no GEMINI_API_KEY in the environment, key entered through the UI."""
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    get_settings.cache_clear()
+
+    async def fake_ready() -> bool:
+        return True
+
+    monkeypatch.setattr(main_module, "_citron_ready", fake_ready)
+
+    with TestClient(app) as client:
+        assert client.get("/health").json()["services"]["gemini"] is False
+        set_gemini_api_key("stored-key")
+        assert client.get("/health").json()["services"]["gemini"] is True
+
     get_settings.cache_clear()

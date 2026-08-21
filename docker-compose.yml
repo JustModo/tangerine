@@ -1,17 +1,39 @@
+# The web UI is the ONLY published port. Citron sits on an internal network with no host
+# binding at all — it executes untrusted learner code, so nothing outside the compose
+# project should be able to reach it. The Gemini API key is deliberately NOT passed in
+# here: the user enters it in the web UI and it is stored encrypted on the agent-data
+# volume. The repo's .env is for local development only.
 services:
   app:
     build: .
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:8000"
     environment:
       DATABASE_PATH: /data/agent.db
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       CITRON_URL: http://citron:2358
-      CITRON_AUTH_TOKEN: ${CITRON_AUTH_TOKEN:-}
+      # Empty on purpose. Without this, a GEMINI_API_KEY left in the shell environment
+      # would silently take priority over the key the user manages in the UI.
+      GEMINI_API_KEY: ""
     volumes:
       - agent-data:/data
+    networks:
+      # `public` carries the published port and egress to the Gemini API; `judge` is the
+      # internal-only link to citron. Both are named explicitly — listing the implicit
+      # `default` network alongside another one leaves the container attached to only the
+      # internal network, which silently drops the port publish.
+      - public
+      - judge
     depends_on:
-      - citron
+      citron:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
 
   citron:
     image: justmodo/citron:latest
@@ -22,8 +44,8 @@ services:
       - systempaths=unconfined
     cgroup: private
     command: ["citron", "-config", "/opt/citron/configs/citron.conf", "-address", "0.0.0.0:2358"]
-    ports:
-      - "127.0.0.1:2358:2358"
+    networks:
+      - judge
     tmpfs:
       - /box:size=2g,mode=1777,exec
     volumes:
@@ -35,6 +57,11 @@ services:
       timeout: 10s
       start_period: 10s
       retries: 3
+
+networks:
+  public:
+  judge:
+    internal: true
 
 volumes:
   agent-data:

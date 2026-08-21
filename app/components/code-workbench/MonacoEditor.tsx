@@ -1,5 +1,4 @@
 import Editor from "@monaco-editor/react";
-import { Skeleton } from "@/components/ui/skeleton";
 import "./monaco-setup";
 
 const MONACO_LANGUAGE: Record<string, string> = {
@@ -24,7 +23,7 @@ export function MonacoEditor({
       theme="vs-dark"
       value={value}
       onChange={(next) => onChange(next ?? "")}
-      loading={<Skeleton className="h-full w-full" />}
+      loading={null}
       options={{
         minimap: { enabled: false },
         fontSize: 14,

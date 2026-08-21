@@ -96,13 +96,7 @@ export default function PlanScreen() {
     }
   }
 
-  if (!plan) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs uppercase tracking-widest">
-        Loading plan...
-      </div>
-    );
-  }
+  if (!plan) return null;
 
   return (
     <div className="flex-1 flex flex-col min-h-0 w-full">

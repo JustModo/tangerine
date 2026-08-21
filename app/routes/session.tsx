@@ -146,13 +146,7 @@ export default function SessionChat() {
     }
   }
 
-  if (!session) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs uppercase tracking-widest">
-        Loading session...
-      </div>
-    );
-  }
+  if (!session) return null;
 
   // The API returns newest-first, so the active plan is simply the first one.
   const activePlan = plans[0];

@@ -12,14 +12,16 @@ from app.curriculum.api.router import router as curriculum_router
 from app.execution.api.router import router as execution_router
 from app.problems.api.router import router as problems_router
 from app.sessions.api.router import router as sessions_router
+from app.setup.router import router as setup_router
 from app.shared.config import get_settings
 from app.shared.database import run_migrations
 from app.shared.errors import register_exception_handlers
+from app.shared.secrets import get_gemini_api_key
 from app.users.api.router import router as users_router
 from app.users.infrastructure.sqlite_repository import SqliteUserRepository
 
-# Populated by `pnpm build` in web/ (see web/vite.config.ts's build.outDir) — absent in
-# `uvicorn --reload` dev mode, where the Vite dev server (web/) is used instead.
+# Populated by `pnpm run build` + scripts/run.js (and by the Dockerfile) — absent in
+# `uvicorn --reload` dev mode, where the Vite dev server proxies to this process instead.
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
@@ -38,6 +40,7 @@ app.include_router(sessions_router, prefix="/api")
 app.include_router(curriculum_router, prefix="/api")
 app.include_router(users_router, prefix="/api")
 app.include_router(problem_sessions_router, prefix="/api")
+app.include_router(setup_router, prefix="/api")
 
 
 class HealthResponse(BaseModel):
@@ -58,7 +61,7 @@ async def _citron_ready() -> bool:
 
 @app.get("/health")
 async def health() -> HealthResponse:
-    services = {"citron": await _citron_ready(), "gemini": bool(get_settings().gemini_api_key)}
+    services = {"citron": await _citron_ready(), "gemini": bool(get_gemini_api_key())}
     return HealthResponse(status="ok" if all(services.values()) else "degraded", services=services)
 
 
