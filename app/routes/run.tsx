@@ -30,14 +30,29 @@ import {
 } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "~/lib/utils";
-import {
-  type QuestionExport,
-  type ExecutionResult,
-} from "../../server/schemas/question_schema";
 
-type TestResult = ExecutionResult & {
+interface TestCaseSpec {
+  id?: string;
+  input: string;
+  output: string; // stored as a sha256 hash, never plaintext
+}
+
+interface QuestionExport {
+  title: string;
+  description: string;
+  languages: string[];
+  testCases: TestCaseSpec[];
+}
+
+interface TestResult {
+  id: string;
+  status: "PENDING" | "PASSED" | "FAILED" | "ERROR" | "TIMEOUT";
+  input: string;
+  actual_output?: string;
+  error?: string;
+  execution_time_ms?: string;
   pending?: boolean;
-};
+}
 
 export default function Runner() {
   const [question, setQuestion] = useState<QuestionExport | null>(null);
@@ -72,7 +87,7 @@ export default function Runner() {
   useEffect(() => {
     if (!codePath) return;
     const eventSource = new EventSource(
-      `/api/watch?path=${encodeURIComponent(codePath)}`,
+      `/api/workspace/watch?path=${encodeURIComponent(codePath)}`,
     );
     eventSource.addEventListener("change", () => {
       // File changed - maybe trigger auto run? For now just log
@@ -88,7 +103,6 @@ export default function Runner() {
       initialResults[tc.id || tc.input] = {
         id: tc.id || tc.input,
         input: tc.input,
-        expectedOutput: tc.output,
         status: "PENDING",
         pending: true,
       };
@@ -96,16 +110,16 @@ export default function Runner() {
     setResults(initialResults);
 
     try {
-      const response = await fetch("/api/run", {
+      const response = await fetch("/api/execution/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           language: selectedLanguage,
-          codePath,
-          testCases: question.testCases.map((tc) => ({
+          code_path: codePath,
+          test_cases: question.testCases.map((tc) => ({
             id: tc.id || tc.input,
             input: tc.input,
-            output: tc.output,
+            output_hash: tc.output,
           })),
         }),
       });
@@ -123,7 +137,7 @@ export default function Runner() {
               const dataStr = line.replace("data: ", "");
               if (dataStr === "{}" || dataStr.trim() === "") continue;
               try {
-                const result = JSON.parse(dataStr) as ExecutionResult;
+                const result = JSON.parse(dataStr) as TestResult;
                 setResults((prev) => ({
                   ...prev,
                   [result.id]: { ...result, pending: false },
@@ -166,10 +180,10 @@ export default function Runner() {
   const openPicker = async (path?: string) => {
     try {
       const resp = await fetch(
-        `/api/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`,
+        `/api/workspace/list${path ? `?path=${encodeURIComponent(path)}` : ""}`,
       );
       const data = await resp.json();
-      setExplorerPath(data.currentPath);
+      setExplorerPath(data.current_path);
       setExplorerFiles(data.files);
       setShowPicker(true);
     } catch (e) {
@@ -344,7 +358,7 @@ export default function Runner() {
                           {getStatusText(res?.status || "PENDING")}
                         </TableCell>
                         <TableCell className="p-4 text-[10px] font-bold font-mono">
-                          {res?.executionTime ? `${res.executionTime}ms` : "-"}
+                          {res?.execution_time_ms || "-"}
                         </TableCell>
                         <TableCell className="p-4">
                           <div className="space-y-2 opacity-60 group-hover:opacity-100 transition-opacity">
@@ -352,7 +366,7 @@ export default function Runner() {
                               <span className="text-zinc-600">IN:</span>{" "}
                               {tc.input.substring(0, 100)}
                             </div>
-                            {res?.actualOutput && (
+                            {res?.actual_output && (
                               <div
                                 className={cn(
                                   "border-l pl-3",
@@ -372,7 +386,7 @@ export default function Runner() {
                                   <span className="font-bold uppercase tracking-tighter mr-2">
                                     Stdout:
                                   </span>{" "}
-                                  {res.actualOutput}
+                                  {res.actual_output}
                                 </div>
                               </div>
                             )}
@@ -441,7 +455,7 @@ export default function Runner() {
                 size="sm"
                 className="text-[9px] font-black uppercase"
                 onClick={async () => {
-                  const resp = await fetch("/api/fs/home");
+                  const resp = await fetch("/api/workspace/home");
                   const data = await resp.json();
                   openPicker(data.path);
                 }}
@@ -458,20 +472,20 @@ export default function Runner() {
                       key={file.path}
                       type="button"
                       onClick={() =>
-                        file.isDirectory
+                        file.is_directory
                           ? openPicker(file.path)
                           : handleFileSelect(file.path)
                       }
                       className="w-full flex items-center gap-3 p-3 text-[11px] font-medium border border-transparent hover:border-white/10 hover:bg-white/5 transition-all text-left group"
                     >
-                      {file.isDirectory ? (
+                      {file.is_directory ? (
                         <Folder className="w-4 h-4 text-zinc-500 group-hover:text-white" />
                       ) : (
                         <FileCode className="w-4 h-4 text-white" />
                       )}
                       <span
                         className={cn(
-                          file.isDirectory ? "text-zinc-400" : "text-white",
+                          file.is_directory ? "text-zinc-400" : "text-white",
                           "group-hover:text-white",
                         )}
                       >

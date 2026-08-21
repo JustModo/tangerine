@@ -1,24 +1,50 @@
 services:
-  web:
+  app:
     build: .
-    ports:
-      - "3000:3000"
-    environment:
-      PORT: 3000
-      AGENT_URL: http://agent:8000
-    depends_on:
-      - agent
-
-  agent:
-    build: ./agent
     ports:
       - "8000:8000"
     environment:
       DATABASE_PATH: /data/agent.db
-      NODE_SANDBOX_URL: http://web:3000
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      CITRON_URL: http://citron:2358
+      CITRON_AUTH_TOKEN: ${CITRON_AUTH_TOKEN:-}
     volumes:
       - agent-data:/data
+    depends_on:
+      - citron
+
+  # NOT buildable as-is: this repo only has Citron's documented config (citron/configs/),
+  # not its source. `context: ./citron` expects a Citron checkout (with its own Dockerfile)
+  # placed there — see API_DOCS.md for the upstream spec this service mirrors. The agent's
+  # CitronAdapter (agent/app/execution/infrastructure/citron_adapter.py) is built and unit
+  # tested against Citron's documented API but not yet wired into the live routers, which
+  # still use LocalSubprocessExecutor (a faithful port of the old Node runner, no real
+  # sandbox isolation) until this service actually builds.
+  citron:
+    build:
+      context: ./citron
+      dockerfile: Dockerfile
+    image: citron:latest
+    restart: unless-stopped
+    cap_add: [SYS_ADMIN]
+    security_opt:
+      - apparmor=unconfined
+      - systempaths=unconfined
+    cgroup: private
+    command: ["citron", "-config", "/opt/citron/configs/citron.conf", "-address", "0.0.0.0:2358"]
+    ports:
+      - "127.0.0.1:2358:2358"
+    tmpfs:
+      - /box:size=2g,mode=1777,exec
+    volumes:
+      - ./citron/configs/citron.conf:/opt/citron/configs/citron.conf:ro
+      - ./citron/configs/languages.toml:/opt/citron/configs/languages.toml:ro
+    healthcheck:
+      test: ["CMD", "citron", "-config", "/opt/citron/configs/citron.conf", "-languages"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
 
 volumes:
   agent-data:

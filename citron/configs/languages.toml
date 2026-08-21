@@ -1,0 +1,51 @@
+# UNVERIFIED — best-effort reconstruction only.
+#
+# API_DOCS.md documents citron.conf verbatim but does NOT document languages.toml's
+# actual schema — only that `/languages` returns {id, name, label} per language (matching
+# Judge0's numeric IDs: 50=C, 54=C++, 62=Java, 71=Python3, which is what's filled in
+# below). The compile/run command shape here is a reasonable guess, not something taken
+# from real Citron source. Verify this against Citron's actual expected format before
+# relying on it — if the schema differs, Citron will fail to start (citron.conf sets
+# languages.require_toolchains = true).
+#
+# "javascript" is included for parity with Tangerine's own Language enum
+# (app/shared/types.py) but does not appear in API_DOCS.md's example /languages output —
+# confirm Citron actually has a Node.js entry before assuming it works.
+
+[[languages]]
+id = 50
+name = "c"
+label = "C (GCC)"
+source_file = "main.c"
+compile_cmd = "gcc -O2 -o main main.c"
+run_cmd = "./main"
+
+[[languages]]
+id = 54
+name = "cpp"
+label = "C++ (G++)"
+source_file = "main.cpp"
+compile_cmd = "g++ -O2 -o main main.cpp"
+run_cmd = "./main"
+
+[[languages]]
+id = 62
+name = "java"
+label = "Java (OpenJDK)"
+source_file = "Main.java"
+compile_cmd = "javac Main.java"
+run_cmd = "java Main"
+
+[[languages]]
+id = 71
+name = "python"
+label = "Python 3"
+source_file = "main.py"
+run_cmd = "python3 main.py"
+
+[[languages]]
+id = 63
+name = "javascript"
+label = "JavaScript (Node.js)"
+source_file = "main.js"
+run_cmd = "node main.js"

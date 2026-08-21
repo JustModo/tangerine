@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from app.evaluation.application.services import EvaluationService
 from app.evaluation.domain.models import Evaluation
 from app.evaluation.infrastructure.sqlite_repository import SqliteEvaluationRepository
-from app.execution.infrastructure.existing_sandbox_adapter import ExistingSandboxAdapter
+from app.execution.infrastructure.local_subprocess_executor import LocalSubprocessExecutor
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.mastery.application.services import MasteryService
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
@@ -19,7 +19,7 @@ def get_service() -> EvaluationService:
     return EvaluationService(
         SqliteEvaluationRepository(),
         SqliteProblemRepository(),
-        ExistingSandboxAdapter(),
+        LocalSubprocessExecutor(),
         GeminiProvider(),
         MasteryService(SqliteUserSkillStateRepository()),
     )

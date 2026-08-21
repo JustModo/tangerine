@@ -69,7 +69,7 @@ export default function ProblemSessionScreen() {
   const [explorerFiles, setExplorerFiles] = useState<any[]>([]);
 
   async function load() {
-    const sessionRes = await fetch(`/api/learning/problem-sessions/${id}`);
+    const sessionRes = await fetch(`/api/problem-sessions/${id}`);
     if (!sessionRes.ok) {
       toast.error("Problem session not found");
       return;
@@ -78,7 +78,7 @@ export default function ProblemSessionScreen() {
     setSession(sessionData);
     setCodePath(sessionData.code_path || "");
 
-    const problemRes = await fetch(`/api/learning/problems/${sessionData.problem_id}`);
+    const problemRes = await fetch(`/api/problems/${sessionData.problem_id}`);
     if (problemRes.ok) setProblem(await problemRes.json());
   }
 
@@ -89,9 +89,9 @@ export default function ProblemSessionScreen() {
 
   const openPicker = async (path?: string) => {
     try {
-      const resp = await fetch(`/api/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`);
+      const resp = await fetch(`/api/workspace/list${path ? `?path=${encodeURIComponent(path)}` : ""}`);
       const data = await resp.json();
-      setExplorerPath(data.currentPath);
+      setExplorerPath(data.current_path);
       setExplorerFiles(data.files);
       setShowPicker(true);
     } catch {
@@ -102,7 +102,7 @@ export default function ProblemSessionScreen() {
   async function selectSourceFile(path: string) {
     setCodePath(path);
     setShowPicker(false);
-    await fetch(`/api/learning/problem-sessions/${id}/source`, {
+    await fetch(`/api/problem-sessions/${id}/source`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code_path: path }),
@@ -114,7 +114,7 @@ export default function ProblemSessionScreen() {
     setIsRunning(true);
     setResults({});
     try {
-      const response = await fetch(`/api/learning/problem-sessions/${id}/run`, {
+      const response = await fetch(`/api/problem-sessions/${id}/run`, {
         method: "POST",
       });
       const reader = response.body?.getReader();
@@ -146,7 +146,7 @@ export default function ProblemSessionScreen() {
     if (!codePath) return;
     setIsSubmitting(true);
     try {
-      const res = await fetch(`/api/learning/problem-sessions/${id}/submit`, { method: "POST" });
+      const res = await fetch(`/api/problem-sessions/${id}/submit`, { method: "POST" });
       if (!res.ok) {
         toast.error("Submission failed");
         return;
@@ -329,7 +329,7 @@ export default function ProblemSessionScreen() {
                 size="sm"
                 className="text-[9px] font-black uppercase"
                 onClick={async () => {
-                  const resp = await fetch("/api/fs/home");
+                  const resp = await fetch("/api/workspace/home");
                   const data = await resp.json();
                   openPicker(data.path);
                 }}
@@ -346,18 +346,18 @@ export default function ProblemSessionScreen() {
                       key={file.path}
                       type="button"
                       onClick={() =>
-                        file.isDirectory ? openPicker(file.path) : selectSourceFile(file.path)
+                        file.is_directory ? openPicker(file.path) : selectSourceFile(file.path)
                       }
                       className="w-full flex items-center gap-3 p-3 text-[11px] font-medium border border-transparent hover:border-white/10 hover:bg-white/5 transition-all text-left group"
                     >
-                      {file.isDirectory ? (
+                      {file.is_directory ? (
                         <Folder className="w-4 h-4 text-zinc-500 group-hover:text-white" />
                       ) : (
                         <FileCode className="w-4 h-4 text-white" />
                       )}
                       <span
                         className={cn(
-                          file.isDirectory ? "text-zinc-400" : "text-white",
+                          file.is_directory ? "text-zinc-400" : "text-white",
                           "group-hover:text-white",
                         )}
                       >

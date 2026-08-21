@@ -28,7 +28,7 @@ export default function SessionChat() {
   const [generatingPlan, setGeneratingPlan] = useState(false);
 
   async function loadSession() {
-    const res = await fetch(`/api/learning/sessions/${id}`);
+    const res = await fetch(`/api/sessions/${id}`);
     if (!res.ok) {
       toast.error("Session not found");
       return;
@@ -45,7 +45,7 @@ export default function SessionChat() {
     if (!draft.trim()) return;
     setSending(true);
     try {
-      await fetch(`/api/learning/sessions/${id}/messages`, {
+      await fetch(`/api/sessions/${id}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: draft }),
@@ -62,7 +62,7 @@ export default function SessionChat() {
   async function generatePlan(topic: string) {
     setGeneratingPlan(true);
     try {
-      const res = await fetch("/api/learning/plans", {
+      const res = await fetch("/api/learning-plans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: id, topic, language: "python", level: "beginner" }),

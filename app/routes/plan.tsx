@@ -26,7 +26,7 @@ export default function PlanScreen() {
   const navigate = useNavigate();
 
   async function load() {
-    const res = await fetch(`/api/learning/plans/${id}`);
+    const res = await fetch(`/api/learning-plans/${id}`);
     if (!res.ok) {
       toast.error("Plan not found");
       return;
@@ -42,7 +42,7 @@ export default function PlanScreen() {
   async function acceptPlan() {
     setBusy(true);
     try {
-      await fetch(`/api/learning/plans/${id}/accept`, { method: "POST" });
+      await fetch(`/api/learning-plans/${id}/accept`, { method: "POST" });
       await load();
     } catch {
       toast.error("Failed to accept plan");
@@ -54,7 +54,7 @@ export default function PlanScreen() {
   async function startNext() {
     setBusy(true);
     try {
-      const res = await fetch(`/api/learning/plans/${id}/problems/next`, { method: "POST" });
+      const res = await fetch(`/api/learning-plans/${id}/problems/next`, { method: "POST" });
       if (!res.ok) {
         toast.error("Failed to select a problem");
         return;

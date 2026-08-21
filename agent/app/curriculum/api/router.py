@@ -7,7 +7,7 @@ from app.curriculum.domain.models import LessonPlan
 from app.curriculum.domain.problem_session import ProblemSession
 from app.curriculum.infrastructure.sqlite_problem_session_repository import SqliteProblemSessionRepository
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
-from app.execution.infrastructure.existing_sandbox_adapter import ExistingSandboxAdapter
+from app.execution.infrastructure.local_subprocess_executor import LocalSubprocessExecutor
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
@@ -29,7 +29,7 @@ def _build_validation_service() -> ProblemValidationService:
     return ProblemValidationService(
         SqliteProblemRepository(),
         GeminiProvider(),
-        ExistingSandboxAdapter(),
+        LocalSubprocessExecutor(),
         llm_cache=SqliteLLMCache(),
     )
 

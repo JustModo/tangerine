@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from app.execution.infrastructure.existing_sandbox_adapter import ExistingSandboxAdapter
+from app.execution.infrastructure.local_subprocess_executor import LocalSubprocessExecutor
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.problems.application.services import ProblemSelectionService
@@ -21,7 +21,7 @@ def get_validation_service() -> ProblemValidationService:
     return ProblemValidationService(
         SqliteProblemRepository(),
         GeminiProvider(),
-        ExistingSandboxAdapter(),
+        LocalSubprocessExecutor(),
         llm_cache=SqliteLLMCache(),
     )
 

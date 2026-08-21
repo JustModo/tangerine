@@ -17,7 +17,7 @@ export default function Home() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    fetch("/api/learning/sessions")
+    fetch("/api/sessions")
       .then((res) => res.json())
       .then(setSessions)
       .catch(() => toast.error("Failed to load sessions"))
@@ -26,7 +26,7 @@ export default function Home() {
 
   async function startNewSession() {
     try {
-      const res = await fetch("/api/learning/sessions", { method: "POST" });
+      const res = await fetch("/api/sessions", { method: "POST" });
       const session = await res.json();
       navigate(`/sessions/${session.id}`);
     } catch {
