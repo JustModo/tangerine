@@ -207,6 +207,53 @@ async def test_generate_plan_tool_call_says_updating_when_a_plan_already_exists(
     assert "Updating" in fetched.messages[1].content
 
 
+async def test_tool_followup_never_leaks_a_raw_tool_call_to_the_user(db_path: str) -> None:
+    # The model sometimes answers a tool result by echoing another tool call as raw JSON.
+    # That must never reach the chat: no text_delta is emitted and the persisted reply is
+    # readable prose, not a JSON blob.
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    generated = GeneratedCurriculum(
+        title="Prefix Sums",
+        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
+    )
+    llm = FakeLLMProvider(
+        structured_responses=[generated],
+        chat_streams=[
+            [
+                ChatChunk(
+                    tool_call=ToolCallResult(
+                        name="generate_learning_plan",
+                        args={"topic": "prefix sums", "language": "python", "level": "beginner"},
+                    )
+                ),
+                ChatChunk(done=True),
+            ],
+            # The follow-up turn echoes a tool call as text instead of replying.
+            [
+                ChatChunk(text_delta='{\n  "name": "edit_learning_plan",'),
+                ChatChunk(text_delta='\n  "arguments": {"instruction": "..."}\n}'),
+                ChatChunk(done=True),
+            ],
+        ],
+    )
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path), llm, skill_repository=SqliteSkillRepository(db_path)
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, curriculum)
+    session = await service.create_session(user.id)
+
+    events = [event async for event in service.add_message(session.id, "teach me prefix sums")]
+
+    assert not [e for e in events if e["type"] == "text_delta"]
+    done = next(e for e in events if e["type"] == "done")
+    assert not done["content"].lstrip().startswith("{")
+    assert "edit_learning_plan" not in done["content"]
+
+    fetched = await service.get_session(session.id)
+    assert fetched is not None
+    assert not fetched.messages[-1].content.lstrip().startswith("{")
+
+
 async def test_edit_plan_preserves_completed_steps_and_adds_new_ones(db_path: str) -> None:
     user = await SqliteUserRepository(db_path).ensure_default_user()
     sessions = SessionService(SqliteSessionRepository(db_path))

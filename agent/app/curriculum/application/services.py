@@ -40,8 +40,17 @@ class CurriculumService:
         self._llm_cache = llm_cache
 
     async def create_draft(
-        self, session_id: str, topic: str, language: Language, level: str
+        self,
+        session_id: str,
+        topic: str,
+        language: Language,
+        level: str,
+        step_count: int | None = None,
+        target_problem: str | None = None,
     ) -> LessonPlan:
+        """step_count honours an explicit "just 2 lessons" request; target_problem is a
+        question the learner pasted in, in which case the generated steps are prerequisites
+        and one extra final step is appended that serves that exact problem."""
         plan = LessonPlan(
             id=str(uuid.uuid4()),
             session_id=session_id,
@@ -53,11 +62,28 @@ class CurriculumService:
         )
         await self._repository.save(plan)
 
-        generated = await generate_curriculum(
-            self._llm_provider, topic, language.value, level, cache=self._llm_cache
+        # A pasted problem occupies the final step, so the LLM only has to produce the
+        # prerequisites — one fewer than the learner asked for in total. "Just this one
+        # problem" therefore means ZERO prerequisites, and we skip curriculum generation
+        # altogether rather than padding the plan with a step they explicitly didn't want.
+        prerequisite_count = (
+            step_count - 1 if step_count is not None and target_problem else step_count
         )
+        generated_nodes = []
+        if prerequisite_count is None or prerequisite_count > 0:
+            generated = await generate_curriculum(
+                self._llm_provider,
+                topic,
+                language.value,
+                level,
+                cache=self._llm_cache,
+                step_count=prerequisite_count,
+                target_problem=target_problem,
+            )
+            generated_nodes = generated.nodes
+
         nodes = []
-        for index, generated_node in enumerate(generated.nodes):
+        for index, generated_node in enumerate(generated_nodes):
             skill_id = await self._skill_repository.ensure_skill(generated_node.skill)
             nodes.append(
                 LessonNode(
@@ -70,6 +96,23 @@ class CurriculumService:
                     created_at=datetime.now(timezone.utc),
                 )
             )
+
+        if target_problem:
+            # The course ends on the learner's own question. Carrying the statement on the
+            # node means it's adapted lazily, when they actually reach it.
+            nodes.append(
+                LessonNode(
+                    id=str(uuid.uuid4()),
+                    lesson_plan_id=plan.id,
+                    skill_id=await self._skill_repository.ensure_skill(topic),
+                    sequence_index=len(nodes),
+                    status=LessonNodeStatus.AVAILABLE if not nodes else LessonNodeStatus.LOCKED,
+                    difficulty="hard",
+                    source_problem_md=target_problem,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+
         if nodes:
             await self._repository.save_nodes(nodes)
 

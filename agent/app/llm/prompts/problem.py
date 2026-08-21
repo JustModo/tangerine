@@ -103,9 +103,36 @@ PROBLEM_SYSTEM_PROMPT = (
     "Also produce: a short constraints section (input value ranges, expected time/space "
     "complexity); 1-3 progressive hints ordered from a gentle nudge to a stronger hint, "
     "never revealing the full solution; and 2-4 short topical tags (e.g. 'two-pointers', "
-    "'hash-map')."
+    "'hash-map').\n\n"
+
+    "hidden_tests: 3-5 ADDITIONAL stdin inputs used only for grading, never shown to the "
+    "learner. Same stdin format as the examples, but different values, chosen to catch the "
+    "mistakes the examples don't — empty or single-element input, all-equal values, the "
+    "minimum and maximum of the stated constraints, negative numbers, no-answer-exists. "
+    "Give inputs only; expected outputs come from running the reference solution."
 )
 
 
 def problem_user_prompt(skill: str, language: str, difficulty: str) -> str:
     return f"Skill: {skill}\nLanguage: {language}\nDifficulty: {difficulty}"
+
+
+def adapt_problem_user_prompt(source_problem: str, language: str) -> str:
+    """For a problem the learner pasted in (e.g. from LeetCode): keep THEIR question, and
+    build the harness/examples/solution around it rather than inventing a new problem."""
+    return (
+        f"Language: {language}\n\n"
+        "Do NOT invent a new problem. Adapt the exact problem below into the required "
+        "format, keeping its meaning, constraints and examples faithful to the original.\n"
+        "- statement_md: the same problem, lightly cleaned up as markdown. Keep any LaTeX.\n"
+        "- title: a concise 5-6 word name for it.\n"
+        "- difficulty: your honest rating of the original ('easy', 'medium' or 'hard').\n"
+        "- examples: use the original's worked examples where it gives them; add one only "
+        "if it gives none. Every example's input must match the stdin format your pre_code "
+        "and post_code parse.\n"
+        "- hidden_tests: still required. The original's examples are rarely enough to grade "
+        "on, so add 3-5 extra edge-case inputs of your own in the same stdin format.\n"
+        "- Everything else (pre_code, user_code, post_code, reference_user_code, "
+        "constraints, hints, tags, skills) follows the same rules as always.\n\n"
+        f"The learner's problem:\n{source_problem}"
+    )

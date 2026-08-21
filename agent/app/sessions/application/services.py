@@ -6,7 +6,12 @@ from typing import AsyncIterator
 from app.curriculum.application.services import CurriculumService
 from app.llm.domain.provider import LLMProvider
 from app.llm.domain.requests import ChatStreamRequest, ChatTurn
-from app.llm.prompts.chat import EDIT_PLAN_TOOL, GENERATE_PLAN_TOOL, chat_system_prompt
+from app.llm.prompts.chat import (
+    EDIT_PLAN_TOOL,
+    GENERATE_PLAN_TOOL,
+    SUPPORTED_LANGUAGES,
+    chat_system_prompt,
+)
 from app.sessions.domain.models import ChatMessage, ChatRole, LearningSession, SessionStatus
 from app.sessions.domain.repository import SessionRepository
 from app.shared.types import Language
@@ -137,6 +142,39 @@ class SessionService:
         user_message: str,
         existing_plan: bool,
     ) -> AsyncIterator[dict]:
+        # Enforced here, not just in the prompt: a plan in a language the learner never
+        # chose — or one the sandbox cannot run — is worse than no plan, and
+        # asking-while-also-building reads as a contradiction. Nothing is persisted and no
+        # "Generating..." note is shown.
+        requested_language = (args.get("language") or "").strip().lower()
+        try:
+            language = Language(requested_language)
+        except ValueError:
+            supported = ", ".join(SUPPORTED_LANGUAGES)
+            if requested_language:
+                summary = (
+                    f"NOT RUN — '{requested_language}' is not a supported language. No plan "
+                    f"was created. Tell the user it isn't supported yet, that the supported "
+                    f"languages are {supported}, and ask them to pick one."
+                )
+                fallback = (
+                    f"'{requested_language}' isn't supported yet — I can do {supported}. "
+                    "Which would you like?"
+                )
+            else:
+                summary = (
+                    "NOT RUN — the user has not said which programming language they want. "
+                    f"No plan was created. Ask them which of {supported} they want, in one "
+                    "short question, and do not imply anything was built."
+                )
+                fallback = f"Which language would you like to practise in? I support {supported}."
+            async for event in self._stream_tool_followup(
+                session_id, history, user_message, existing_plan,
+                "generate_learning_plan", summary, fallback, None,
+            ):
+                yield event
+            return
+
         label = "Updating your learning plan..." if existing_plan else "Generating a learning plan..."
         system_note = ChatMessage(
             id=str(uuid.uuid4()),
@@ -150,15 +188,20 @@ class SessionService:
 
         topic = args.get("topic") or "this topic"
         level = args.get("level") or "beginner"
-        try:
-            language = Language(args.get("language", Language.PYTHON.value))
-        except ValueError:
-            language = Language.PYTHON
+        step_count = args.get("step_count")
+        target_problem = args.get("target_problem") or None
 
         plan = None
         if self._curriculum_service is not None:
             try:
-                plan = await self._curriculum_service.create_draft(session_id, topic, language, level)
+                plan = await self._curriculum_service.create_draft(
+                    session_id,
+                    topic,
+                    language,
+                    level,
+                    step_count=int(step_count) if step_count else None,
+                    target_problem=target_problem,
+                )
             except Exception:
                 logger.warning("Plan generation failed for session %s", session_id, exc_info=True)
 
@@ -247,18 +290,35 @@ class SessionService:
         follow_up_request = ChatStreamRequest(
             system_prompt=chat_system_prompt(existing_plan),
             history=history + [ChatTurn(role="user", content=user_message)],
-            message=f"[{tool_name} tool result] {result_summary}",
+            message=(
+                f"[{tool_name} tool result] {result_summary}\n\n"
+                "The tool has ALREADY run and this is its result. Reply to the user in one "
+                "or two plain sentences telling them what changed. Do not call any tool, "
+                "and never output JSON, a function call, or code — only prose."
+            ),
             tools=[],
         )
+        # The model sometimes answers a tool result by echoing another tool call as raw
+        # JSON. Nothing is streamed until the text is known not to be one, so a blob can
+        # never reach the UI — we fall back to plain prose instead.
         text_parts: list[str] = []
+        streamed = 0
+        looks_like_tool_call = False
         async for chunk in self._llm_provider.stream_chat(follow_up_request):
             if chunk.text_delta:
                 text_parts.append(chunk.text_delta)
-                yield {"type": "text_delta", "delta": chunk.text_delta}
+                full = "".join(text_parts)
+                if full.lstrip().startswith(("{", "```", "[{")):
+                    looks_like_tool_call = True
+                if not looks_like_tool_call and len(full) > streamed:
+                    yield {"type": "text_delta", "delta": full[streamed:]}
+                    streamed = len(full)
             if chunk.done:
                 break
 
-        reply_text = "".join(text_parts).strip() or fallback_text
+        reply_text = "" if looks_like_tool_call else "".join(text_parts).strip()
+        if not reply_text:
+            reply_text = fallback_text
         reply = await self._persist_assistant_reply(session_id, reply_text)
         yield {
             "type": "done",

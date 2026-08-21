@@ -24,6 +24,12 @@ class GeneratedProblem(BaseModel):
     post_code: str
     reference_user_code: str
     examples: list[GeneratedExample]
+    hidden_tests: list[str] = Field(
+        default=[],
+        description="3-5 EXTRA stdin inputs for grading only, in the exact same format as "
+        "the examples' inputs. Must be different from the examples and should probe edge "
+        "cases. No expected outputs — those come from running the reference solution.",
+    )
     constraints: str | None = None
     hints: list[str] = []
     tags: list[str] = []

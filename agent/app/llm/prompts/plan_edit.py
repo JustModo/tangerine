@@ -7,6 +7,10 @@ PLAN_EDIT_SYSTEM_PROMPT = (
     "one of: easy, medium, hard.\n\n"
 
     "Rules:\n"
+    "- Follow the instruction literally. Use the exact topic and count the learner asked "
+    "for — 'add one lesson on arrays' adds exactly one step about arrays, even if a "
+    "different topic looks more relevant to the problem. Never swap their subject for one "
+    "you consider better.\n"
     "- Change as little as possible. Every step the instruction does not concern must come "
     "back with BOTH its skill string AND its difficulty COPIED CHARACTER-FOR-CHARACTER from "
     "the current plan. The exact skill match is what preserves the learner's completed "

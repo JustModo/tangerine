@@ -16,6 +16,8 @@ class CurriculumGraphState(TypedDict):
     topic: str
     language: str
     level: str
+    step_count: int | None
+    target_problem: str | None
     result: GeneratedCurriculum | None
     error: str | None
     attempts: int
@@ -25,7 +27,13 @@ def build_curriculum_graph(provider: LLMProvider):
     async def generate(state: CurriculumGraphState) -> CurriculumGraphState:
         request = StructuredGenerationRequest(
             system_prompt=CURRICULUM_SYSTEM_PROMPT,
-            user_prompt=curriculum_user_prompt(state["topic"], state["language"], state["level"]),
+            user_prompt=curriculum_user_prompt(
+                state["topic"],
+                state["language"],
+                state["level"],
+                state["step_count"],
+                state["target_problem"],
+            ),
         )
         try:
             result = await provider.generate_structured(request, GeneratedCurriculum)
@@ -51,10 +59,18 @@ async def generate_curriculum(
     language: str,
     level: str,
     cache: SqliteLLMCache | None = None,
+    step_count: int | None = None,
+    target_problem: str | None = None,
 ) -> GeneratedCurriculum:
     # Same (topic, language, level) always warrants the same curriculum — a safe, valuable
     # cache candidate, unlike per-submission coaching feedback (plan.md §38).
-    key = cache_key("curriculum", topic, language, level) if cache is not None else None
+    # A pasted target problem makes the curriculum one-of-a-kind, so it is never cached;
+    # an explicit step count is part of the identity of the result, so it joins the key.
+    key = (
+        cache_key("curriculum", topic, language, level, str(step_count))
+        if cache is not None and not target_problem
+        else None
+    )
     if cache is not None and key is not None:
         cached = await cache.get(key)
         if cached is not None:
@@ -66,6 +82,8 @@ async def generate_curriculum(
             "topic": topic,
             "language": language,
             "level": level,
+            "step_count": step_count,
+            "target_problem": target_problem,
             "result": None,
             "error": None,
             "attempts": 0,

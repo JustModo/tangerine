@@ -53,6 +53,22 @@ class ProblemSessionService:
 
         skill_name = node.skill_name or await self._skill_repository.get_name(node.skill_id) or node.skill_id
 
+        # A node carrying a pasted problem must serve THAT question — never a bank hit for
+        # a merely similar skill — so selection is skipped entirely for it.
+        if node.source_problem_md:
+            problem = await self._problem_validation.generate_and_validate(
+                skill_name,
+                plan.language,
+                node.difficulty or "medium",
+                source_problem=node.source_problem_md,
+            )
+            if problem is None:
+                raise NotFoundError(
+                    "Could not prepare the problem you pasted — it may be missing examples "
+                    "or an input format that can be run automatically."
+                )
+            return await self._start_session(plan, node, problem, user_id)
+
         criteria = ProblemCriteria(skill_id=node.skill_id, language=plan.language)
         problem = await self._problem_selection.find_suitable(criteria)
         if problem is None:
@@ -69,6 +85,9 @@ class ProblemSessionService:
         if problem is None:
             raise NotFoundError(f"Could not generate a valid problem for skill {skill_name}")
 
+        return await self._start_session(plan, node, problem, user_id)
+
+    async def _start_session(self, plan, node, problem, user_id: str) -> ProblemSession:
         now = datetime.now(timezone.utc)
         session = ProblemSession(
             id=str(uuid.uuid4()),
@@ -85,7 +104,9 @@ class ProblemSessionService:
 
         if self._prefetch_service is not None:
             next_node = next((n for n in plan.nodes if n.sequence_index == node.sequence_index + 1), None)
-            if next_node is not None:
+            # A pasted-problem node is adapted from its own statement, so there's nothing
+            # generic to prefetch for it.
+            if next_node is not None and not next_node.source_problem_md:
                 next_skill_name = (
                     next_node.skill_name
                     or await self._skill_repository.get_name(next_node.skill_id)

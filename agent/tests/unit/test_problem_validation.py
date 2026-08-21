@@ -41,6 +41,7 @@ def _generated_problem() -> GeneratedProblem:
         post_code="print(solve(nums))",
         reference_user_code="def solve(nums): return sum(nums)",
         examples=[GeneratedExample(input="1 2 3", output="6")],
+        hidden_tests=["", "5", "-1 -2"],
         constraints="1 <= len(nums) <= 10^5",
         hints=["Consider a running total."],
         tags=["prefix-sum", "arrays"],
@@ -50,8 +51,14 @@ def _generated_problem() -> GeneratedProblem:
 async def test_generate_and_validate_marks_available_on_success(db_path: str) -> None:
     repo = SqliteProblemRepository(db_path)
     llm = FakeLLMProvider(structured_responses=[_generated_problem()])
+    # One result per graded input: the single example plus the three hidden test inputs.
     executor = FakeCodeExecutor(
-        [TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6\n")]
+        [
+            TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6\n"),
+            TestResult(id="1", status=ExecutionStatus.PASSED, input="", actual_output="0\n"),
+            TestResult(id="2", status=ExecutionStatus.PASSED, input="5", actual_output="5\n"),
+            TestResult(id="3", status=ExecutionStatus.PASSED, input="-1 -2", actual_output="-3\n"),
+        ]
     )
     service = ProblemValidationService(repo, llm, executor, SqliteSkillRepository(db_path))
 
@@ -62,9 +69,14 @@ async def test_generate_and_validate_marks_available_on_success(db_path: str) ->
 
     version = await repo.get_latest_version(problem.id)
     assert version is not None
-    assert len(version.tests) == 1
+    # Graded on the example AND the hidden inputs — otherwise every "hidden" test would be
+    # an input the learner can already read in the statement.
+    assert len(version.tests) == 4
+    assert len(version.examples) == 1
+    assert [t.input for t in version.tests] == ["1 2 3", "", "5", "-1 -2"]
     # ground truth hash comes from the executor's actual_output, not the LLM's claimed output
     assert version.tests[0].output_hash == hash_output("6\n")
+    assert version.tests[3].output_hash == hash_output("-3\n")
     assert version.constraints == "1 <= len(nums) <= 10^5"
     assert version.hints == ["Consider a running total."]
     assert problem.tags == ["prefix-sum", "arrays"]

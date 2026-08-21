@@ -36,10 +36,22 @@ class ProblemValidationService:
         self._llm_cache = llm_cache
 
     async def generate_and_validate(
-        self, skill: str, language: Language, difficulty: str
+        self,
+        skill: str,
+        language: Language,
+        difficulty: str,
+        source_problem: str | None = None,
     ) -> Problem | None:
+        """When source_problem is given, the learner pasted that question in and the LLM
+        adapts it rather than inventing one — the sandbox validation below is identical
+        either way, so a pasted problem still has to actually run before anyone sees it."""
         generated = await generate_problem(
-            self._llm_provider, skill, language.value, difficulty, cache=self._llm_cache
+            self._llm_provider,
+            skill,
+            language.value,
+            difficulty,
+            cache=self._llm_cache,
+            source_problem=source_problem,
         )
 
         skill_ids = [
@@ -64,14 +76,18 @@ class ProblemValidationService:
         reference_program = assemble_program(
             generated.pre_code, generated.reference_user_code, generated.post_code
         )
+        # Grade against the examples AND the extra hidden inputs. Without the extras, every
+        # "hidden" test would be an input the learner can already see in the statement, so
+        # hardcoding the example answers would pass a submission.
+        graded_inputs = [example.input for example in generated.examples] + list(generated.hidden_tests)
         request = ExecutionRequest(
             language=language,
             code=reference_program,
             # output_hash is irrelevant here — we only read back actual_output below,
             # never the PASS/FAIL verdict, since there's nothing trustworthy to compare against yet.
             test_cases=[
-                ExecutionTestCase(id=str(index), input=example.input, output_hash="")
-                for index, example in enumerate(generated.examples)
+                ExecutionTestCase(id=str(index), input=value, output_hash="")
+                for index, value in enumerate(graded_inputs)
             ],
         )
         results = [result async for result in self._executor.execute(request)]
@@ -80,7 +96,7 @@ class ProblemValidationService:
         # that errors — no legitimate DSA answer is an empty string, and an empty-output
         # test silently hashes to hash_output(""), which would let ANY equally-empty
         # submission pass. Catch it here rather than let it reach a real user.
-        broken = len(results) != len(generated.examples) or any(
+        broken = len(results) != len(graded_inputs) or any(
             r.status in (ExecutionStatus.ERROR, ExecutionStatus.TIMEOUT) or not (r.actual_output or "").strip()
             for r in results
         )
@@ -102,14 +118,16 @@ class ProblemValidationService:
                 ProblemExample(id=str(uuid.uuid4()), input=ex.input, output=ex.output, explanation=ex.explanation)
                 for ex in generated.examples
             ],
+            # Expected outputs always come from actually running the reference solution,
+            # never from the LLM's claimed output (plan.md §23) — and only ever as a hash.
             tests=[
                 ProblemTest(
                     id=str(uuid.uuid4()),
-                    input=example.input,
+                    input=value,
                     output_hash=hash_output(result.actual_output or ""),
                     is_hidden=True,
                 )
-                for example, result in zip(generated.examples, results)
+                for value, result in zip(graded_inputs, results)
             ],
             created_at=datetime.now(timezone.utc),
         )

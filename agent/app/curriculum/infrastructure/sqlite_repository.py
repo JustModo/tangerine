@@ -6,11 +6,12 @@ from app.shared.config import get_settings
 
 _UPSERT_NODE_SQL = (
     "INSERT INTO lesson_nodes "
-    "(id, lesson_plan_id, skill_id, sequence_index, status, difficulty, created_at) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?) "
+    "(id, lesson_plan_id, skill_id, sequence_index, status, difficulty, source_problem_md, created_at) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
     "ON CONFLICT(id) DO UPDATE SET "
     "skill_id=excluded.skill_id, sequence_index=excluded.sequence_index, "
-    "status=excluded.status, difficulty=excluded.difficulty"
+    "status=excluded.status, difficulty=excluded.difficulty, "
+    "source_problem_md=excluded.source_problem_md"
 )
 
 
@@ -22,6 +23,7 @@ def _node_params(node: LessonNode) -> tuple:
         node.sequence_index,
         node.status.value,
         node.difficulty,
+        node.source_problem_md,
         node.created_at.isoformat(),
     )
 
@@ -104,6 +106,7 @@ class SqliteLessonPlanRepository:
                 sequence_index=row["sequence_index"],
                 status=row["status"],
                 difficulty=row["difficulty"],
+                source_problem_md=row["source_problem_md"],
                 created_at=row["created_at"],
             )
 
@@ -166,6 +169,7 @@ class SqliteLessonPlanRepository:
                     sequence_index=n["sequence_index"],
                     status=n["status"],
                     difficulty=n["difficulty"],
+                    source_problem_md=n["source_problem_md"],
                     created_at=n["created_at"],
                 )
                 for n in node_rows

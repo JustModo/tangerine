@@ -37,6 +37,7 @@ export default function SessionChat() {
   const [streamingText, setStreamingText] = useState("");
   const [toolLabel, setToolLabel] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const { showError, setBusyMessage } = useStatus();
 
   async function loadSession() {
@@ -64,6 +65,16 @@ export default function SessionChat() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [session?.messages.length, streamingText, toolLabel]);
+
+  // Autosize the composer: 1 line at rest, growing to at most 3 before it scrolls.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 24;
+    const padding = el.offsetHeight - el.clientHeight + 16; // borders + py-2 top/bottom
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, lineHeight * 3 + padding)}px`;
+  }, [draft]);
 
   async function sendMessage() {
     if (!draft.trim()) return;
@@ -220,12 +231,15 @@ export default function SessionChat() {
             <div ref={bottomRef} />
           </div>
         </ScrollArea>
-        <div className="flex-none px-10 py-6 border-t border-white/10 flex items-center gap-4">
+        <div className="flex-none px-10 py-6 border-t border-white/10 flex items-end gap-4">
           <Textarea
+            ref={inputRef}
+            rows={1}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Message..."
-            className="flex-1 resize-none min-h-0 h-10 py-2"
+            // Grows from 1 line up to 3, then scrolls — see the autosize effect above.
+            className="flex-1 resize-none min-h-0 py-2 overflow-y-auto leading-6"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();

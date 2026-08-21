@@ -23,6 +23,9 @@ class LessonNode(BaseModel):
     # "easy" | "medium" | "hard". None falls back to suggest_difficulty()'s mastery/position
     # guess at problem-selection time.
     difficulty: str | None = None
+    # Set only on the final node of a plan built around a problem the learner pasted in —
+    # that node serves this exact question instead of a generated one.
+    source_problem_md: str | None = None
     created_at: datetime
 
 
