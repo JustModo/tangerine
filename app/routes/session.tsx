@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { ListTree, Loader2, Trash2 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
+import { Markdown } from "@/components/Markdown";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/PageHeader";
@@ -194,9 +193,9 @@ export default function SessionChat() {
                 {message.role === "system" ? (
                   <p className="text-xs italic text-zinc-500 px-1">{message.content}</p>
                 ) : (
-                  <div className="border border-white/10 rounded-md px-4 py-3 text-sm prose prose-invert prose-sm max-w-none prose-p:my-0">
+                  <div className="border border-white/10 rounded-md px-4 py-3 text-sm">
                     {message.role === "assistant" ? (
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                      <Markdown className="prose-p:my-0">{message.content}</Markdown>
                     ) : (
                       message.content
                     )}
@@ -213,8 +212,8 @@ export default function SessionChat() {
             {streamingText && (
               <div className="self-start max-w-lg">
                 <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">assistant</p>
-                <div className="border border-white/10 rounded-md px-4 py-3 text-sm prose prose-invert prose-sm max-w-none prose-p:my-0">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingText}</ReactMarkdown>
+                <div className="border border-white/10 rounded-md px-4 py-3 text-sm">
+                  <Markdown className="prose-p:my-0">{streamingText}</Markdown>
                 </div>
               </div>
             )}

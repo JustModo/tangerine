@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Markdown } from "@/components/Markdown";
 import { apiJson } from "~/lib/api";
 import type { LessonNotes } from "~/lib/types";
 
@@ -52,9 +51,7 @@ export function LessonNotesPanel({ lessonNodeId }: { lessonNodeId: string }) {
           <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
             {step.title}
           </h4>
-          <div className="prose dark:prose-invert prose-sm max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{step.body_md}</ReactMarkdown>
-          </div>
+          <Markdown>{step.body_md}</Markdown>
         </div>
       ))}
       {revealed < notes.steps.length && (

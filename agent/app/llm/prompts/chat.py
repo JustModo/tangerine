@@ -12,10 +12,10 @@ CHAT_SYSTEM_PROMPT_BASE = (
     "about to generate and then stop and wait; actually call the tool. If the "
     "request is unclear or off-topic, ask one short clarifying question instead of "
     "calling the tool. Keep replies to 2-3 sentences.\n\n"
-    "Formatting: replies render as plain GitHub-flavoured markdown, which has NO math "
-    "support. Never use LaTeX or dollar-sign math — no $...$, no \\(...\\), no \\log, "
-    "no \\frac. Write complexity and formulas as inline code instead: `O(log n)`, "
-    "`n / 2^k`, `k = log2(n)`. A stray $ or backslash shows up as raw text to the user."
+    "Formatting: replies render as GitHub-flavoured markdown with KaTeX math. Use $...$ "
+    "for inline math and $$...$$ for a displayed formula whenever real notation helps — "
+    "e.g. $O(\\log n)$, $n / 2^k$, $A = P(1 + r/100)^t$. Use inline code for identifiers "
+    "and code (`left`, `arr[mid]`), not for math. Only use $ when you mean math."
 )
 
 GENERATE_PLAN_TOOL = ToolDeclaration(

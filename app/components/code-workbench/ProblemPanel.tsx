@@ -1,7 +1,6 @@
 import { useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { Lightbulb } from "lucide-react";
+import { Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -100,9 +99,7 @@ export function ProblemPanel({
         )}
 
         <div className={tab === "notes" ? "hidden" : "space-y-6"}>
-        <div className="prose dark:prose-invert prose-sm max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{problem.statement_md}</ReactMarkdown>
-        </div>
+        <Markdown>{problem.statement_md}</Markdown>
 
         {problem.constraints && (
           <div className="space-y-2">
@@ -135,7 +132,9 @@ export function ProblemPanel({
                     <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">
                       Explanation
                     </span>
-                    <p className="mt-1 text-zinc-400 whitespace-pre-wrap">{example.explanation}</p>
+                    {/* Markdown (not plain text) so LaTeX renders here too; remark-breaks
+                        keeps the generated one-idea-per-line formatting intact. */}
+                    <Markdown className="mt-1 text-zinc-400">{example.explanation}</Markdown>
                   </div>
                 )}
               </div>

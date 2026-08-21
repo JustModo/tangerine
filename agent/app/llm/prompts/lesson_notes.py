@@ -32,10 +32,9 @@ LESSON_NOTES_SYSTEM_PROMPT = (
     "words and a simpler template; an advanced learner gets the tighter idiom and sharper "
     "tips. No preamble, no sign-off, no horizontal rules, no 'In conclusion'.\n\n"
 
-    "Formatting: this renders as plain GitHub-flavoured markdown with NO math support. "
-    "Never use LaTeX or dollar-sign math — no $...$, no \\(...\\), no \\log, no \\frac. "
-    "Write complexity as inline code instead: `O(n log n)`, `O(1)`. A stray $ or backslash "
-    "shows up as raw text to the learner."
+    "Formatting: this renders as GitHub-flavoured markdown with KaTeX math. Use $...$ for "
+    "inline math where real notation helps — e.g. $O(n \\log n)$, $O(1)$ — and keep inline "
+    "code for identifiers and code (`left`, `counts[c]`). Only use $ when you mean math."
 )
 
 
