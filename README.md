@@ -31,20 +31,23 @@ cd agent && uv sync
 ```
 
 ### Development
-Two processes: the agent (API) and the frontend's own dev server.
 ```bash
-cd agent && uv run python -m uvicorn app.main:app --reload --port 8000
-pnpm dev   # Vite dev server, proxies /api to the agent (see vite.config.ts)
+pnpm dev
 ```
+`scripts/run.js dev` (Windows/macOS/Linux, Node only — no bash) — starts the agent in
+`--reload` mode and the Vite dev server together; the dev server proxies `/api/*` to the
+agent (see `vite.config.ts`). `PORT` overrides the agent's port (default `8000`).
 
-### Production Build
-A single Docker image builds the frontend and bundles it into the Python agent, which
-serves both the static SPA and the API from one process:
+### Production
+```bash
+pnpm start
+```
+`scripts/run.js prod` — builds the SPA, stages it into `agent/static/`, and runs the
+agent alone serving both the static frontend and the API from one process. Or via
+Docker, which does the same thing in a single image:
 ```bash
 docker compose up --build
 ```
-Or manually: `pnpm build` produces `build/client/`, which the agent serves from
-`agent/static/` — copy the build output there before running `uvicorn` standalone.
 
 ## Architecture
 - **Frontend**: React Router v7 in SPA mode (`ssr: false`) + Tailwind CSS — a plain

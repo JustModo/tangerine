@@ -14,9 +14,10 @@ _TIMEOUT_SECONDS = 5.0
 class LocalSubprocessExecutor:
     """CodeExecutor that runs code directly via subprocess — a faithful port of the
     original web/server/services/runner_service.ts (same compile step, 5s per-testcase
-    timeout, same C/C++/Java/Python/JS command shapes), for once Node/Express is removed
-    from this repo. Swap for CitronAdapter once Citron's real image is buildable — this
-    has no real sandbox isolation, only a timeout, same as the code it replaces."""
+    timeout, same C/C++/Java/Python/JS command shapes). No real sandbox isolation, only
+    a timeout, same as the code it replaces. Used only as CompositeExecutor's JavaScript
+    fallback now that CitronAdapter handles c/cpp/java/python with real nsjail
+    isolation — Citron's languages.toml has no JS runtime registered."""
 
     async def execute(self, request: ExecutionRequest):
         language = request.language.value
@@ -73,7 +74,7 @@ class LocalSubprocessExecutor:
     ) -> tuple[list[str], str | None]:
         if language in ("c", "cpp"):
             compiler = "gcc" if language == "c" else "g++"
-            compiled_path = temp_dir / "out"
+            compiled_path = temp_dir / ("out.exe" if sys.platform == "win32" else "out")
             proc = await asyncio.create_subprocess_exec(
                 compiler,
                 str(code_path),

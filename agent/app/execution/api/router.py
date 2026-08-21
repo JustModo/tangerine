@@ -6,13 +6,13 @@ from pydantic import BaseModel
 
 from app.execution.application.services import ExecutionService
 from app.execution.domain.models import ExecutionRequest
-from app.execution.infrastructure.local_subprocess_executor import LocalSubprocessExecutor
+from app.execution.infrastructure.composite_executor import CompositeExecutor
 
 router = APIRouter(prefix="/execution", tags=["execution"])
 
 
 def get_service() -> ExecutionService:
-    return ExecutionService(LocalSubprocessExecutor())
+    return ExecutionService(CompositeExecutor())
 
 
 @router.post("/run")

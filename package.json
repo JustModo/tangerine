@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "build": "react-router build",
-    "dev": "react-router dev",
+    "dev": "node scripts/run.js dev",
+    "dev:web": "react-router dev",
+    "start": "node scripts/run.js prod",
     "typecheck": "react-router typegen && tsc"
   },
   "dependencies": {

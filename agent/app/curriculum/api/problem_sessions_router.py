@@ -12,7 +12,7 @@ from app.evaluation.infrastructure.sqlite_repository import SqliteEvaluationRepo
 from app.execution.application.services import ExecutionService
 from app.execution.domain.models import ExecutionRequest
 from app.execution.domain.models import TestCase as ExecutionTestCase
-from app.execution.infrastructure.local_subprocess_executor import LocalSubprocessExecutor
+from app.execution.infrastructure.composite_executor import CompositeExecutor
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.mastery.application.services import MasteryService
@@ -32,7 +32,7 @@ def _build_validation_service() -> ProblemValidationService:
     return ProblemValidationService(
         SqliteProblemRepository(),
         GeminiProvider(),
-        LocalSubprocessExecutor(),
+        CompositeExecutor(),
         llm_cache=SqliteLLMCache(),
     )
 
@@ -87,7 +87,7 @@ async def run(session_id: str, service: ProblemSessionService = Depends(get_serv
     if problem is None or version is None:
         raise HTTPException(status_code=404, detail="Problem not found")
 
-    execution_service = ExecutionService(LocalSubprocessExecutor())
+    execution_service = ExecutionService(CompositeExecutor())
     request = ExecutionRequest(
         language=problem.language,
         code_path=session.code_path,
@@ -123,7 +123,7 @@ async def submit(
     eval_service = EvaluationService(
         SqliteEvaluationRepository(),
         problem_repo,
-        LocalSubprocessExecutor(),
+        CompositeExecutor(),
         GeminiProvider(),
         MasteryService(SqliteUserSkillStateRepository()),
     )

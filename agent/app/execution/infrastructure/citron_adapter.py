@@ -30,11 +30,10 @@ class CitronAdapter:
     correctness, matching the invariant the original Node runner already established —
     Citron is used purely as an isolated execution engine here, not as the judge.
 
-    NOT yet wired into the live routers (execution/api/router.py still uses
-    LocalSubprocessExecutor) — Citron's actual source/image isn't available in this repo,
-    so this class is built and unit-tested against the documented API shape only; no live
-    submission against a real Citron instance has been run. Swap it in once `docker
-    compose up citron` actually builds."""
+    Live-verified against the real `justmodo/citron:latest` image (PASSED/FAILED via our
+    own hash, real compile-error surfacing) — see CompositeExecutor for how it's wired
+    into the live routers (Citron for c/cpp/java/python; LocalSubprocessExecutor is the
+    JS fallback since Citron's languages.toml has no JS runtime registered)."""
 
     def __init__(
         self,

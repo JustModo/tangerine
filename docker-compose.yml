@@ -13,18 +13,8 @@ services:
     depends_on:
       - citron
 
-  # NOT buildable as-is: this repo only has Citron's documented config (citron/configs/),
-  # not its source. `context: ./citron` expects a Citron checkout (with its own Dockerfile)
-  # placed there — see API_DOCS.md for the upstream spec this service mirrors. The agent's
-  # CitronAdapter (agent/app/execution/infrastructure/citron_adapter.py) is built and unit
-  # tested against Citron's documented API but not yet wired into the live routers, which
-  # still use LocalSubprocessExecutor (a faithful port of the old Node runner, no real
-  # sandbox isolation) until this service actually builds.
   citron:
-    build:
-      context: ./citron
-      dockerfile: Dockerfile
-    image: citron:latest
+    image: justmodo/citron:latest
     restart: unless-stopped
     cap_add: [SYS_ADMIN]
     security_opt:
