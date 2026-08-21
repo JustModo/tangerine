@@ -26,8 +26,6 @@ interface SessionDetail {
 
 interface LessonPlanSummary {
   id: string;
-  status: string;
-  version: number;
 }
 
 export default function SessionChat() {
@@ -146,8 +144,8 @@ export default function SessionChat() {
     );
   }
 
-  const activePlan =
-    plans.find((p) => p.status === "ACCEPTED") ?? [...plans].sort((a, b) => b.version - a.version)[0];
+  // The API returns newest-first, so the active plan is simply the first one.
+  const activePlan = plans[0];
 
   return (
     <div className="flex-1 flex flex-col min-h-0 w-full">

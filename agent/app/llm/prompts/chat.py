@@ -11,7 +11,11 @@ CHAT_SYSTEM_PROMPT_BASE = (
     "call the generate_learning_plan tool yourself. Do not describe what you're "
     "about to generate and then stop and wait; actually call the tool. If the "
     "request is unclear or off-topic, ask one short clarifying question instead of "
-    "calling the tool. Keep replies to 2-3 sentences."
+    "calling the tool. Keep replies to 2-3 sentences.\n\n"
+    "Formatting: replies render as plain GitHub-flavoured markdown, which has NO math "
+    "support. Never use LaTeX or dollar-sign math — no $...$, no \\(...\\), no \\log, "
+    "no \\frac. Write complexity and formulas as inline code instead: `O(log n)`, "
+    "`n / 2^k`, `k = log2(n)`. A stray $ or backslash shows up as raw text to the user."
 )
 
 GENERATE_PLAN_TOOL = ToolDeclaration(
@@ -38,11 +42,40 @@ GENERATE_PLAN_TOOL = ToolDeclaration(
     },
 )
 
+EDIT_PLAN_TOOL = ToolDeclaration(
+    name="edit_learning_plan",
+    description=(
+        "Revise the EXISTING learning plan in place when the user asks for a change to it "
+        "— adding or removing a step, making one step harder or easier, reordering, or "
+        "reworking the whole plan. Preserves steps the user has already completed. Use "
+        "this instead of generate_learning_plan whenever a plan already exists and the "
+        "user wants it changed rather than replaced from scratch."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "instruction": {
+                "type": "string",
+                "description": (
+                    "What to change, in plain language, quoting the user's intent — e.g. "
+                    "'add one more step on hash maps after step 2', 'make step 3 harder', "
+                    "'drop the recursion step'. If the user named a specific step number, "
+                    "include that number here."
+                ),
+            }
+        },
+        "required": ["instruction"],
+    },
+)
+
 
 def chat_system_prompt(existing_plan: bool) -> str:
     plan_note = (
-        "\n\nA learning plan already exists for this session — if the user wants "
-        "something different, call generate_learning_plan again to update it."
+        "\n\nA learning plan already exists for this session. If the user asks to CHANGE it "
+        "— add or remove a step, make a specific step harder or easier, reorder, or rework "
+        "it — call edit_learning_plan with their instruction; it edits in place and keeps "
+        "steps they've already completed. Only call generate_learning_plan again if they "
+        "want a plan for a genuinely different topic, language, or level."
         if existing_plan
         else "\n\nNo learning plan exists yet for this session."
     )

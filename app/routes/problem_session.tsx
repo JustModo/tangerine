@@ -9,6 +9,7 @@ import type { EvaluationResult, ProblemDetail, TestResult } from "~/lib/types";
 interface ProblemSessionData {
   id: string;
   problem_id: string;
+  lesson_node_id: string;
   lesson_plan_id: string | null;
   source_code: string | null;
   status: string;
@@ -119,6 +120,7 @@ export default function ProblemSessionScreen() {
           onRun={runCode}
           onSubmit={submitCode}
           onRequestFeedback={requestFeedback}
+          lessonNodeId={session.lesson_node_id}
         />
       </div>
     </div>

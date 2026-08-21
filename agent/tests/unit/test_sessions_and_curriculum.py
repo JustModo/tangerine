@@ -4,15 +4,19 @@ from pathlib import Path
 import pytest
 
 from app.curriculum.application.services import CurriculumService
-from app.curriculum.domain.models import LessonPlanStatus
+from app.curriculum.domain.models import LessonNodeStatus
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
 from app.llm.domain.requests import ChatChunk, ToolCallResult
+from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
+from app.llm.schemas.lesson_notes import GeneratedLessonNotes, LessonNoteStep
+from app.llm.schemas.plan_edit import RevisedCurriculum, RevisedStep
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.sessions.application.services import SessionService
 from app.sessions.domain.models import ChatRole
 from app.sessions.infrastructure.sqlite_repository import SqliteSessionRepository
 from app.shared.database import MIGRATIONS_DIR
+from app.shared.errors import NotFoundError
 from app.shared.types import Language
 from app.users.infrastructure.sqlite_repository import SqliteUserRepository
 from tests.fakes import FakeLLMProvider
@@ -50,7 +54,9 @@ async def test_session_create_and_add_message(db_path: str) -> None:
     assert [s.id for s in sessions] == [session.id]
 
 
-async def test_curriculum_accept_supersedes_previous_plan(db_path: str) -> None:
+async def test_list_for_session_returns_the_newest_plan_first(db_path: str) -> None:
+    # There's no accept/supersede step any more — the most recently created plan IS the
+    # session's active one, which is exactly what the home and chat screens read as plans[0].
     user = await SqliteUserRepository(db_path).ensure_default_user()
     sessions = SessionService(SqliteSessionRepository(db_path))
     session = await sessions.create_session(user.id)
@@ -64,17 +70,12 @@ async def test_curriculum_accept_supersedes_previous_plan(db_path: str) -> None:
         SqliteLessonPlanRepository(db_path), fake_llm, skill_repository=SqliteSkillRepository(db_path)
     )
 
-    plan_a = await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
-    await curriculum.accept(plan_a.id)
+    await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+    newer = await curriculum.create_draft(session.id, "prefix sums v2", Language.PYTHON, "beginner")
 
-    plan_b = await curriculum.create_draft(session.id, "prefix sums v2", Language.PYTHON, "beginner")
-    accepted_b = await curriculum.accept(plan_b.id)
-
-    assert accepted_b.status == LessonPlanStatus.ACCEPTED
-
-    refetched_a = await curriculum.get(plan_a.id)
-    assert refetched_a is not None
-    assert refetched_a.status == LessonPlanStatus.SUPERSEDED
+    plans = await curriculum.list_for_session(session.id)
+    assert len(plans) == 2
+    assert plans[0].id == newer.id
 
 
 async def test_delete_session_cascades_to_chat_and_plans(db_path: str) -> None:
@@ -204,3 +205,112 @@ async def test_generate_plan_tool_call_says_updating_when_a_plan_already_exists(
     fetched = await service.get_session(session.id)
     assert fetched is not None
     assert "Updating" in fetched.messages[1].content
+
+
+async def test_edit_plan_preserves_completed_steps_and_adds_new_ones(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session(user.id)
+
+    original = GeneratedCurriculum(
+        title="Prefix Sums",
+        nodes=[
+            GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1),
+            GeneratedCurriculumNode(title="Range queries", skill="range-query", difficulty=3),
+        ],
+    )
+    # The revision keeps both existing skills verbatim (so their progress survives), bumps
+    # range-query's difficulty, and inserts a brand new step.
+    revised = RevisedCurriculum(
+        steps=[
+            RevisedStep(title="Fundamentals", skill="prefix-sum", difficulty="easy"),
+            RevisedStep(title="Range queries", skill="range-query", difficulty="hard"),
+            RevisedStep(title="2D prefix sums", skill="prefix-sum-2d", difficulty="hard"),
+        ],
+    )
+    repo = SqliteLessonPlanRepository(db_path)
+    curriculum = CurriculumService(
+        repo,
+        FakeLLMProvider(structured_responses=[original, revised]),
+        skill_repository=SqliteSkillRepository(db_path),
+    )
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+    await repo.update_node_status(plan.nodes[0].id, LessonNodeStatus.DONE)
+
+    edited = await curriculum.edit_plan(plan.id, "add a step on 2D prefix sums and make step 2 harder")
+
+    assert len(edited.nodes) == 3
+    # The completed step kept its identity (same row id) and its DONE status.
+    assert edited.nodes[0].id == plan.nodes[0].id
+    assert edited.nodes[0].status == LessonNodeStatus.DONE
+    # The untouched-but-retargeted step also kept its row, with the new difficulty applied.
+    assert edited.nodes[1].id == plan.nodes[1].id
+    assert edited.nodes[1].difficulty == "hard"
+    # The new step is genuinely new, and the plan stays startable rather than all-locked.
+    assert edited.nodes[2].skill_name == "prefix-sum-2d"
+    assert edited.nodes[1].status == LessonNodeStatus.AVAILABLE
+
+
+async def test_lesson_notes_404_for_unknown_node(db_path: str) -> None:
+    service = CurriculumService(
+        SqliteLessonPlanRepository(db_path),
+        FakeLLMProvider(),  # no responses queued — the LLM must never be reached
+        skill_repository=SqliteSkillRepository(db_path),
+    )
+
+    with pytest.raises(NotFoundError):
+        await service.get_node_notes("does-not-exist")
+
+
+async def test_lesson_notes_refused_for_a_locked_node(db_path: str) -> None:
+    # Reading ahead would generate (and pay for) notes for a node the learner may never
+    # reach — the same rule the plan UI enforces by hiding the button on locked rows.
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session(user.id)
+    generated = GeneratedCurriculum(
+        title="Prefix Sums",
+        nodes=[
+            GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1),
+            GeneratedCurriculumNode(title="Range queries", skill="range-query", difficulty=2),
+        ],
+    )
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path),
+        FakeLLMProvider(structured_responses=[generated]),
+        skill_repository=SqliteSkillRepository(db_path),
+    )
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+
+    locked = next(n for n in plan.nodes if n.status == LessonNodeStatus.LOCKED)
+    with pytest.raises(NotFoundError):
+        await curriculum.get_node_notes(locked.id)
+
+
+async def test_lesson_notes_use_the_plans_language_and_level_and_cache(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session(user.id)
+    generated = GeneratedCurriculum(
+        title="Prefix Sums",
+        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
+    )
+    notes = GeneratedLessonNotes(
+        steps=[LessonNoteStep(title="The core idea", body_md="Keep a running total.")]
+    )
+    # One curriculum response + exactly one notes response: a second notes generation would
+    # raise AssertionError, so the repeat call below proves the cache served it.
+    llm = FakeLLMProvider(structured_responses=[generated, notes])
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path),
+        llm,
+        skill_repository=SqliteSkillRepository(db_path),
+        llm_cache=SqliteLLMCache(db_path),
+    )
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+
+    first = await curriculum.get_node_notes(plan.nodes[0].id)
+    second = await curriculum.get_node_notes(plan.nodes[0].id)
+
+    assert first.steps[0].title == "The core idea"
+    assert first == second

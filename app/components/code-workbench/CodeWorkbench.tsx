@@ -26,6 +26,8 @@ interface CodeWorkbenchProps {
   onRun: (code: string) => AsyncGenerator<TestResult>;
   onSubmit: ((code: string) => Promise<EvaluationResult>) | null;
   onRequestFeedback?: (payload: FeedbackPayload) => Promise<string | null>;
+  /** Enables the Notes tab. Absent in practice mode, which has no lesson node. */
+  lessonNodeId?: string;
 }
 
 export function CodeWorkbench({
@@ -35,6 +37,7 @@ export function CodeWorkbench({
   onRun,
   onSubmit,
   onRequestFeedback,
+  lessonNodeId,
 }: CodeWorkbenchProps) {
   const [code, setCode] = useState(initialCode);
   const [isRunning, setIsRunning] = useState(false);
@@ -134,7 +137,7 @@ export function CodeWorkbench({
     <div className="h-full flex flex-col overflow-hidden bg-black text-white">
       <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0">
         <ResizablePanel defaultSize={32} minSize={20}>
-          <ProblemPanel problem={problem} />
+          <ProblemPanel problem={problem} lessonNodeId={lessonNodeId} />
         </ResizablePanel>
         <ResizableHandle className="w-1 bg-white/5" />
         <ResizablePanel defaultSize={68} minSize={30}>

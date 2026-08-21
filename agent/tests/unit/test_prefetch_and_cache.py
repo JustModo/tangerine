@@ -48,6 +48,25 @@ async def test_llm_cache_avoids_a_second_generation_call(db_path: str) -> None:
     assert first.title == second.title == "Prefix Sums"
 
 
+async def test_lesson_notes_cache_avoids_a_second_llm_call(db_path: str) -> None:
+    from app.llm.graphs.lesson_notes import generate_lesson_notes
+    from app.llm.schemas.lesson_notes import GeneratedLessonNotes, LessonNoteStep
+
+    cache = SqliteLLMCache(db_path)
+    notes = GeneratedLessonNotes(
+        steps=[LessonNoteStep(title="The core idea", body_md="Keep a running total.")]
+    )
+    # only ONE response queued — a second real call would raise AssertionError. This is the
+    # token-efficiency guarantee: a skill's notes are written once, ever.
+    provider = FakeLLMProvider(structured_responses=[notes])
+
+    first = await generate_lesson_notes(provider, "prefix-sum", "python", "beginner", cache=cache)
+    second = await generate_lesson_notes(provider, "prefix-sum", "python", "beginner", cache=cache)
+
+    assert first == second
+    assert first.steps[0].title == "The core idea"
+
+
 async def test_prefetch_skips_when_bank_already_has_a_match(db_path: str) -> None:
     repo = SqliteProblemRepository(db_path)
     await repo.save(

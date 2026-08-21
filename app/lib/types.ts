@@ -18,6 +18,15 @@ export interface ProblemDetail {
   examples: ProblemExample[];
 }
 
+export interface LessonNoteStep {
+  title: string;
+  body_md: string;
+}
+
+export interface LessonNotes {
+  steps: LessonNoteStep[];
+}
+
 export interface TestResult {
   id: string;
   status: "PENDING" | "PASSED" | "FAILED" | "ERROR" | "TIMEOUT";

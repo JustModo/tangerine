@@ -5,6 +5,8 @@ import { Lightbulb } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { LessonNotesPanel } from "@/components/LessonNotesPanel";
+import { cn } from "~/lib/utils";
 import type { ProblemDetail } from "~/lib/types";
 
 function HintList({ hints }: { hints: string[] }) {
@@ -40,7 +42,18 @@ function HintList({ hints }: { hints: string[] }) {
   );
 }
 
-export function ProblemPanel({ problem }: { problem: ProblemDetail }) {
+export function ProblemPanel({
+  problem,
+  lessonNodeId,
+}: {
+  problem: ProblemDetail;
+  lessonNodeId?: string;
+}) {
+  const [tab, setTab] = useState<"statement" | "notes">("statement");
+  // Mount the notes panel only once Notes is first opened (so never-opened notes cost zero
+  // tokens), then keep it mounted-but-hidden so toggling back and forth never refetches.
+  const [notesMounted, setNotesMounted] = useState(false);
+
   return (
     <ScrollArea className="h-full bg-zinc-950 border-r border-white/10">
       <div className="p-8 space-y-6">
@@ -59,6 +72,34 @@ export function ProblemPanel({ problem }: { problem: ProblemDetail }) {
 
         <Separator className="bg-white/10" />
 
+        {lessonNodeId && (
+          <div className="flex items-center gap-4">
+            {(["statement", "notes"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => {
+                  setTab(value);
+                  if (value === "notes") setNotesMounted(true);
+                }}
+                className={cn(
+                  "text-[10px] font-bold uppercase tracking-widest transition-colors",
+                  tab === value ? "text-white" : "text-zinc-500 hover:text-zinc-300",
+                )}
+              >
+                {value}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {notesMounted && lessonNodeId && (
+          <div className={tab === "notes" ? "" : "hidden"}>
+            <LessonNotesPanel lessonNodeId={lessonNodeId} />
+          </div>
+        )}
+
+        <div className={tab === "notes" ? "hidden" : "space-y-6"}>
         <div className="prose dark:prose-invert prose-sm max-w-none">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{problem.statement_md}</ReactMarkdown>
         </div>
@@ -103,6 +144,7 @@ export function ProblemPanel({ problem }: { problem: ProblemDetail }) {
         )}
 
         <HintList hints={problem.hints} />
+        </div>
       </div>
     </ScrollArea>
   );

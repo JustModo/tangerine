@@ -60,7 +60,9 @@ class ProblemSessionService:
             if self._mastery_repository is not None:
                 state = await self._mastery_repository.get(user_id, node.skill_id)
                 mastery_score = state.mastery_score if state else None
-            difficulty = suggest_difficulty(mastery_score, node.sequence_index)
+            # An explicit per-node difficulty (set by the curriculum, or by the user asking
+            # the chat to make a step harder/easier) wins over the mastery/position guess.
+            difficulty = node.difficulty or suggest_difficulty(mastery_score, node.sequence_index)
             problem = await self._problem_validation.generate_and_validate(
                 skill_name, plan.language, difficulty
             )

@@ -10,6 +10,7 @@ from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepo
 from app.execution.infrastructure.citron_adapter import CitronAdapter
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
+from app.llm.schemas.lesson_notes import GeneratedLessonNotes
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
 from app.problems.application.prefetch import PrefetchService
 from app.problems.application.services import ProblemSelectionService
@@ -68,6 +69,14 @@ async def list_plans(
     return await service.list_for_session(session_id)
 
 
+@router.get("/nodes/{node_id}/notes")
+async def get_node_notes(
+    node_id: str, service: CurriculumService = Depends(get_service)
+) -> GeneratedLessonNotes:
+    # NotFoundError -> 404 is handled by the app-wide exception handler (app/shared/errors.py)
+    return await service.get_node_notes(node_id)
+
+
 @router.get("/{plan_id}")
 async def get_plan(
     plan_id: str, service: CurriculumService = Depends(get_service)
@@ -76,14 +85,6 @@ async def get_plan(
     if plan is None:
         raise HTTPException(status_code=404, detail="Learning plan not found")
     return plan
-
-
-@router.post("/{plan_id}/accept")
-async def accept_plan(
-    plan_id: str, service: CurriculumService = Depends(get_service)
-) -> LessonPlan:
-    # NotFoundError -> 404 is handled by the app-wide exception handler (app/shared/errors.py)
-    return await service.accept(plan_id)
 
 
 @router.post("/{plan_id}/problems/next")

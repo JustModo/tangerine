@@ -4,23 +4,46 @@ from app.curriculum.domain.models import LessonNode, LessonNodeStatus, LessonPla
 from app.shared.config import get_settings
 
 
+_UPSERT_NODE_SQL = (
+    "INSERT INTO lesson_nodes "
+    "(id, lesson_plan_id, skill_id, sequence_index, status, difficulty, created_at) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?) "
+    "ON CONFLICT(id) DO UPDATE SET "
+    "skill_id=excluded.skill_id, sequence_index=excluded.sequence_index, "
+    "status=excluded.status, difficulty=excluded.difficulty"
+)
+
+
+def _node_params(node: LessonNode) -> tuple:
+    return (
+        node.id,
+        node.lesson_plan_id,
+        node.skill_id,
+        node.sequence_index,
+        node.status.value,
+        node.difficulty,
+        node.created_at.isoformat(),
+    )
+
+
 class SqliteLessonPlanRepository:
     def __init__(self, database_path: str | None = None) -> None:
         self._database_path = database_path or get_settings().database_path
 
     async def save(self, plan: LessonPlan) -> None:
         async with aiosqlite.connect(self._database_path) as db:
+            # lesson_plans.status still exists in the schema with a DEFAULT — it's simply no
+            # longer read or written, so no migration was needed to drop the concept.
             await db.execute(
-                "INSERT INTO lesson_plans (id, session_id, topic, language, level, status, version, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET status=excluded.status, version=excluded.version",
+                "INSERT INTO lesson_plans (id, session_id, topic, language, level, version, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET version=excluded.version",
                 (
                     plan.id,
                     plan.session_id,
                     plan.topic,
                     plan.language.value,
                     plan.level,
-                    plan.status.value,
                     plan.version,
                     plan.created_at.isoformat(),
                 ),
@@ -30,19 +53,29 @@ class SqliteLessonPlanRepository:
     async def save_nodes(self, nodes: list[LessonNode]) -> None:
         async with aiosqlite.connect(self._database_path) as db:
             for node in nodes:
-                await db.execute(
-                    "INSERT INTO lesson_nodes "
-                    "(id, lesson_plan_id, skill_id, sequence_index, status, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        node.id,
-                        node.lesson_plan_id,
-                        node.skill_id,
-                        node.sequence_index,
-                        node.status.value,
-                        node.created_at.isoformat(),
-                    ),
-                )
+                await db.execute(_UPSERT_NODE_SQL, _node_params(node))
+            await db.commit()
+
+    async def replace_nodes(self, lesson_plan_id: str, nodes: list[LessonNode]) -> None:
+        """Applies an edited node list, preserving the identity (and therefore the progress
+        and problem sessions) of every node the caller chose to keep. Nodes absent from the
+        new list are removed along with their problem sessions — the caller is responsible
+        for never dropping a DONE node, so this only ever discards unstarted work."""
+        keep_ids = [node.id for node in nodes]
+        placeholders = ",".join("?" for _ in keep_ids) or "NULL"
+
+        async with aiosqlite.connect(self._database_path) as db:
+            await db.execute(
+                f"DELETE FROM problem_sessions WHERE lesson_node_id IN ("
+                f"  SELECT id FROM lesson_nodes WHERE lesson_plan_id = ? AND id NOT IN ({placeholders}))",
+                (lesson_plan_id, *keep_ids),
+            )
+            await db.execute(
+                f"DELETE FROM lesson_nodes WHERE lesson_plan_id = ? AND id NOT IN ({placeholders})",
+                (lesson_plan_id, *keep_ids),
+            )
+            for node in nodes:
+                await db.execute(_UPSERT_NODE_SQL, _node_params(node))
             await db.commit()
 
     async def get(self, plan_id: str) -> LessonPlan | None:
@@ -70,6 +103,7 @@ class SqliteLessonPlanRepository:
                 skill_name=row["skill_name"],
                 sequence_index=row["sequence_index"],
                 status=row["status"],
+                difficulty=row["difficulty"],
                 created_at=row["created_at"],
             )
 
@@ -98,7 +132,10 @@ class SqliteLessonPlanRepository:
         async with aiosqlite.connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
-                "SELECT * FROM lesson_plans WHERE session_id = ? ORDER BY version DESC",
+                # Newest first — the most recently generated plan is the session's active
+                # one now that there's no ACCEPTED status to mark it (version is always 1,
+                # so the old ORDER BY version DESC never actually ordered anything).
+                "SELECT * FROM lesson_plans WHERE session_id = ? ORDER BY created_at DESC",
                 (session_id,),
             )
             rows = await cursor.fetchall()
@@ -118,7 +155,6 @@ class SqliteLessonPlanRepository:
             topic=row["topic"],
             language=row["language"],
             level=row["level"],
-            status=row["status"],
             version=row["version"],
             created_at=row["created_at"],
             nodes=[
@@ -129,6 +165,7 @@ class SqliteLessonPlanRepository:
                     skill_name=n["skill_name"],
                     sequence_index=n["sequence_index"],
                     status=n["status"],
+                    difficulty=n["difficulty"],
                     created_at=n["created_at"],
                 )
                 for n in node_rows

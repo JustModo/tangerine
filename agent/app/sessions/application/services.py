@@ -4,10 +4,9 @@ from datetime import datetime, timezone
 from typing import AsyncIterator
 
 from app.curriculum.application.services import CurriculumService
-from app.curriculum.domain.models import LessonPlanStatus
 from app.llm.domain.provider import LLMProvider
 from app.llm.domain.requests import ChatStreamRequest, ChatTurn
-from app.llm.prompts.chat import GENERATE_PLAN_TOOL, chat_system_prompt
+from app.llm.prompts.chat import EDIT_PLAN_TOOL, GENERATE_PLAN_TOOL, chat_system_prompt
 from app.sessions.domain.models import ChatMessage, ChatRole, LearningSession, SessionStatus
 from app.sessions.domain.repository import SessionRepository
 from app.shared.types import Language
@@ -83,10 +82,7 @@ class SessionService:
         existing_plan = False
         if self._curriculum_service is not None:
             try:
-                plans = await self._curriculum_service.list_for_session(session_id)
-                existing_plan = any(
-                    p.status in (LessonPlanStatus.DRAFT, LessonPlanStatus.ACCEPTED) for p in plans
-                )
+                existing_plan = bool(await self._curriculum_service.list_for_session(session_id))
             except Exception:
                 logger.warning("Failed to check for an existing plan for session %s", session_id, exc_info=True)
 
@@ -99,11 +95,14 @@ class SessionService:
     async def _stream_reply(
         self, session_id: str, history: list[ChatTurn], message: str, existing_plan: bool
     ) -> AsyncIterator[dict]:
+        # edit_learning_plan is only offered once a plan exists — there's nothing to edit
+        # otherwise, and omitting it keeps the model from reaching for it prematurely.
+        tools = [GENERATE_PLAN_TOOL] + ([EDIT_PLAN_TOOL] if existing_plan else [])
         request = ChatStreamRequest(
             system_prompt=chat_system_prompt(existing_plan),
             history=history,
             message=message,
-            tools=[GENERATE_PLAN_TOOL],
+            tools=tools,
         )
         text_parts: list[str] = []
         async for chunk in self._llm_provider.stream_chat(request):
@@ -113,6 +112,12 @@ class SessionService:
             if chunk.tool_call is not None and chunk.tool_call.name == "generate_learning_plan":
                 async for event in self._handle_generate_plan(
                     session_id, chunk.tool_call.args, history, message, existing_plan
+                ):
+                    yield event
+                return
+            if chunk.tool_call is not None and chunk.tool_call.name == "edit_learning_plan":
+                async for event in self._handle_edit_plan(
+                    session_id, chunk.tool_call.args, history, message
                 ):
                     yield event
                 return
@@ -162,10 +167,87 @@ class SessionService:
             if plan is not None
             else "Plan generation failed — tell the user something went wrong and they can try again."
         )
+        fallback = (
+            "Your learning plan is ready — check the corner button to view it."
+            if plan is not None
+            else "Something went wrong generating the plan — want to try again?"
+        )
+        async for event in self._stream_tool_followup(
+            session_id,
+            history,
+            user_message,
+            existing_plan,
+            "generate_learning_plan",
+            result_summary,
+            fallback,
+            plan.id if plan is not None else None,
+        ):
+            yield event
+
+    async def _handle_edit_plan(
+        self, session_id: str, args: dict, history: list[ChatTurn], user_message: str
+    ) -> AsyncIterator[dict]:
+        label = "Updating your learning plan..."
+        system_note = ChatMessage(
+            id=str(uuid.uuid4()),
+            session_id=session_id,
+            role=ChatRole.SYSTEM,
+            content=label,
+            created_at=datetime.now(timezone.utc),
+        )
+        await self._repository.add_message(system_note)
+        yield {"type": "tool_start", "label": label, "message_id": system_note.id}
+
+        instruction = args.get("instruction") or user_message
+        plan = None
+        if self._curriculum_service is not None:
+            try:
+                # list_for_session is newest-first, so [0] is the session's active plan.
+                plans = await self._curriculum_service.list_for_session(session_id)
+                if plans:
+                    plan = await self._curriculum_service.edit_plan(plans[0].id, instruction)
+            except Exception:
+                logger.warning("Plan edit failed for session %s", session_id, exc_info=True)
+
+        if plan is not None:
+            steps = ", ".join(
+                f"{n.sequence_index + 1}. {n.skill_name or n.skill_id}" for n in plan.nodes
+            )
+            result_summary = f"Updated the plan. It now has {len(plan.nodes)} steps: {steps}."
+            fallback = "I've updated your plan — open it with the corner button to see the changes."
+        else:
+            result_summary = "Plan edit failed — tell the user something went wrong and they can try again."
+            fallback = "Something went wrong updating the plan — want to try again?"
+
+        async for event in self._stream_tool_followup(
+            session_id,
+            history,
+            user_message,
+            True,
+            "edit_learning_plan",
+            result_summary,
+            fallback,
+            plan.id if plan is not None else None,
+        ):
+            yield event
+
+    async def _stream_tool_followup(
+        self,
+        session_id: str,
+        history: list[ChatTurn],
+        user_message: str,
+        existing_plan: bool,
+        tool_name: str,
+        result_summary: str,
+        fallback_text: str,
+        plan_id: str | None,
+    ) -> AsyncIterator[dict]:
+        """Feeds a tool's result back to the model for a natural closing line, streamed like
+        any other reply, then persists it. Shared by both plan tools."""
         follow_up_request = ChatStreamRequest(
             system_prompt=chat_system_prompt(existing_plan),
             history=history + [ChatTurn(role="user", content=user_message)],
-            message=f"[generate_learning_plan tool result] {result_summary}",
+            message=f"[{tool_name} tool result] {result_summary}",
             tools=[],
         )
         text_parts: list[str] = []
@@ -176,17 +258,13 @@ class SessionService:
             if chunk.done:
                 break
 
-        reply_text = "".join(text_parts).strip() or (
-            "Your learning plan is ready — check the corner button to view it."
-            if plan is not None
-            else "Something went wrong generating the plan — want to try again?"
-        )
+        reply_text = "".join(text_parts).strip() or fallback_text
         reply = await self._persist_assistant_reply(session_id, reply_text)
         yield {
             "type": "done",
             "message_id": reply.id,
             "content": reply_text,
-            "plan_id": plan.id if plan is not None else None,
+            "plan_id": plan_id,
         }
 
     async def _persist_assistant_reply(self, session_id: str, content: str) -> ChatMessage:

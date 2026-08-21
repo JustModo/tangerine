@@ -16,8 +16,6 @@ interface SessionSummary {
 interface LessonPlanSummary {
   id: string;
   topic: string;
-  status: string;
-  version: number;
 }
 
 export default function Home() {
@@ -39,10 +37,8 @@ export default function Home() {
             const plans = await apiJson<LessonPlanSummary[]>(
               `/api/learning-plans?session_id=${session.id}`,
             );
-            const active =
-              plans.find((p) => p.status === "ACCEPTED") ??
-              [...plans].sort((a, b) => b.version - a.version)[0];
-            return [session.id, active] as const;
+            // The API returns newest-first, so the active plan is simply the first one.
+            return [session.id, plans[0]] as const;
           } catch {
             return [session.id, undefined] as const;
           }

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { CheckCircle2, Lock, MessageSquare, Play, RefreshCcw, Trash2 } from "lucide-react";
+import { BookOpen, CheckCircle2, Lock, MessageSquare, Play, RefreshCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
+import { LessonNotesPanel } from "@/components/LessonNotesPanel";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiJson } from "~/lib/api";
 import { cn } from "~/lib/utils";
@@ -12,6 +13,7 @@ interface LessonNode {
   skill_name: string | null;
   sequence_index: number;
   status: string;
+  difficulty: string | null;
 }
 
 interface LessonPlan {
@@ -20,7 +22,6 @@ interface LessonPlan {
   topic: string;
   language: string;
   level: string;
-  status: string;
   nodes: LessonNode[];
 }
 
@@ -29,6 +30,7 @@ export default function PlanScreen() {
   const [plan, setPlan] = useState<LessonPlan | null>(null);
   const [busy, setBusy] = useState(false);
   const [revisitingNodeId, setRevisitingNodeId] = useState<string | null>(null);
+  const [notesNodeId, setNotesNodeId] = useState<string | null>(null);
   const navigate = useNavigate();
   const { showError, setBusyMessage } = useStatus();
 
@@ -44,20 +46,6 @@ export default function PlanScreen() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-
-  async function acceptPlan() {
-    setBusy(true);
-    setBusyMessage("Accepting plan...");
-    try {
-      await apiJson(`/api/learning-plans/${id}/accept`, { method: "POST" });
-      await load();
-    } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Failed to accept plan");
-    } finally {
-      setBusy(false);
-      setBusyMessage(null);
-    }
-  }
 
   async function startNext() {
     setBusy(true);
@@ -120,7 +108,7 @@ export default function PlanScreen() {
     <div className="flex-1 flex flex-col min-h-0 w-full">
       <PageHeader
         title={plan.topic}
-        subtitle={`${plan.language} · ${plan.level} · ${plan.status}`}
+        subtitle={`${plan.language} · ${plan.level}`}
         backTo="/"
         actions={
           <>
@@ -154,7 +142,8 @@ export default function PlanScreen() {
               const isLocked = node.status === "LOCKED";
               const isActionable = node.status === "AVAILABLE" || node.status === "IN_PROGRESS";
               return (
-                <div key={node.id} className={cn("relative flex items-center gap-4 py-3", isDone && "opacity-40")}>
+                <div key={node.id} className="relative">
+                  <div className={cn("relative flex items-center gap-4 py-3", isDone && "opacity-40")}>
                   {isActionable ? (
                     <Button
                       variant="ghost"
@@ -190,22 +179,50 @@ export default function PlanScreen() {
                       <Lock className="w-4 h-4 text-zinc-500" />
                     </span>
                   )}
-                  <div className="flex-1 min-w-0 flex items-center justify-between">
+                  <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
                     <span className="text-sm font-bold uppercase tracking-wide truncate">
                       {node.sequence_index + 1}. {node.skill_name || node.id}
                     </span>
-                    <span
-                      className={cn(
-                        "text-[10px] font-black uppercase tracking-widest flex-none",
-                        isDone && "text-zinc-600",
-                        isLocked && "text-zinc-500",
-                        node.status === "IN_PROGRESS" && "text-white",
-                        node.status === "AVAILABLE" && "text-zinc-300",
+                    <div className="flex items-center gap-2 flex-none">
+                      {node.difficulty && (
+                        <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 border border-white/10 px-2 py-1">
+                          {node.difficulty}
+                        </span>
                       )}
-                    >
-                      {node.status.replace("_", " ")}
-                    </span>
+                      {/* Hidden on locked rows: reading ahead contradicts the lock and would
+                          generate notes for a node the learner may never reach. */}
+                      {!isLocked && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Lesson notes"
+                          className="text-zinc-500 hover:text-white"
+                          onClick={() =>
+                            setNotesNodeId((current) => (current === node.id ? null : node.id))
+                          }
+                        >
+                          <BookOpen className="w-4 h-4" />
+                        </Button>
+                      )}
+                      <span
+                        className={cn(
+                          "text-[10px] font-black uppercase tracking-widest",
+                          isDone && "text-zinc-600",
+                          isLocked && "text-zinc-500",
+                          node.status === "IN_PROGRESS" && "text-white",
+                          node.status === "AVAILABLE" && "text-zinc-300",
+                        )}
+                      >
+                        {node.status.replace("_", " ")}
+                      </span>
+                    </div>
                   </div>
+                  </div>
+                  {notesNodeId === node.id && (
+                    <div className="pl-14 pb-6">
+                      <LessonNotesPanel lessonNodeId={node.id} />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -213,12 +230,6 @@ export default function PlanScreen() {
               <p className="text-zinc-500 text-xs uppercase py-8 text-center">No nodes yet.</p>
             )}
           </div>
-
-          {plan.status === "DRAFT" && (
-            <Button className="tracking-[0.3em]" onClick={acceptPlan} disabled={busy}>
-              PROCEED
-            </Button>
-          )}
         </div>
       </div>
     </div>
