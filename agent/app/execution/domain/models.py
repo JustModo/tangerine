@@ -21,7 +21,7 @@ class TestCase(BaseModel):
 
 class ExecutionRequest(BaseModel):
     language: Language
-    code_path: str
+    code: str
     test_cases: list[TestCase]
 
 
@@ -32,3 +32,9 @@ class TestResult(BaseModel):
     actual_output: str | None = None
     error: str | None = None
     execution_time_ms: str | None = None
+    exit_code: int | None = None
+    signal: int | None = None
+    memory_kb: int | None = None
+    status_description: str | None = None
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False

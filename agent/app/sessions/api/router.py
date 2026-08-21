@@ -1,9 +1,15 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.curriculum.application.services import CurriculumService
+from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
+from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.sessions.application.services import SessionService
-from app.sessions.domain.models import ChatMessage, ChatRole, LearningSession
+from app.sessions.domain.models import LearningSession
 from app.sessions.infrastructure.sqlite_repository import SqliteSessionRepository
 from app.users.domain.models import LOCAL_USER_ID
 
@@ -11,7 +17,10 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 def get_service() -> SessionService:
-    return SessionService(SqliteSessionRepository(), GeminiProvider())
+    curriculum_service = CurriculumService(
+        SqliteLessonPlanRepository(), GeminiProvider(), llm_cache=SqliteLLMCache()
+    )
+    return SessionService(SqliteSessionRepository(), GeminiProvider(), curriculum_service)
 
 
 class PostMessageBody(BaseModel):
@@ -51,7 +60,13 @@ async def delete_session(
 @router.post("/{session_id}/messages")
 async def post_message(
     session_id: str, body: PostMessageBody, service: SessionService = Depends(get_service)
-) -> ChatMessage:
+) -> StreamingResponse:
     if await service.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    return await service.add_message(session_id, role=ChatRole.USER, content=body.content)
+
+    async def event_stream():
+        async for event in service.add_message(session_id, body.content):
+            yield f"data: {json.dumps(event)}\n\n"
+        yield "event: done\ndata: {}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

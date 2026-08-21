@@ -18,7 +18,6 @@ dependencies = [
     { name = "langgraph" },
     { name = "pydantic-settings" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "watchfiles" },
 ]
 
 [package.dev-dependencies]
@@ -36,7 +35,6 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.11" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
-    { name = "watchfiles", specifier = ">=1.0" },
 ]
 
 [package.metadata.requires-dev]

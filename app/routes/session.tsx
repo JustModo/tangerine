@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { ArrowLeft, ListTree, Trash2 } from "lucide-react";
+import { ArrowLeft, ListTree, Loader2, Trash2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { useStatus } from "~/lib/status";
-import { ApiError, apiJson } from "~/lib/api";
+import { ApiError, apiFetch, apiJson } from "~/lib/api";
 
 interface ChatMessage {
   id: string;
@@ -36,7 +36,8 @@ export default function SessionChat() {
   const [plans, setPlans] = useState<LessonPlanSummary[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [generatingPlan, setGeneratingPlan] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
+  const [toolLabel, setToolLabel] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const { showError, setBusyMessage } = useStatus();
 
@@ -64,50 +65,62 @@ export default function SessionChat() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [session?.messages.length]);
+  }, [session?.messages.length, streamingText, toolLabel]);
 
   async function sendMessage() {
     if (!draft.trim()) return;
+    const content = draft;
+    setDraft("");
     setSending(true);
-    setBusyMessage("Sending message...");
+    setStreamingText("");
+    setToolLabel(null);
     try {
-      // Only clear the draft / reload once the send is actually confirmed — previously
-      // this fired-and-forgot, so a dropped connection (e.g. the agent restarting under
-      // --reload in dev) silently lost the message while still clearing the input.
-      await apiJson(`/api/sessions/${id}/messages`, {
+      const response = await apiFetch(`/api/sessions/${id}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: draft }),
+        body: JSON.stringify({ content }),
       });
-      setDraft("");
-      await loadSession();
+      if (!response.ok) {
+        showError(`Send failed (${response.status})`);
+        return;
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value);
+          for (const line of chunk.split("\n\n")) {
+            if (!line.startsWith("data: ")) continue;
+            const dataStr = line.replace("data: ", "");
+            if (dataStr === "{}" || !dataStr.trim()) continue;
+            let event: { type: string; delta?: string; label?: string };
+            try {
+              event = JSON.parse(dataStr);
+            } catch {
+              continue;
+            }
+            if (event.type === "user_message") {
+              await loadSession();
+            } else if (event.type === "text_delta") {
+              setStreamingText((prev) => prev + (event.delta || ""));
+            } else if (event.type === "tool_start") {
+              setToolLabel(event.label || "Working...");
+            } else if (event.type === "done") {
+              await loadSession();
+              await loadPlans();
+            }
+          }
+        }
+      }
     } catch (err) {
       showError(err instanceof ApiError ? err.message : "Failed to send message");
     } finally {
       setSending(false);
-      setBusyMessage(null);
-    }
-  }
-
-  async function generatePlan(topic: string) {
-    setGeneratingPlan(true);
-    // A single synchronous request under the hood — these are staged, not real backend
-    // progress events, just enough feedback that the wait doesn't look frozen.
-    setBusyMessage("Generating curriculum...");
-    const validatingTimer = setTimeout(() => setBusyMessage("Validating curriculum..."), 2500);
-    try {
-      const plan = await apiJson<{ id: string }>("/api/learning-plans", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: id, topic, language: "python", level: "beginner" }),
-      });
-      navigate(`/plans/${plan.id}`);
-    } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Failed to generate a plan");
-    } finally {
-      clearTimeout(validatingTimer);
-      setGeneratingPlan(false);
-      setBusyMessage(null);
+      setStreamingText("");
+      setToolLabel(null);
     }
   }
 
@@ -131,10 +144,6 @@ export default function SessionChat() {
       </div>
     );
   }
-
-  const lastLearningPlanMessage = [...session.messages]
-    .reverse()
-    .find((message) => message.intent === "learning_plan");
 
   const activePlan =
     plans.find((p) => p.status === "ACCEPTED") ?? [...plans].sort((a, b) => b.version - a.version)[0];
@@ -171,7 +180,7 @@ export default function SessionChat() {
       </div>
       <ScrollArea className="flex-1 min-h-0 px-10 py-10">
         <div className="flex flex-col gap-6">
-          {session.messages.length === 0 && (
+          {session.messages.length === 0 && !streamingText && (
             <p className="text-zinc-500 text-xs uppercase tracking-widest text-center py-10">
               What do you want to learn?
             </p>
@@ -184,24 +193,31 @@ export default function SessionChat() {
               <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">
                 {message.role}
               </p>
-              <div className="border border-white/10 rounded-md px-4 py-3 text-sm prose prose-invert prose-sm max-w-none prose-p:my-0">
-                {message.role === "assistant" ? (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-                ) : (
-                  message.content
-                )}
-              </div>
+              {message.role === "system" ? (
+                <p className="text-xs italic text-zinc-500 px-1">{message.content}</p>
+              ) : (
+                <div className="border border-white/10 rounded-md px-4 py-3 text-sm prose prose-invert prose-sm max-w-none prose-p:my-0">
+                  {message.role === "assistant" ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                  ) : (
+                    message.content
+                  )}
+                </div>
+              )}
             </div>
           ))}
-          {lastLearningPlanMessage && (
-            <div className="self-center">
-              <Button
-                className="tracking-[0.3em]"
-                onClick={() => generatePlan(lastLearningPlanMessage.content)}
-                disabled={generatingPlan}
-              >
-                GENERATE LEARNING PLAN
-              </Button>
+          {toolLabel && (
+            <div className="self-start flex items-center gap-2 text-xs italic text-zinc-500 px-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              {toolLabel}
+            </div>
+          )}
+          {streamingText && (
+            <div className="self-start max-w-lg">
+              <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">assistant</p>
+              <div className="border border-white/10 rounded-md px-4 py-3 text-sm prose prose-invert prose-sm max-w-none prose-p:my-0">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingText}</ReactMarkdown>
+              </div>
             </div>
           )}
           <div ref={bottomRef} />

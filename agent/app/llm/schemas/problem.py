@@ -15,3 +15,6 @@ class GeneratedProblem(BaseModel):
     boilerplate: str
     reference_solution: str
     examples: list[GeneratedExample]
+    constraints: str | None = None
+    hints: list[str] = []
+    tags: list[str] = []

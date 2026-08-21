@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app.problems.domain.models import Problem, ProblemCriteria, ProblemStatus
+from app.problems.domain.models import Problem, ProblemCriteria, ProblemStatus, ProblemVersion
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.database import MIGRATIONS_DIR
 from app.shared.types import Language
@@ -33,6 +33,7 @@ async def test_save_then_find_suitable_and_get(db_path: str) -> None:
         language=Language.PYTHON,
         difficulty="easy",
         status=ProblemStatus.AVAILABLE,
+        tags=["prefix-sum", "arrays"],
         created_at="2026-01-01T00:00:00",
     )
     await repo.save(problem)
@@ -44,6 +45,40 @@ async def test_save_then_find_suitable_and_get(db_path: str) -> None:
     fetched = await repo.get("p1")
     assert fetched is not None
     assert fetched.title == "Static Range Sum"
+    assert fetched.tags == ["prefix-sum", "arrays"]
+
+
+async def test_save_version_then_get_latest_version_round_trips_metadata(db_path: str) -> None:
+    repo = SqliteProblemRepository(db_path)
+    await repo.save(
+        Problem(
+            id="p3",
+            conceptual_id="two-sum",
+            title="Two Sum",
+            language=Language.PYTHON,
+            difficulty="easy",
+            status=ProblemStatus.AVAILABLE,
+            created_at="2026-01-01T00:00:00",
+        )
+    )
+    await repo.save_version(
+        ProblemVersion(
+            id="v3",
+            problem_id="p3",
+            version=1,
+            statement_md="Find two numbers that sum to target.",
+            reference_solution="...",
+            boilerplate="",
+            constraints="1 <= n <= 10^5",
+            hints=["Try a hash map.", "Look up target - x as you go."],
+            created_at="2026-01-01T00:00:00",
+        )
+    )
+
+    version = await repo.get_latest_version("p3")
+    assert version is not None
+    assert version.constraints == "1 <= n <= 10^5"
+    assert version.hints == ["Try a hash map.", "Look up target - x as you go."]
 
 
 async def test_find_suitable_excludes_unavailable_and_wrong_language(db_path: str) -> None:

@@ -6,8 +6,8 @@ import pytest
 from app.curriculum.application.services import CurriculumService
 from app.curriculum.domain.models import LessonPlanStatus
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
+from app.llm.domain.requests import ChatChunk, ToolCallResult
 from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
-from app.llm.schemas.intent import ClassifiedIntent, UserIntent
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.sessions.application.services import SessionService
 from app.sessions.domain.models import ChatRole
@@ -38,7 +38,8 @@ async def test_session_create_and_add_message(db_path: str) -> None:
     service = SessionService(SqliteSessionRepository(db_path))
 
     session = await service.create_session(user.id)
-    await service.add_message(session.id, ChatRole.USER, "teach me prefix sums")
+    async for _ in service.add_message(session.id, "teach me prefix sums"):
+        pass
 
     fetched = await service.get_session(session.id)
     assert fetched is not None
@@ -80,7 +81,8 @@ async def test_delete_session_cascades_to_chat_and_plans(db_path: str) -> None:
     user = await SqliteUserRepository(db_path).ensure_default_user()
     sessions = SessionService(SqliteSessionRepository(db_path))
     session = await sessions.create_session(user.id)
-    await sessions.add_message(session.id, ChatRole.USER, "teach me prefix sums")
+    async for _ in sessions.add_message(session.id, "teach me prefix sums"):
+        pass
 
     generated = GeneratedCurriculum(
         title="Prefix Sums",
@@ -99,17 +101,21 @@ async def test_delete_session_cascades_to_chat_and_plans(db_path: str) -> None:
     assert await curriculum.get(plan.id) is None
 
 
-async def test_unclear_intent_surfaces_a_real_clarifying_question(db_path: str) -> None:
+async def test_unclear_message_streams_a_real_clarifying_question(db_path: str) -> None:
     user = await SqliteUserRepository(db_path).ensure_default_user()
     llm = FakeLLMProvider(
-        structured_responses=[
-            ClassifiedIntent(intent=UserIntent.UNCLEAR, clarifying_question="Beginner or interview-level?")
+        chat_streams=[
+            [
+                ChatChunk(text_delta="Beginner or "),
+                ChatChunk(text_delta="interview-level?"),
+                ChatChunk(done=True),
+            ]
         ]
     )
     service = SessionService(SqliteSessionRepository(db_path), llm)
     session = await service.create_session(user.id)
 
-    await service.add_message(session.id, ChatRole.USER, "I want to get better at DSA")
+    events = [event async for event in service.add_message(session.id, "I want to get better at DSA")]
 
     fetched = await service.get_session(session.id)
     assert fetched is not None
@@ -117,22 +123,84 @@ async def test_unclear_intent_surfaces_a_real_clarifying_question(db_path: str) 
     assert fetched.messages[0].role == ChatRole.USER
     assert fetched.messages[1].role == ChatRole.ASSISTANT
     assert fetched.messages[1].content == "Beginner or interview-level?"
+    assert any(e["type"] == "text_delta" for e in events)
+    assert events[-1]["type"] == "done"
 
 
-async def test_learning_plan_intent_confirms_before_generating(db_path: str) -> None:
+async def test_generate_plan_tool_call_persists_system_message_and_generates(db_path: str) -> None:
     user = await SqliteUserRepository(db_path).ensure_default_user()
-    llm = FakeLLMProvider(
-        structured_responses=[ClassifiedIntent(intent=UserIntent.LEARNING_PLAN, topic="prefix sums")]
+    generated = GeneratedCurriculum(
+        title="Prefix Sums",
+        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
     )
-    service = SessionService(SqliteSessionRepository(db_path), llm)
+    llm = FakeLLMProvider(
+        structured_responses=[generated],
+        chat_streams=[
+            [
+                ChatChunk(
+                    tool_call=ToolCallResult(
+                        name="generate_learning_plan",
+                        args={"topic": "prefix sums", "language": "python", "level": "beginner"},
+                    )
+                ),
+                ChatChunk(done=True),
+            ],
+            [ChatChunk(text_delta="Your plan for prefix sums is ready!"), ChatChunk(done=True)],
+        ],
+    )
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path), llm, skill_repository=SqliteSkillRepository(db_path)
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, curriculum)
     session = await service.create_session(user.id)
 
-    await service.add_message(session.id, ChatRole.USER, "teach me prefix sums")
+    events = [event async for event in service.add_message(session.id, "teach me prefix sums")]
 
     fetched = await service.get_session(session.id)
     assert fetched is not None
-    assert len(fetched.messages) == 2
-    reply = fetched.messages[1]
-    assert reply.role == ChatRole.ASSISTANT
-    assert "prefix sums" in reply.content
-    assert "Generate Learning Plan" in reply.content
+    assert len(fetched.messages) == 3  # user, SYSTEM "Generating...", closing ASSISTANT reply
+    assert fetched.messages[1].role == ChatRole.SYSTEM
+    assert "Generating" in fetched.messages[1].content
+    assert fetched.messages[2].role == ChatRole.ASSISTANT
+    assert "ready" in fetched.messages[2].content
+
+    plans = await curriculum.list_for_session(session.id)
+    assert len(plans) == 1
+    assert plans[0].topic == "prefix sums"
+
+    assert any(e["type"] == "tool_start" for e in events)
+
+
+async def test_generate_plan_tool_call_says_updating_when_a_plan_already_exists(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    generated = GeneratedCurriculum(
+        title="Prefix Sums",
+        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
+    )
+    llm = FakeLLMProvider(structured_responses=[generated, generated.model_copy()])
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path), llm, skill_repository=SqliteSkillRepository(db_path)
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, curriculum)
+    session = await service.create_session(user.id)
+    await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+
+    llm._chat_streams = [
+        [
+            ChatChunk(
+                tool_call=ToolCallResult(
+                    name="generate_learning_plan",
+                    args={"topic": "prefix sums v2", "language": "python", "level": "beginner"},
+                )
+            ),
+            ChatChunk(done=True),
+        ],
+        [ChatChunk(text_delta="Updated!"), ChatChunk(done=True)],
+    ]
+
+    async for _ in service.add_message(session.id, "actually make it harder"):
+        pass
+
+    fetched = await service.get_session(session.id)
+    assert fetched is not None
+    assert "Updating" in fetched.messages[1].content

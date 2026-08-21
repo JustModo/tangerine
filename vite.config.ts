@@ -10,6 +10,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": process.env.AGENT_URL || "http://localhost:8000",
+      "/health": process.env.AGENT_URL || "http://localhost:8000",
     },
   },
   plugins: [tailwindcss(), reactRouter(), tsconfigPaths()],

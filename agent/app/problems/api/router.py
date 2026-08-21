@@ -50,6 +50,9 @@ class ProblemDetail(BaseModel):
     difficulty: str
     statement_md: str
     boilerplate: str
+    constraints: str | None
+    hints: list[str]
+    tags: list[str]
     examples: list[ProblemExample]
 
 
@@ -70,6 +73,9 @@ async def get_problem(
         difficulty=problem.difficulty,
         statement_md=version.statement_md,
         boilerplate=version.boilerplate,
+        constraints=version.constraints,
+        hints=version.hints,
+        tags=problem.tags,
         examples=version.examples,
     )
 

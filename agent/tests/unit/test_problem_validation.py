@@ -39,6 +39,9 @@ def _generated_problem() -> GeneratedProblem:
         boilerplate="def solve(nums): ...",
         reference_solution="def solve(nums): return sum(nums)",
         examples=[GeneratedExample(input="1 2 3", output="6")],
+        constraints="1 <= len(nums) <= 10^5",
+        hints=["Consider a running total."],
+        tags=["prefix-sum", "arrays"],
     )
 
 
@@ -60,6 +63,9 @@ async def test_generate_and_validate_marks_available_on_success(db_path: str) ->
     assert len(version.tests) == 1
     # ground truth hash comes from the executor's actual_output, not the LLM's claimed output
     assert version.tests[0].output_hash == hash_output("6\n")
+    assert version.constraints == "1 <= len(nums) <= 10^5"
+    assert version.hints == ["Consider a running total."]
+    assert problem.tags == ["prefix-sum", "arrays"]
 
 
 async def test_generate_and_validate_marks_invalid_when_reference_solution_errors(db_path: str) -> None:

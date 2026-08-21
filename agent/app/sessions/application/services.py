@@ -1,26 +1,35 @@
 import logging
 import uuid
 from datetime import datetime, timezone
+from typing import AsyncIterator
 
+from app.curriculum.application.services import CurriculumService
+from app.curriculum.domain.models import LessonPlanStatus
 from app.llm.domain.provider import LLMProvider
-from app.llm.graphs.intent import classify_intent
-from app.llm.schemas.intent import ClassifiedIntent, UserIntent
+from app.llm.domain.requests import ChatStreamRequest, ChatTurn
+from app.llm.prompts.chat import GENERATE_PLAN_TOOL, chat_system_prompt
 from app.sessions.domain.models import ChatMessage, ChatRole, LearningSession, SessionStatus
 from app.sessions.domain.repository import SessionRepository
+from app.shared.types import Language
 
 logger = logging.getLogger(__name__)
 
 
 class SessionService:
-    """Session/chat persistence (plan.md §71-75). Chat is not the memory system — the
-    classified `intent` on each message is the only structured state anything
-    downstream relies on (plan.md §75) — but a classified message DOES get a real
-    assistant reply (a clarifying question, or a confirm-before-generating summary),
-    so the user is never asked to commit to a plan sight-unseen (plan.md §55)."""
+    """Session/chat persistence (plan.md §71-75). Chat is not the memory system — but a
+    user message now gets a real, streamed assistant reply: the model itself decides,
+    from conversation context, when to call the generate_learning_plan tool (no manual
+    button, no static templated reply) — see add_message/_stream_reply."""
 
-    def __init__(self, repository: SessionRepository, llm_provider: LLMProvider | None = None) -> None:
+    def __init__(
+        self,
+        repository: SessionRepository,
+        llm_provider: LLMProvider | None = None,
+        curriculum_service: CurriculumService | None = None,
+    ) -> None:
         self._repository = repository
         self._llm_provider = llm_provider
+        self._curriculum_service = curriculum_service
 
     async def create_session(self, user_id: str) -> LearningSession:
         now = datetime.now(timezone.utc)
@@ -43,62 +52,150 @@ class SessionService:
     async def delete_session(self, session_id: str) -> None:
         await self._repository.delete(session_id)
 
-    async def add_message(self, session_id: str, role: ChatRole, content: str) -> ChatMessage:
-        classified = None
-        if role == ChatRole.USER and self._llm_provider is not None:
-            # Best-effort: a message is still worth recording even if the LLM is
-            # unavailable/unconfigured (plan.md's "LLMs are not authoritative" theme).
-            try:
-                classified = await classify_intent(self._llm_provider, content)
-            except Exception:
-                logger.warning("Intent classification failed for session %s", session_id, exc_info=True)
+    async def add_message(self, session_id: str, content: str) -> AsyncIterator[dict]:
+        """Persists the user's message, then streams the assistant's reply as a sequence
+        of event dicts a router can turn straight into SSE frames:
+        {"type": "user_message", ...} once the user's own message is saved,
+        {"type": "text_delta", "delta": ...} for each streamed token,
+        {"type": "tool_start", "label": ...} when a plan-generation tool call begins
+        (persisted as a real ChatRole.SYSTEM message, not just a UI-only event),
+        {"type": "done", "message_id", "content"} once the final assistant reply lands."""
+        existing = await self._repository.get(session_id)
+        history = [
+            ChatTurn(role="user" if m.role == ChatRole.USER else "assistant", content=m.content)
+            for m in (existing.messages if existing else [])
+            if m.role in (ChatRole.USER, ChatRole.ASSISTANT)
+        ]
 
-        message = ChatMessage(
+        user_message = ChatMessage(
             id=str(uuid.uuid4()),
             session_id=session_id,
-            role=role,
+            role=ChatRole.USER,
             content=content,
-            intent=classified.intent.value if classified else None,
             created_at=datetime.now(timezone.utc),
         )
-        await self._repository.add_message(message)
+        await self._repository.add_message(user_message)
+        yield {"type": "user_message", "message_id": user_message.id}
 
-        # The reply lands after the user's own message is persisted, so the transcript
-        # reads in the right order (a reply appearing before its trigger is confusing).
-        if classified is not None:
+        if self._llm_provider is None:
+            return
+
+        existing_plan = False
+        if self._curriculum_service is not None:
             try:
-                await self._reply(session_id, classified)
+                plans = await self._curriculum_service.list_for_session(session_id)
+                existing_plan = any(
+                    p.status in (LessonPlanStatus.DRAFT, LessonPlanStatus.ACCEPTED) for p in plans
+                )
             except Exception:
-                logger.warning("Assistant reply failed for session %s", session_id, exc_info=True)
+                logger.warning("Failed to check for an existing plan for session %s", session_id, exc_info=True)
 
-        return message
+        try:
+            async for event in self._stream_reply(session_id, history, content, existing_plan):
+                yield event
+        except Exception:
+            logger.warning("Chat stream failed for session %s", session_id, exc_info=True)
 
-    async def _reply(self, session_id: str, classified: ClassifiedIntent) -> None:
-        if classified.intent == UserIntent.UNCLEAR:
-            text = classified.clarifying_question or (
-                'What would you like to learn? A broad topic (e.g. "prefix sums") works, '
-                "or paste a specific problem you're stuck on."
-            )
-        elif classified.intent == UserIntent.LEARNING_PLAN:
-            topic = classified.topic or "this topic"
-            text = (
-                f"Got it — I'll put together a learning plan for **{topic}**, in Python, "
-                f"starting at beginner level: a short sequence of skills building from "
-                f'fundamentals up to harder problems. Hit "Generate Learning Plan" below '
-                f"to confirm, or send another message first if you'd like something "
-                f"different — a different language, level, or focus."
-            )
-        else:  # SINGLE_PROBLEM — not built yet
-            text = (
-                "Practicing a single pasted problem isn't supported yet — let's build a "
-                "learning plan instead. What topic would you like to learn?"
-            )
+    async def _stream_reply(
+        self, session_id: str, history: list[ChatTurn], message: str, existing_plan: bool
+    ) -> AsyncIterator[dict]:
+        request = ChatStreamRequest(
+            system_prompt=chat_system_prompt(existing_plan),
+            history=history,
+            message=message,
+            tools=[GENERATE_PLAN_TOOL],
+        )
+        text_parts: list[str] = []
+        async for chunk in self._llm_provider.stream_chat(request):
+            if chunk.text_delta:
+                text_parts.append(chunk.text_delta)
+                yield {"type": "text_delta", "delta": chunk.text_delta}
+            if chunk.tool_call is not None and chunk.tool_call.name == "generate_learning_plan":
+                async for event in self._handle_generate_plan(
+                    session_id, chunk.tool_call.args, history, message, existing_plan
+                ):
+                    yield event
+                return
+            if chunk.done:
+                break
 
+        reply_text = "".join(text_parts).strip()
+        if reply_text:
+            reply = await self._persist_assistant_reply(session_id, reply_text)
+            yield {"type": "done", "message_id": reply.id, "content": reply_text}
+
+    async def _handle_generate_plan(
+        self,
+        session_id: str,
+        args: dict,
+        history: list[ChatTurn],
+        user_message: str,
+        existing_plan: bool,
+    ) -> AsyncIterator[dict]:
+        label = "Updating your learning plan..." if existing_plan else "Generating a learning plan..."
+        system_note = ChatMessage(
+            id=str(uuid.uuid4()),
+            session_id=session_id,
+            role=ChatRole.SYSTEM,
+            content=label,
+            created_at=datetime.now(timezone.utc),
+        )
+        await self._repository.add_message(system_note)
+        yield {"type": "tool_start", "label": label, "message_id": system_note.id}
+
+        topic = args.get("topic") or "this topic"
+        level = args.get("level") or "beginner"
+        try:
+            language = Language(args.get("language", Language.PYTHON.value))
+        except ValueError:
+            language = Language.PYTHON
+
+        plan = None
+        if self._curriculum_service is not None:
+            try:
+                plan = await self._curriculum_service.create_draft(session_id, topic, language, level)
+            except Exception:
+                logger.warning("Plan generation failed for session %s", session_id, exc_info=True)
+
+        result_summary = (
+            f"Generated a learning plan for '{plan.topic}' with {len(plan.nodes)} steps."
+            if plan is not None
+            else "Plan generation failed — tell the user something went wrong and they can try again."
+        )
+        follow_up_request = ChatStreamRequest(
+            system_prompt=chat_system_prompt(existing_plan),
+            history=history + [ChatTurn(role="user", content=user_message)],
+            message=f"[generate_learning_plan tool result] {result_summary}",
+            tools=[],
+        )
+        text_parts: list[str] = []
+        async for chunk in self._llm_provider.stream_chat(follow_up_request):
+            if chunk.text_delta:
+                text_parts.append(chunk.text_delta)
+                yield {"type": "text_delta", "delta": chunk.text_delta}
+            if chunk.done:
+                break
+
+        reply_text = "".join(text_parts).strip() or (
+            "Your learning plan is ready — check the corner button to view it."
+            if plan is not None
+            else "Something went wrong generating the plan — want to try again?"
+        )
+        reply = await self._persist_assistant_reply(session_id, reply_text)
+        yield {
+            "type": "done",
+            "message_id": reply.id,
+            "content": reply_text,
+            "plan_id": plan.id if plan is not None else None,
+        }
+
+    async def _persist_assistant_reply(self, session_id: str, content: str) -> ChatMessage:
         reply = ChatMessage(
             id=str(uuid.uuid4()),
             session_id=session_id,
             role=ChatRole.ASSISTANT,
-            content=text,
+            content=content,
             created_at=datetime.now(timezone.utc),
         )
         await self._repository.add_message(reply)
+        return reply

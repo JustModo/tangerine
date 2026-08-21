@@ -1,15 +1,66 @@
+import httpx
 from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app.main import app
 from app.shared.config import get_settings
 
 
-def test_health_returns_ok(tmp_path, monkeypatch):
+def test_health_reports_ok_when_citron_ready_and_gemini_configured(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     get_settings.cache_clear()
+
+    async def fake_ready() -> bool:
+        return True
+
+    monkeypatch.setattr(main_module, "_citron_ready", fake_ready)
 
     with TestClient(app) as client:
         response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["services"] == {"citron": True, "gemini": True}
+
+
+def test_health_reports_degraded_when_citron_unreachable(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
+    # A real .env in this repo sets GEMINI_API_KEY for local dev — an empty process env
+    # var overrides it (pydantic-settings prioritizes env vars over the .env file),
+    # whereas delenv alone would leave the .env file's value in effect.
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    get_settings.cache_clear()
+
+    async def fake_ready() -> bool:
+        return False
+
+    monkeypatch.setattr(main_module, "_citron_ready", fake_ready)
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "degraded"
+    assert body["services"] == {"citron": False, "gemini": False}
+
+
+async def test_citron_ready_returns_false_on_non_200(monkeypatch):
+    monkeypatch.setenv("CITRON_URL", "http://citron.test")
+    get_settings.cache_clear()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/ready"
+        return httpx.Response(503, json={"status": "unavailable"})
+
+    real_async_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: real_async_client(*args, transport=httpx.MockTransport(handler), **kwargs),
+    )
+
+    assert await main_module._citron_ready() is False
+    get_settings.cache_clear()

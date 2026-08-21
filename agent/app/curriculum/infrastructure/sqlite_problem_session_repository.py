@@ -12,16 +12,16 @@ class SqliteProblemSessionRepository:
         async with aiosqlite.connect(self._database_path) as db:
             await db.execute(
                 "INSERT INTO problem_sessions "
-                "(id, lesson_node_id, problem_id, user_id, code_path, status, created_at, updated_at) "
+                "(id, lesson_node_id, problem_id, user_id, source_code, status, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET "
-                "code_path=excluded.code_path, status=excluded.status, updated_at=excluded.updated_at",
+                "source_code=excluded.source_code, status=excluded.status, updated_at=excluded.updated_at",
                 (
                     session.id,
                     session.lesson_node_id,
                     session.problem_id,
                     session.user_id,
-                    session.code_path,
+                    session.source_code,
                     session.status.value,
                     session.created_at.isoformat(),
                     session.updated_at.isoformat(),
@@ -41,7 +41,7 @@ class SqliteProblemSessionRepository:
                 lesson_node_id=row["lesson_node_id"],
                 problem_id=row["problem_id"],
                 user_id=row["user_id"],
-                code_path=row["code_path"],
+                source_code=row["source_code"],
                 status=row["status"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],

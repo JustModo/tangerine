@@ -41,6 +41,8 @@ class ProblemVersion(BaseModel):
     statement_md: str
     reference_solution: str
     boilerplate: str = ""
+    constraints: str | None = None
+    hints: list[str] = []
     examples: list[ProblemExample] = []
     tests: list[ProblemTest] = []
     created_at: datetime
@@ -54,6 +56,7 @@ class Problem(BaseModel):
     difficulty: str
     status: ProblemStatus
     skill_ids: list[str] = []
+    tags: list[str] = []
     created_at: datetime
 
 

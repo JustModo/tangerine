@@ -1,5 +1,9 @@
+from typing import AsyncIterator
+
 from google import genai
 from google.genai import types
+
+from app.llm.domain.requests import ChatChunk, ChatTurn, ToolCallResult, ToolDeclaration
 
 
 class GeminiClient:
@@ -33,3 +37,52 @@ class GeminiClient:
         )
         response = await chat.send_message(user_prompt)
         return response.text or ""
+
+    async def stream_chat(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        history: list[ChatTurn],
+        message: str,
+        tools: list[ToolDeclaration],
+    ) -> AsyncIterator[ChatChunk]:
+        # Passing declarative types.Tool objects (not raw Python callables) means the
+        # SDK's automatic function calling never has anything callable to invoke — it
+        # streams a `function_call` part back to us instead, which is exactly the manual
+        # handoff we want (see google.genai._extra_utils.get_function_map: it only maps
+        # entries where `callable(tool)` is true).
+        genai_tools = (
+            [types.Tool(function_declarations=[
+                types.FunctionDeclaration(
+                    name=t.name, description=t.description, parameters_json_schema=t.parameters_schema
+                )
+                for t in tools
+            ])]
+            if tools
+            else None
+        )
+        chat = self._client.aio.chats.create(
+            model=model,
+            history=[
+                types.Content(
+                    role="model" if turn.role == "assistant" else "user",
+                    parts=[types.Part(text=turn.content)],
+                )
+                for turn in history
+            ],
+            config=types.GenerateContentConfig(system_instruction=system_prompt, tools=genai_tools),
+        )
+        async for chunk in await chat.send_message_stream(message):
+            if not chunk.candidates or not chunk.candidates[0].content:
+                continue
+            for part in chunk.candidates[0].content.parts or []:
+                if getattr(part, "function_call", None) is not None:
+                    yield ChatChunk(
+                        tool_call=ToolCallResult(
+                            name=part.function_call.name, args=dict(part.function_call.args or {})
+                        )
+                    )
+                elif getattr(part, "text", None):
+                    yield ChatChunk(text_delta=part.text)
+        yield ChatChunk(done=True)

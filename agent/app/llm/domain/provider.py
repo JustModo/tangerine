@@ -1,8 +1,8 @@
-from typing import Protocol, TypeVar
+from typing import AsyncIterator, Protocol, TypeVar
 
 from pydantic import BaseModel
 
-from app.llm.domain.requests import StructuredGenerationRequest, TextGenerationRequest
+from app.llm.domain.requests import ChatChunk, ChatStreamRequest, StructuredGenerationRequest, TextGenerationRequest
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -16,3 +16,5 @@ class LLMProvider(Protocol):
     ) -> T: ...
 
     async def generate_text(self, request: TextGenerationRequest) -> str: ...
+
+    def stream_chat(self, request: ChatStreamRequest) -> AsyncIterator[ChatChunk]: ...

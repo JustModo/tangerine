@@ -1,7 +1,5 @@
-import tempfile
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from app.execution.domain.executor import CodeExecutor
 from app.execution.domain.models import ExecutionRequest, ExecutionStatus
@@ -14,14 +12,6 @@ from app.problems.domain.repository import ProblemRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.shared.hashing import hash_output
 from app.shared.types import Language
-
-_LANGUAGE_EXTENSIONS = {
-    Language.PYTHON: "py",
-    Language.JAVASCRIPT: "js",
-    Language.CPP: "cpp",
-    Language.C: "c",
-    Language.JAVA: "java",
-}
 
 
 class ProblemValidationService:
@@ -62,6 +52,7 @@ class ProblemValidationService:
             difficulty=difficulty,
             status=ProblemStatus.VALIDATING,
             skill_ids=skill_ids,
+            tags=generated.tags or generated.skills or [skill],
             created_at=datetime.now(timezone.utc),
         )
         await self._repository.save(problem)
@@ -69,21 +60,17 @@ class ProblemValidationService:
         if not generated.examples:
             return await self._mark_invalid(problem)
 
-        code_path = self._write_reference_solution(language, generated.reference_solution)
-        try:
-            request = ExecutionRequest(
-                language=language,
-                code_path=code_path,
-                # output_hash is irrelevant here — we only read back actual_output below,
-                # never the PASS/FAIL verdict, since there's nothing trustworthy to compare against yet.
-                test_cases=[
-                    ExecutionTestCase(id=str(index), input=example.input, output_hash="")
-                    for index, example in enumerate(generated.examples)
-                ],
-            )
-            results = [result async for result in self._executor.execute(request)]
-        finally:
-            Path(code_path).unlink(missing_ok=True)
+        request = ExecutionRequest(
+            language=language,
+            code=generated.reference_solution,
+            # output_hash is irrelevant here — we only read back actual_output below,
+            # never the PASS/FAIL verdict, since there's nothing trustworthy to compare against yet.
+            test_cases=[
+                ExecutionTestCase(id=str(index), input=example.input, output_hash="")
+                for index, example in enumerate(generated.examples)
+            ],
+        )
+        results = [result async for result in self._executor.execute(request)]
 
         broken = len(results) != len(generated.examples) or any(
             r.status in (ExecutionStatus.ERROR, ExecutionStatus.TIMEOUT) for r in results
@@ -98,6 +85,8 @@ class ProblemValidationService:
             statement_md=generated.statement_md,
             reference_solution=generated.reference_solution,
             boilerplate=generated.boilerplate,
+            constraints=generated.constraints,
+            hints=generated.hints,
             examples=[
                 ProblemExample(id=str(uuid.uuid4()), input=ex.input, output=ex.output, explanation=ex.explanation)
                 for ex in generated.examples
@@ -123,12 +112,3 @@ class ProblemValidationService:
         invalid = problem.model_copy(update={"status": ProblemStatus.INVALID})
         await self._repository.save(invalid)
         return None
-
-    def _write_reference_solution(self, language: Language, code: str) -> str:
-        # Assumes the agent and the Node sandbox share a filesystem (true in dev and in a
-        # single-host deploy — the same assumption run.tsx's codePath already makes).
-        extension = _LANGUAGE_EXTENSIONS[language]
-        fd, path = tempfile.mkstemp(suffix=f".{extension}", prefix="tangerine_ref_")
-        with open(fd, "w") as f:
-            f.write(code)
-        return path

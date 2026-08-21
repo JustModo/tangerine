@@ -19,7 +19,7 @@ class Evaluation(BaseModel):
     passed_tests: int
     total_tests: int
     runtime_ms: float | None = None
-    memory_mb: float | None = None  # runner_service.ts doesn't measure memory yet — always null for now
+    memory_mb: float | None = None  # peak across per-test memory_kb; null when the executor can't measure it (e.g. the local JS fallback)
     complexity_verdict: str | None = None  # no static complexity analyzer built yet — always null for now
     feedback: str | None = None
     created_at: datetime

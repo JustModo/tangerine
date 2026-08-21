@@ -1,3 +1,5 @@
+import json
+
 import aiosqlite
 
 from app.problems.domain.models import (
@@ -67,10 +69,11 @@ class SqliteProblemRepository:
     async def save(self, problem: Problem) -> None:
         async with aiosqlite.connect(self._database_path) as db:
             await db.execute(
-                "INSERT INTO problems (id, conceptual_id, title, language, difficulty, status, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "INSERT INTO problems (id, conceptual_id, title, language, difficulty, status, tags_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET "
-                "title=excluded.title, difficulty=excluded.difficulty, status=excluded.status",
+                "title=excluded.title, difficulty=excluded.difficulty, status=excluded.status, "
+                "tags_json=excluded.tags_json",
                 (
                     problem.id,
                     problem.conceptual_id,
@@ -78,6 +81,7 @@ class SqliteProblemRepository:
                     problem.language.value,
                     problem.difficulty,
                     problem.status.value,
+                    json.dumps(problem.tags),
                     problem.created_at.isoformat(),
                 ),
             )
@@ -92,8 +96,9 @@ class SqliteProblemRepository:
         async with aiosqlite.connect(self._database_path) as db:
             await db.execute(
                 "INSERT INTO problem_versions "
-                "(id, problem_id, version, statement_md, reference_solution, boilerplate, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(id, problem_id, version, statement_md, reference_solution, boilerplate, "
+                "constraints, hints_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     version.id,
                     version.problem_id,
@@ -101,6 +106,8 @@ class SqliteProblemRepository:
                     version.statement_md,
                     version.reference_solution,
                     version.boilerplate,
+                    version.constraints,
+                    json.dumps(version.hints),
                     version.created_at.isoformat(),
                 ),
             )
@@ -145,6 +152,8 @@ class SqliteProblemRepository:
                 statement_md=row["statement_md"],
                 reference_solution=row["reference_solution"],
                 boilerplate=row["boilerplate"],
+                constraints=row["constraints"],
+                hints=json.loads(row["hints_json"] or "[]"),
                 created_at=row["created_at"],
                 examples=[
                     ProblemExample(id=e["id"], input=e["input"], output=e["output"], explanation=e["explanation"])
@@ -169,5 +178,6 @@ class SqliteProblemRepository:
             difficulty=row["difficulty"],
             status=row["status"],
             skill_ids=[r["skill_id"] for r in skill_rows],
+            tags=json.loads(row["tags_json"] or "[]"),
             created_at=row["created_at"],
         )

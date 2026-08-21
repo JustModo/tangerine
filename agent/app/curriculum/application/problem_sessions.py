@@ -103,12 +103,21 @@ class ProblemSessionService:
     async def get(self, session_id: str) -> ProblemSession | None:
         return await self._session_repository.get(session_id)
 
-    async def set_source(self, session_id: str, code_path: str) -> ProblemSession:
+    async def save_code(self, session_id: str, source_code: str) -> ProblemSession:
         session = await self._require(session_id)
+        # Called on every debounced autosave tick as well as on Run/Submit — only ever
+        # advance a fresh session into IN_PROGRESS; never regress a SUBMITTED/COMPLETED
+        # session back on a later autosave (unlike the old one-time file-pick flow, this
+        # fires repeatedly for the lifetime of the page).
+        status = (
+            ProblemSessionStatus.IN_PROGRESS
+            if session.status == ProblemSessionStatus.NOT_STARTED
+            else session.status
+        )
         updated = session.model_copy(
             update={
-                "code_path": code_path,
-                "status": ProblemSessionStatus.IN_PROGRESS,
+                "source_code": source_code,
+                "status": status,
                 "updated_at": datetime.now(timezone.utc),
             }
         )

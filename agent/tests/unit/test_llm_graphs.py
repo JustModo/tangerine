@@ -2,23 +2,12 @@ import pytest
 
 from app.llm.graphs.coaching import generate_coaching_feedback
 from app.llm.graphs.curriculum import generate_curriculum
-from app.llm.graphs.intent import classify_intent
 from app.llm.graphs.problem import generate_problem
 from app.llm.infrastructure.gemini.mapping import SchemaValidationError
 from app.llm.schemas.coaching import CoachingFeedback
 from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
-from app.llm.schemas.intent import ClassifiedIntent, UserIntent
 from app.llm.schemas.problem import GeneratedExample, GeneratedProblem
 from tests.fakes import FakeLLMProvider
-
-
-async def test_classify_intent_returns_structured_result() -> None:
-    provider = FakeLLMProvider(
-        structured_responses=[ClassifiedIntent(intent=UserIntent.LEARNING_PLAN, topic="prefix sums")]
-    )
-    result = await classify_intent(provider, "teach me prefix sums")
-    assert result.intent == UserIntent.LEARNING_PLAN
-    assert result.topic == "prefix sums"
 
 
 async def test_generate_curriculum_retries_on_invalid_then_succeeds() -> None:

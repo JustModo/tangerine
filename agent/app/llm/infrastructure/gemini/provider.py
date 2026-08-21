@@ -1,8 +1,8 @@
-from typing import TypeVar
+from typing import AsyncIterator, TypeVar
 
 from pydantic import BaseModel
 
-from app.llm.domain.requests import StructuredGenerationRequest, TextGenerationRequest
+from app.llm.domain.requests import ChatChunk, ChatStreamRequest, StructuredGenerationRequest, TextGenerationRequest
 from app.llm.infrastructure.gemini.client import GeminiClient
 from app.llm.infrastructure.gemini.mapping import parse_structured_response
 from app.shared.config import get_settings
@@ -44,3 +44,13 @@ class GeminiProvider:
             system_prompt=request.system_prompt,
             user_prompt=request.user_prompt,
         )
+
+    async def stream_chat(self, request: ChatStreamRequest) -> AsyncIterator[ChatChunk]:
+        async for chunk in self._get_client().stream_chat(
+            model=request.model or self._default_model,
+            system_prompt=request.system_prompt,
+            history=request.history,
+            message=request.message,
+            tools=request.tools,
+        ):
+            yield chunk

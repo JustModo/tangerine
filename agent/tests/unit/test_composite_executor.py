@@ -21,7 +21,7 @@ async def test_routes_python_to_citron() -> None:
     executor = CompositeExecutor(citron=citron, local=local)
     request = ExecutionRequest(
         language=Language.PYTHON,
-        code_path="x.py",
+        code="print(1)",
         test_cases=[ExecutionTestCase(id="t1", input="", output_hash=hash_output("x"))],
     )
 
@@ -36,7 +36,7 @@ async def test_routes_javascript_to_local_fallback() -> None:
     executor = CompositeExecutor(citron=citron, local=local)
     request = ExecutionRequest(
         language=Language.JAVASCRIPT,
-        code_path="x.js",
+        code="console.log(1)",
         test_cases=[ExecutionTestCase(id="t1", input="", output_hash=hash_output("x"))],
     )
 

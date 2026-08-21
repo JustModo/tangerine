@@ -19,7 +19,7 @@ class ProblemSession(BaseModel):
     lesson_node_id: str
     problem_id: str
     user_id: str
-    code_path: str | None = None
+    source_code: str | None = None
     status: ProblemSessionStatus
     created_at: datetime
     updated_at: datetime

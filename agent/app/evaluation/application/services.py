@@ -1,7 +1,6 @@
 import logging
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from app.evaluation.domain.models import Evaluation, Submission
 from app.evaluation.domain.repository import EvaluationRepository
@@ -47,7 +46,7 @@ class EvaluationService:
         self._mastery_service = mastery_service
 
     async def evaluate(
-        self, problem_id: str, user_id: str, language: Language, code_path: str
+        self, problem_id: str, user_id: str, language: Language, code: str
     ) -> Evaluation:
         problem = await self._problem_repository.get(problem_id)
         if problem is None:
@@ -59,7 +58,7 @@ class EvaluationService:
 
         request = ExecutionRequest(
             language=language,
-            code_path=code_path,
+            code=code,
             test_cases=[
                 ExecutionTestCase(id=test.id, input=test.input, output_hash=test.output_hash)
                 for test in version.tests
@@ -70,13 +69,15 @@ class EvaluationService:
         passed = sum(1 for r in results if r.status == ExecutionStatus.PASSED)
         runtimes = [t for r in results if (t := _parse_runtime_ms(r.execution_time_ms)) is not None]
         runtime_ms = sum(runtimes) if runtimes else None
+        memories = [r.memory_kb for r in results if r.memory_kb is not None]
+        memory_mb = max(memories) / 1024 if memories else None
 
         now = datetime.now(timezone.utc)
         submission = Submission(
             id=str(uuid.uuid4()),
             problem_id=problem_id,
             user_id=user_id,
-            code_snapshot=Path(code_path).read_text(),
+            code_snapshot=code,
             created_at=now,
         )
         await self._repository.save_submission(submission)
@@ -124,6 +125,7 @@ class EvaluationService:
             passed_tests=passed,
             total_tests=len(version.tests),
             runtime_ms=runtime_ms,
+            memory_mb=memory_mb,
             feedback=feedback,
             created_at=now,
             results=results,

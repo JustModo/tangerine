@@ -28,11 +28,11 @@ def get_service() -> EvaluationService:
 class EvaluateBody(BaseModel):
     problem_id: str
     language: Language
-    code_path: str
+    code: str
 
 
 @router.post("")
 async def evaluate(
     body: EvaluateBody, service: EvaluationService = Depends(get_service)
 ) -> Evaluation:
-    return await service.evaluate(body.problem_id, LOCAL_USER_ID, body.language, body.code_path)
+    return await service.evaluate(body.problem_id, LOCAL_USER_ID, body.language, body.code)

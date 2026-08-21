@@ -1,60 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { toast } from "sonner";
-import { ArrowLeft, ChevronLeft, FileCode, Folder, Play, RefreshCcw, X } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import { cn } from "~/lib/utils";
+import { CodeWorkbench } from "@/components/code-workbench/CodeWorkbench";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiFetch, apiJson } from "~/lib/api";
+import type { EvaluationResult, ProblemDetail, TestResult } from "~/lib/types";
 
 interface ProblemSessionData {
   id: string;
   problem_id: string;
-  code_path: string | null;
+  source_code: string | null;
   status: string;
-}
-
-interface ProblemExample {
-  id: string;
-  input: string;
-  output: string;
-  explanation?: string | null;
-}
-
-interface ProblemDetail {
-  id: string;
-  title: string;
-  language: string;
-  difficulty: string;
-  statement_md: string;
-  boilerplate: string;
-  examples: ProblemExample[];
-}
-
-interface RunResult {
-  id: string;
-  status: string;
-  input: string;
-  actual_output?: string | null;
-  error?: string | null;
-  execution_time_ms?: string | null;
-}
-
-interface EvaluationResult {
-  passed_tests: number;
-  total_tests: number;
-  feedback?: string | null;
-  results: RunResult[];
 }
 
 export default function ProblemSessionScreen() {
@@ -62,22 +19,12 @@ export default function ProblemSessionScreen() {
   const navigate = useNavigate();
   const [session, setSession] = useState<ProblemSessionData | null>(null);
   const [problem, setProblem] = useState<ProblemDetail | null>(null);
-  const [codePath, setCodePath] = useState("");
-  const [results, setResults] = useState<Record<string, RunResult>>({});
-  const [isRunning, setIsRunning] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
-
-  const [showPicker, setShowPicker] = useState(false);
-  const [explorerPath, setExplorerPath] = useState("");
-  const [explorerFiles, setExplorerFiles] = useState<any[]>([]);
-  const { showError, setBusyMessage } = useStatus();
+  const { showError } = useStatus();
 
   async function load() {
     try {
       const sessionData = await apiJson<ProblemSessionData>(`/api/problem-sessions/${id}`);
       setSession(sessionData);
-      setCodePath(sessionData.code_path || "");
       setProblem(await apiJson<ProblemDetail>(`/api/problems/${sessionData.problem_id}`));
     } catch (err) {
       showError(err instanceof ApiError ? err.message : "Failed to load problem session");
@@ -89,94 +36,51 @@ export default function ProblemSessionScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const openPicker = async (path?: string) => {
+  async function autosave(code: string) {
     try {
-      const data = await apiJson<{ current_path: string; files: any[] }>(
-        `/api/workspace/list${path ? `?path=${encodeURIComponent(path)}` : ""}`,
-      );
-      setExplorerPath(data.current_path);
-      setExplorerFiles(data.files);
-      setShowPicker(true);
-    } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Failed to browse files");
-    }
-  };
-
-  async function selectSourceFile(path: string) {
-    try {
-      // Confirm the backend actually recorded it before treating it as selected —
-      // this used to be fire-and-forget, so a dropped connection left the UI showing a
-      // source file the server never knew about.
-      await apiJson(`/api/problem-sessions/${id}/source`, {
-        method: "POST",
+      await apiJson(`/api/problem-sessions/${id}/code`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code_path: path }),
+        body: JSON.stringify({ source_code: code }),
       });
-      setCodePath(path);
-      setShowPicker(false);
-    } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Failed to set source file");
+    } catch {
+      // Non-critical — a failed autosave tick just means the next one (or Run/Submit,
+      // which also save) will catch it up. Not worth interrupting the user for.
     }
   }
 
-  async function runVisibleTests() {
-    if (!codePath) return;
-    setIsRunning(true);
-    setBusyMessage("Running visible tests...");
-    setResults({});
-    try {
-      const response = await apiFetch(`/api/problem-sessions/${id}/run`, { method: "POST" });
-      if (!response.ok) {
-        showError(`Run failed (${response.status})`);
-        return;
+  async function* runCode(code: string): AsyncGenerator<TestResult> {
+    const response = await apiFetch(`/api/problem-sessions/${id}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_code: code }),
+    });
+    if (!response.ok) throw new ApiError(`Run failed (${response.status})`, response.status);
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+    if (!reader) return;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      for (const line of chunk.split("\n\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const dataStr = line.replace("data: ", "");
+        if (dataStr === "{}" || !dataStr.trim()) continue;
+        try {
+          yield JSON.parse(dataStr) as TestResult;
+        } catch {}
       }
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value);
-          for (const line of chunk.split("\n\n")) {
-            if (!line.startsWith("data: ")) continue;
-            const dataStr = line.replace("data: ", "");
-            if (dataStr === "{}" || !dataStr.trim()) continue;
-            try {
-              const result = JSON.parse(dataStr) as RunResult;
-              setResults((prev) => ({ ...prev, [result.id]: result }));
-            } catch {}
-          }
-        }
-      }
-    } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Run failed");
-    } finally {
-      setIsRunning(false);
-      setBusyMessage(null);
     }
   }
 
-  async function submit() {
-    if (!codePath) return;
-    setIsSubmitting(true);
-    setBusyMessage("Evaluating submission...");
-    try {
-      const evaluationData = await apiJson<EvaluationResult>(
-        `/api/problem-sessions/${id}/submit`,
-        { method: "POST" },
-      );
-      setEvaluation(evaluationData);
-      toast.success(
-        evaluationData.passed_tests === evaluationData.total_tests
-          ? "All hidden tests passed!"
-          : `${evaluationData.passed_tests}/${evaluationData.total_tests} hidden tests passed`,
-      );
-    } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Submission failed");
-    } finally {
-      setIsSubmitting(false);
-      setBusyMessage(null);
-    }
+  async function submitCode(code: string): Promise<EvaluationResult> {
+    return apiJson<EvaluationResult>(`/api/problem-sessions/${id}/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_code: code }),
+    });
   }
 
   if (!session || !problem) {
@@ -188,237 +92,21 @@ export default function ProblemSessionScreen() {
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-black text-white px-10 pt-10">
-      <div className="flex-none">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Back">
-              <ArrowLeft className="w-4 h-4" />
-            </Button>
-            <div className="space-y-1">
-              <h1 className="text-4xl font-black tracking-tighter uppercase">{problem.title}</h1>
-              <p className="text-zinc-500 text-xs font-bold uppercase tracking-[0.2em]">
-                {problem.language} · {problem.difficulty}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex gap-4 mb-8">
-          <div className="flex-1 flex gap-2">
-            <Input
-              placeholder="FULL PATH TO SOURCE FILE"
-              className="flex-1 bg-zinc-950 border-white/10 font-bold uppercase tracking-widest text-[10px]"
-              value={codePath}
-              onChange={(e) => setCodePath(e.target.value)}
-              onBlur={() => codePath && selectSourceFile(codePath)}
-            />
-            <Button
-              variant="outline"
-              className="border-dashed border-white/20 hover:border-white text-[10px]"
-              onClick={() => openPicker()}
-            >
-              PICK SOURCE
-            </Button>
-          </div>
-          <Button
-            onClick={runVisibleTests}
-            disabled={!codePath || isRunning}
-            variant="outline"
-            className="text-[10px]"
-          >
-            {isRunning ? (
-              <RefreshCcw className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="mr-2 h-4 w-4" />
-            )}
-            RUN
-          </Button>
-          <Button onClick={submit} disabled={!codePath || isSubmitting} className="text-[10px]">
-            SUBMIT
-          </Button>
-        </div>
-        <Separator className="bg-white/10 mb-8" />
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <div className="flex-none px-4 py-2 flex items-center gap-2 border-b border-white/10 bg-black">
+        <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Back">
+          <ArrowLeft className="w-4 h-4" />
+        </Button>
       </div>
-
-      <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0 overflow-hidden">
-        <ResizablePanel defaultSize={40}>
-          <ScrollArea className="h-full p-8 prose dark:prose-invert max-w-none bg-zinc-950 border-r border-white/10">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{problem.statement_md}</ReactMarkdown>
-            {problem.boilerplate && (
-              <>
-                <h3>Boilerplate</h3>
-                <pre className="text-xs whitespace-pre-wrap">{problem.boilerplate}</pre>
-              </>
-            )}
-          </ScrollArea>
-        </ResizablePanel>
-
-        <ResizableHandle className="w-1 bg-white/5" />
-
-        <ResizablePanel defaultSize={60} className="h-full overflow-hidden">
-          <div className="h-full flex flex-col bg-black overflow-hidden">
-            <ScrollArea className="flex-1 min-h-0 px-8 py-8 w-full">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-4">
-                Visible Example Results
-              </h3>
-              <div className="space-y-3">
-                {problem.examples.map((example) => {
-                  const result = results[example.id];
-                  return (
-                    <div
-                      key={example.id}
-                      className="border border-white/10 p-4 text-xs font-mono space-y-1"
-                    >
-                      <div>
-                        <span className="text-zinc-600">IN:</span> {example.input}
-                      </div>
-                      <div>
-                        <span className="text-zinc-600">STATUS:</span>{" "}
-                        <span
-                          className={cn(
-                            "font-black",
-                            result?.status === "PASSED" && "text-green-500",
-                            result?.status === "FAILED" && "text-red-500",
-                          )}
-                        >
-                          {result?.status || "PENDING"}
-                        </span>
-                      </div>
-                      {result?.actual_output && (
-                        <div className="text-zinc-500">OUT: {result.actual_output}</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {evaluation && (
-                <div className="mt-8 border-t border-white/10 pt-6 space-y-2">
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
-                    Evaluation
-                  </h3>
-                  <p className="text-sm font-bold">
-                    {evaluation.passed_tests} / {evaluation.total_tests} hidden tests passed
-                  </p>
-                  {evaluation.feedback && (
-                    <p className="text-xs text-zinc-400">{evaluation.feedback}</p>
-                  )}
-                  <div className="space-y-2 pt-2">
-                    {evaluation.results.map((result, index) => (
-                      <div
-                        key={result.id || index}
-                        className="border border-white/10 p-4 text-xs font-mono space-y-1"
-                      >
-                        <div>
-                          <span className="text-zinc-600">TEST {index + 1} · IN:</span>{" "}
-                          {result.input}
-                        </div>
-                        <div>
-                          <span className="text-zinc-600">STATUS:</span>{" "}
-                          <span
-                            className={cn(
-                              "font-black",
-                              result.status === "PASSED" && "text-green-500",
-                              result.status === "FAILED" && "text-red-500",
-                            )}
-                          >
-                            {result.status}
-                          </span>
-                        </div>
-                        {result.actual_output && (
-                          <div className="text-zinc-500">ACTUAL: {result.actual_output}</div>
-                        )}
-                        {result.error && <div className="text-red-500">ERROR: {result.error}</div>}
-                        <div className="text-zinc-700">EXPECTED: hidden</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </ScrollArea>
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-
-      {showPicker && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-8 bg-black/80 backdrop-blur-sm">
-          <div className="w-full max-w-2xl bg-zinc-950 border border-white/20 flex flex-col h-[70vh] overflow-hidden">
-            <div className="flex-none p-6 border-b border-white/10 flex justify-between items-center bg-black">
-              <div className="space-y-1">
-                <h3 className="text-sm font-black uppercase tracking-widest">
-                  Select Source File
-                </h3>
-                <p className="text-[9px] font-mono text-zinc-500 overflow-hidden text-ellipsis whitespace-nowrap max-w-md">
-                  {explorerPath}
-                </p>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => setShowPicker(false)}>
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-
-            <div className="flex-none p-4 flex gap-2 overflow-x-auto bg-zinc-900 border-b border-white/5">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-[9px] font-black uppercase"
-                onClick={() =>
-                  openPicker(explorerPath.split("/").slice(0, -1).join("/") || "/")
-                }
-              >
-                <ChevronLeft className="w-3 h-3 mr-2" /> UP
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-[9px] font-black uppercase"
-                onClick={async () => {
-                  try {
-                    const data = await apiJson<{ path: string }>("/api/workspace/home");
-                    openPicker(data.path);
-                  } catch (err) {
-                    showError(err instanceof ApiError ? err.message : "Failed to reach home directory");
-                  }
-                }}
-              >
-                HOME
-              </Button>
-            </div>
-
-            <div className="flex-1 overflow-hidden">
-              <ScrollArea className="h-full w-full">
-                <div className="p-2">
-                  {explorerFiles.map((file) => (
-                    <button
-                      key={file.path}
-                      type="button"
-                      onClick={() =>
-                        file.is_directory ? openPicker(file.path) : selectSourceFile(file.path)
-                      }
-                      className="w-full flex items-center gap-3 p-3 text-[11px] font-medium border border-transparent hover:border-white/10 hover:bg-white/5 transition-all text-left group"
-                    >
-                      {file.is_directory ? (
-                        <Folder className="w-4 h-4 text-zinc-500 group-hover:text-white" />
-                      ) : (
-                        <FileCode className="w-4 h-4 text-white" />
-                      )}
-                      <span
-                        className={cn(
-                          file.is_directory ? "text-zinc-400" : "text-white",
-                          "group-hover:text-white",
-                        )}
-                      >
-                        {file.name}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </ScrollArea>
-            </div>
-          </div>
-        </div>
-      )}
+      <div className="flex-1 min-h-0">
+        <CodeWorkbench
+          problem={problem}
+          initialCode={session.source_code ?? problem.boilerplate}
+          onAutosave={autosave}
+          onRun={runCode}
+          onSubmit={submitCode}
+        />
+      </div>
     </div>
   );
 }

@@ -55,12 +55,9 @@ async def _seed_problem(db_path: str) -> str:
     return problem.id
 
 
-async def test_evaluate_persists_deterministic_result_and_coaching_feedback(
-    tmp_path: Path, db_path: str
-) -> None:
+async def test_evaluate_persists_deterministic_result_and_coaching_feedback(db_path: str) -> None:
     problem_id = await _seed_problem(db_path)
-    code_file = tmp_path / "solution.py"
-    code_file.write_text("print(sum(int(x) for x in input().split()))")
+    code = "print(sum(int(x) for x in input().split()))"
 
     executor = FakeCodeExecutor(
         [TestResult(id="t1", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6")]
@@ -72,17 +69,16 @@ async def test_evaluate_persists_deterministic_result_and_coaching_feedback(
         SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor, llm
     )
 
-    evaluation = await service.evaluate(problem_id, "local-user", Language.PYTHON, str(code_file))
+    evaluation = await service.evaluate(problem_id, "local-user", Language.PYTHON, code)
 
     assert evaluation.passed_tests == 1
     assert evaluation.total_tests == 1
     assert evaluation.feedback == "Nice work."
 
 
-async def test_evaluate_degrades_gracefully_when_llm_unavailable(tmp_path: Path, db_path: str) -> None:
+async def test_evaluate_degrades_gracefully_when_llm_unavailable(db_path: str) -> None:
     problem_id = await _seed_problem(db_path)
-    code_file = tmp_path / "solution.py"
-    code_file.write_text("print(sum(int(x) for x in input().split()))")
+    code = "print(sum(int(x) for x in input().split()))"
 
     executor = FakeCodeExecutor(
         [TestResult(id="t1", status=ExecutionStatus.FAILED, input="1 2 3", actual_output="7")]
@@ -91,16 +87,15 @@ async def test_evaluate_degrades_gracefully_when_llm_unavailable(tmp_path: Path,
         SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor, llm_provider=None
     )
 
-    evaluation = await service.evaluate(problem_id, "local-user", Language.PYTHON, str(code_file))
+    evaluation = await service.evaluate(problem_id, "local-user", Language.PYTHON, code)
 
     assert evaluation.passed_tests == 0
     assert evaluation.feedback is None
 
 
-async def test_evaluate_returns_per_test_results_for_debugging(tmp_path: Path, db_path: str) -> None:
+async def test_evaluate_returns_per_test_results_for_debugging(db_path: str) -> None:
     problem_id = await _seed_problem(db_path)
-    code_file = tmp_path / "solution.py"
-    code_file.write_text("print(sum(int(x) for x in input().split()) + 1)")  # off by one
+    code = "print(sum(int(x) for x in input().split()) + 1)"  # off by one
 
     executor = FakeCodeExecutor(
         [TestResult(id="t1", status=ExecutionStatus.FAILED, input="1 2 3", actual_output="7")]
@@ -109,9 +104,25 @@ async def test_evaluate_returns_per_test_results_for_debugging(tmp_path: Path, d
         SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor, llm_provider=None
     )
 
-    evaluation = await service.evaluate(problem_id, "local-user", Language.PYTHON, str(code_file))
+    evaluation = await service.evaluate(problem_id, "local-user", Language.PYTHON, code)
 
     assert len(evaluation.results) == 1
     assert evaluation.results[0].input == "1 2 3"
     assert evaluation.results[0].actual_output == "7"
     assert evaluation.results[0].status == ExecutionStatus.FAILED
+
+
+async def test_evaluate_computes_peak_memory_across_results(db_path: str) -> None:
+    problem_id = await _seed_problem(db_path)
+    executor = FakeCodeExecutor(
+        [TestResult(id="t1", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6", memory_kb=8192)]
+    )
+    service = EvaluationService(
+        SqliteEvaluationRepository(db_path), SqliteProblemRepository(db_path), executor, llm_provider=None
+    )
+
+    evaluation = await service.evaluate(
+        problem_id, "local-user", Language.PYTHON, "print(sum(int(x) for x in input().split()))"
+    )
+
+    assert evaluation.memory_mb == 8.0

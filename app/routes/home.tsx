@@ -66,10 +66,10 @@ export default function Home() {
     <div className="flex-1 flex flex-col min-h-0 w-full">
       <div className="max-w-3xl mx-auto w-full flex-none flex flex-col gap-10 px-10 pt-20 pb-10">
         <div className="space-y-4 text-center">
+          <p className="text-3xl font-black tracking-tighter">TANGERINE</p>
           <h1 className="text-7xl font-black tracking-tighter uppercase leading-none">
             Learning<br />Sessions
           </h1>
-          <p className="text-zinc-500 text-sm font-bold uppercase tracking-[0.5em]">Tangerine Engine v1.0</p>
         </div>
 
         <Button className="tracking-[0.3em]" onClick={startNewSession}>

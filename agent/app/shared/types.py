@@ -9,3 +9,12 @@ class Language(StrEnum):
     CPP = "cpp"
     C = "c"
     JAVA = "java"
+
+
+LANGUAGE_EXTENSIONS: dict[Language, str] = {
+    Language.PYTHON: "py",
+    Language.JAVASCRIPT: "js",
+    Language.CPP: "cpp",
+    Language.C: "c",
+    Language.JAVA: "java",
+}

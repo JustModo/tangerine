@@ -50,8 +50,8 @@ def get_service() -> ProblemSessionService:
     )
 
 
-class SetSourceBody(BaseModel):
-    code_path: str
+class SourceCodeBody(BaseModel):
+    source_code: str
 
 
 @router.get("/{session_id}")
@@ -64,22 +64,23 @@ async def get_session(
     return session
 
 
-@router.post("/{session_id}/source")
-async def set_source(
-    session_id: str, body: SetSourceBody, service: ProblemSessionService = Depends(get_service)
+@router.patch("/{session_id}/code")
+async def save_code(
+    session_id: str, body: SourceCodeBody, service: ProblemSessionService = Depends(get_service)
 ) -> ProblemSession:
-    return await service.set_source(session_id, body.code_path)
+    return await service.save_code(session_id, body.source_code)
 
 
 @router.post("/{session_id}/run")
-async def run(session_id: str, service: ProblemSessionService = Depends(get_service)) -> StreamingResponse:
+async def run(
+    session_id: str, body: SourceCodeBody, service: ProblemSessionService = Depends(get_service)
+) -> StreamingResponse:
     """Runs the problem's visible examples (not graded) — the "Run" action, distinct from
     "Submit" which grades against hidden tests (plan.md §12, §16)."""
     session = await service.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Problem session not found")
-    if session.code_path is None:
-        raise HTTPException(status_code=400, detail="Set a source file before running")
+    await service.save_code(session_id, body.source_code)
 
     problem_repo = SqliteProblemRepository()
     problem = await problem_repo.get(session.problem_id)
@@ -90,7 +91,7 @@ async def run(session_id: str, service: ProblemSessionService = Depends(get_serv
     execution_service = ExecutionService(CompositeExecutor())
     request = ExecutionRequest(
         language=problem.language,
-        code_path=session.code_path,
+        code=body.source_code,
         test_cases=[
             ExecutionTestCase(id=example.id, input=example.input, output_hash=hash_output(example.output))
             for example in version.examples
@@ -107,13 +108,12 @@ async def run(session_id: str, service: ProblemSessionService = Depends(get_serv
 
 @router.post("/{session_id}/submit")
 async def submit(
-    session_id: str, service: ProblemSessionService = Depends(get_service)
+    session_id: str, body: SourceCodeBody, service: ProblemSessionService = Depends(get_service)
 ) -> Evaluation:
     session = await service.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Problem session not found")
-    if session.code_path is None:
-        raise HTTPException(status_code=400, detail="Set a source file before submitting")
+    await service.save_code(session_id, body.source_code)
 
     problem_repo = SqliteProblemRepository()
     problem = await problem_repo.get(session.problem_id)
@@ -129,7 +129,7 @@ async def submit(
     )
     try:
         evaluation = await eval_service.evaluate(
-            session.problem_id, LOCAL_USER_ID, problem.language, session.code_path
+            session.problem_id, LOCAL_USER_ID, problem.language, body.source_code
         )
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

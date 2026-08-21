@@ -1,16 +1,20 @@
 from pydantic import BaseModel
 
 from app.execution.domain.models import ExecutionRequest, TestResult
-from app.llm.domain.requests import StructuredGenerationRequest, TextGenerationRequest
+from app.llm.domain.requests import ChatChunk, ChatStreamRequest, StructuredGenerationRequest, TextGenerationRequest
 
 
 class FakeLLMProvider:
     """Test double for LLMProvider — returns/raises queued canned responses in order,
     so graph logic (retry loops, schema handling) can be tested without a live API key."""
 
-    def __init__(self, structured_responses=None, text_responses=None) -> None:
+    def __init__(self, structured_responses=None, text_responses=None, chat_streams=None) -> None:
         self._structured_responses = list(structured_responses or [])
         self._text_responses = list(text_responses or [])
+        # Each item is itself a list[ChatChunk] — one queued item per stream_chat() call,
+        # mirroring how the real control flow calls it once for the initial reply and
+        # again for the closing reply after a tool call.
+        self._chat_streams = list(chat_streams or [])
 
     async def generate_structured(
         self, request: StructuredGenerationRequest, response_model: type[BaseModel]
@@ -26,6 +30,13 @@ class FakeLLMProvider:
         if not self._text_responses:
             raise AssertionError("FakeLLMProvider: no more text responses queued")
         return self._text_responses.pop(0)
+
+    async def stream_chat(self, request: ChatStreamRequest):
+        if not self._chat_streams:
+            raise AssertionError("FakeLLMProvider: no more chat streams queued")
+        chunks = self._chat_streams.pop(0)
+        for chunk in chunks:
+            yield chunk
 
 
 class FakeCodeExecutor:
