@@ -9,9 +9,12 @@ from app.llm.domain.requests import ChatStreamRequest, ChatTurn
 from app.llm.prompts.chat import (
     EDIT_PLAN_TOOL,
     GENERATE_PLAN_TOOL,
+    PRACTICE_RECORD_TOOL,
     SUPPORTED_LANGUAGES,
     chat_system_prompt,
+    mastery_context,
 )
+from app.revision.application.services import RevisionService
 from app.sessions.domain.models import ChatMessage, ChatRole, LearningSession, SessionStatus
 from app.sessions.domain.repository import SessionRepository
 from app.shared.types import Language
@@ -35,10 +38,12 @@ class SessionService:
         repository: SessionRepository,
         llm_provider: LLMProvider | None = None,
         curriculum_service: CurriculumService | None = None,
+        revision_service: RevisionService | None = None,
     ) -> None:
         self._repository = repository
         self._llm_provider = llm_provider
         self._curriculum_service = curriculum_service
+        self._revision_service = revision_service
 
     async def create_session(self, user_id: str) -> LearningSession:
         now = datetime.now(timezone.utc)
@@ -99,15 +104,27 @@ class SessionService:
         # Deliberately NOT caught here: app/shared/sse.py logs it and emits a terminal
         # error frame. Swallowing it used to close the stream cleanly with no reply, which
         # the client could not distinguish from the assistant choosing to say nothing.
-        async for event in self._stream_reply(session_id, history, content, existing_plan):
+        user_id = existing.user_id if existing is not None else None
+        async for event in self._stream_reply(session_id, history, content, existing_plan, user_id):
             yield event
 
     async def _stream_reply(
-        self, session_id: str, history: list[ChatTurn], message: str, existing_plan: bool
+        self,
+        session_id: str,
+        history: list[ChatTurn],
+        message: str,
+        existing_plan: bool,
+        user_id: str | None,
     ) -> AsyncIterator[dict]:
         # edit_learning_plan is only offered once a plan exists — there's nothing to edit
         # otherwise, and omitting it keeps the model from reaching for it prematurely.
-        tools = [GENERATE_PLAN_TOOL] + ([EDIT_PLAN_TOOL] if existing_plan else [])
+        tools = (
+            [GENERATE_PLAN_TOOL]
+            + ([EDIT_PLAN_TOOL] if existing_plan else [])
+            # Only offered when there's a record to look up. Fetching it on every turn would
+            # be a wasted query on the many turns that never mention progress.
+            + ([PRACTICE_RECORD_TOOL] if self._revision_service is not None and user_id else [])
+        )
         request = ChatStreamRequest(
             system_prompt=chat_system_prompt(existing_plan),
             history=history,
@@ -128,6 +145,12 @@ class SessionService:
             if chunk.tool_call is not None and chunk.tool_call.name == "edit_learning_plan":
                 async for event in self._handle_edit_plan(
                     session_id, chunk.tool_call.args, history, message
+                ):
+                    yield event
+                return
+            if chunk.tool_call is not None and chunk.tool_call.name == "get_practice_record":
+                async for event in self._handle_practice_record(
+                    session_id, user_id, history, message, existing_plan
                 ):
                     yield event
                 return
@@ -237,7 +260,11 @@ class SessionService:
             yield event
 
     async def _handle_edit_plan(
-        self, session_id: str, args: dict, history: list[ChatTurn], user_message: str
+        self,
+        session_id: str,
+        args: dict,
+        history: list[ChatTurn],
+        user_message: str,
     ) -> AsyncIterator[dict]:
         label = "Updating your learning plan..."
         system_note = ChatMessage(
@@ -283,6 +310,46 @@ class SessionService:
         ):
             yield event
 
+    async def _handle_practice_record(
+        self,
+        session_id: str,
+        user_id: str | None,
+        history: list[ChatTurn],
+        user_message: str,
+        existing_plan: bool,
+    ) -> AsyncIterator[dict]:
+        """Read-only lookup — nothing is persisted and no tool_start note is shown, because
+        from the user's side this is the assistant answering, not doing."""
+        candidates = []
+        if self._revision_service is not None and user_id:
+            try:
+                candidates = await self._revision_service.get_revision_queue(user_id)
+            except Exception:
+                logger.warning("Failed to load the practice record for %s", user_id, exc_info=True)
+
+        async for event in self._stream_tool_followup(
+            session_id,
+            history,
+            user_message,
+            existing_plan,
+            "get_practice_record",
+            mastery_context(candidates),
+            (
+                "Here's where you're at — want me to build a plan around one of these?"
+                if candidates
+                else "You haven't finished any practice problems yet, so I've nothing to go on. "
+                "What would you like to work on?"
+            ),
+            None,
+            instruction=(
+                "Answer their question from it: name the two or three topics worth their time, "
+                "a few words on why each, then ask if they want a plan for one. Use the skill "
+                "names exactly as given and do not invent any. Do not read the scores out as "
+                "numbers."
+            ),
+        ):
+            yield event
+
     async def _stream_tool_followup(
         self,
         session_id: str,
@@ -293,17 +360,19 @@ class SessionService:
         result_summary: str,
         fallback_text: str,
         plan_id: str | None,
+        instruction: str = (
+            "Reply to the user in one or two plain sentences telling them what changed."
+        ),
     ) -> AsyncIterator[dict]:
         """Feeds a tool's result back to the model for a natural closing line, streamed like
-        any other reply, then persists it. Shared by both plan tools."""
+        any other reply, then persists it. Shared by every tool."""
         follow_up_request = ChatStreamRequest(
             system_prompt=chat_system_prompt(existing_plan),
             history=history + [ChatTurn(role="user", content=user_message)],
             message=(
                 f"[{tool_name} tool result] {result_summary}\n\n"
-                "The tool has ALREADY run and this is its result. Reply to the user in one "
-                "or two plain sentences telling them what changed. Do not call any tool, "
-                "and never output JSON, a function call, or code — only prose."
+                f"The tool has ALREADY run and this is its result. {instruction} Do not call "
+                "any tool, and never output JSON, a function call, or code — only prose."
             ),
             tools=[],
         )

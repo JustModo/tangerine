@@ -7,6 +7,8 @@ from app.curriculum.application.services import CurriculumService
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
+from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
+from app.revision.application.services import RevisionService
 from app.sessions.application.services import SessionService
 from app.sessions.domain.models import LearningSession
 from app.sessions.infrastructure.sqlite_repository import SqliteSessionRepository
@@ -20,7 +22,12 @@ def get_service() -> SessionService:
     curriculum_service = CurriculumService(
         SqliteLessonPlanRepository(), GeminiProvider(), llm_cache=SqliteLLMCache()
     )
-    return SessionService(SqliteSessionRepository(), GeminiProvider(), curriculum_service)
+    return SessionService(
+        SqliteSessionRepository(),
+        GeminiProvider(),
+        curriculum_service,
+        RevisionService(SqliteUserSkillStateRepository()),
+    )
 
 
 class PostMessageBody(BaseModel):

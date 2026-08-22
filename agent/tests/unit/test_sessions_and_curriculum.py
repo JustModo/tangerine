@@ -12,6 +12,7 @@ from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumN
 from app.llm.schemas.lesson_notes import GeneratedLessonNotes, LessonNoteStep
 from app.llm.schemas.plan_edit import RevisedCurriculum, RevisedStep
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
+from app.revision.domain.models import RevisionCandidate
 from app.sessions.application.services import SessionService
 from app.sessions.domain.models import ChatRole
 from app.sessions.infrastructure.sqlite_repository import SqliteSessionRepository
@@ -361,3 +362,66 @@ async def test_lesson_notes_use_the_plans_language_and_level_and_cache(db_path: 
 
     assert first.steps[0].title == "The core idea"
     assert first == second
+
+
+class _RaisingRevisionService:
+    async def get_revision_queue(self, user_id: str):
+        raise RuntimeError("mastery lookup exploded")
+
+
+class _StubRevisionService:
+    def __init__(self, candidates) -> None:
+        self._candidates = candidates
+
+    async def get_revision_queue(self, user_id: str):
+        return self._candidates
+
+
+async def test_practice_record_tool_answers_from_the_real_record(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    llm = FakeLLMProvider(
+        chat_streams=[
+            [ChatChunk(tool_call=ToolCallResult(name="get_practice_record", args={}))],
+            [ChatChunk(text_delta="Graphs is worth a look."), ChatChunk(done=True)],
+        ]
+    )
+    candidate = RevisionCandidate(
+        skill_id="s1", skill_name="graphs", reason="weak_skill", priority=2.0,
+        mastery_score=0.1, days_since_seen=4.0,
+    )
+    service = SessionService(
+        SqliteSessionRepository(db_path), llm, None, _StubRevisionService([candidate])
+    )
+    session = await service.create_session(user.id)
+
+    events = [event async for event in service.add_message(session.id, "what am I weak in?")]
+
+    # The follow-up turn is what carries the record back to the model.
+    assert llm.last_chat_request is not None
+    assert "graphs (0.10" in llm.last_chat_request.message
+    assert events[-1]["type"] == "done"
+    assert events[-1]["content"] == "Graphs is worth a look."
+    # Read-only: no "Generating a learning plan..." note gets persisted.
+    fetched = await service.get_session(session.id)
+    assert fetched is not None
+    assert [m.role for m in fetched.messages] == [ChatRole.USER, ChatRole.ASSISTANT]
+
+
+async def test_a_broken_mastery_lookup_still_returns_a_reply(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    llm = FakeLLMProvider(
+        chat_streams=[
+            [ChatChunk(tool_call=ToolCallResult(name="get_practice_record", args={}))],
+            [ChatChunk(done=True)],
+        ]
+    )
+    service = SessionService(
+        SqliteSessionRepository(db_path), llm, None, _RaisingRevisionService()
+    )
+    session = await service.create_session(user.id)
+
+    events = [event async for event in service.add_message(session.id, "what should I do next?")]
+
+    assert events[0]["type"] == "user_message"
+    assert events[-1]["type"] == "done"
+    assert events[-1]["content"]

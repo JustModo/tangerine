@@ -1,4 +1,5 @@
 from app.llm.domain.requests import ToolDeclaration
+from app.revision.domain.models import RevisionCandidate
 from app.shared.types import Language
 
 # Derived from the Language enum so this can never drift from what the sandbox can
@@ -127,6 +128,85 @@ EDIT_PLAN_TOOL = ToolDeclaration(
 )
 
 
+COACHING_PROMPT = (
+    "COACHING — recommending what to learn next.\n"
+    "You do NOT know how the learner is doing until you look. When they ask what to focus on "
+    "— 'what am I weak in', 'what should I do next', 'teach me something new', 'I don't know "
+    "where to start', 'what do top companies ask' — call get_practice_record FIRST and answer "
+    "from what it returns. Never guess at their scores, and never mention a skill or a number "
+    "the tool did not give you.\n"
+    "Do not call it otherwise. It is for recommending, not for small talk, and their progress "
+    "is not something to bring up unprompted.\n"
+    "Then recommend concretely: two or three specific topics, a few words on why each, and ask "
+    "if they want a plan for one. Not a syllabus.\n"
+    "A skill the record calls weak is one they practised and struggled with — the strongest "
+    "signal there is. A skill missing from the record has never been tried, which is a gap, not "
+    "a strength: never call an absent skill mastered. If the record is empty, say plainly that "
+    "there is nothing to go on yet and recommend from general DSA knowledge instead.\n"
+    "For interview prep, recommend from the patterns big tech interviews actually lean on — two "
+    "pointers, sliding window, binary search, hashing, stacks/queues, BFS/DFS, topological sort, "
+    "dynamic programming, heaps, intervals, tries, union-find — picking the ones that fit their "
+    "record and level rather than reciting the list.\n"
+    "When they accept a recommendation ('yes', 'that one', 'do the graphs one'), that topic is "
+    "the topic — go build it. ACT OR ASK still applies, and you still never assume the language.\n"
+)
+
+PRACTICE_RECORD_TOOL = ToolDeclaration(
+    name="get_practice_record",
+    description=(
+        "Look up how this learner is actually doing: which skills they have practised, their "
+        "mastery score on each, and how long since they last saw it. Call this before "
+        "recommending what to study next, what they are weak in, or what to focus on for "
+        "interviews — it is the only way to know. Takes no arguments. Do not call it for "
+        "anything else."
+    ),
+    parameters_schema={"type": "object", "properties": {}},
+)
+
+
+def mastery_context(candidates: list[RevisionCandidate], limit: int = 8) -> str:
+    """Renders the get_practice_record tool result for the model.
+
+    Reuses the RevisionService ranking (weakest + most overdue first), so the cap keeps the
+    entries that matter most rather than an arbitrary slice.
+    """
+    if not candidates:
+        return (
+            "PRACTICE RECORD: empty — this learner has not completed any practice problems "
+            "yet, so there is nothing to be weak or strong at. Tell them that plainly and "
+            "recommend from general DSA knowledge and what they tell you."
+        )
+
+    shown = candidates[:limit]
+    buckets: dict[str, list[str]] = {"Weak": [], "In progress": [], "Solid": []}
+    for candidate in shown:
+        if candidate.mastery_score < 0.5:
+            bucket = "Weak"
+        elif candidate.mastery_score > 0.7:
+            bucket = "Solid"
+        else:
+            bucket = "In progress"
+        buckets[bucket].append(
+            f"{candidate.skill_name} ({candidate.mastery_score:.2f}, "
+            f"last practised {round(candidate.days_since_seen)}d ago)"
+        )
+
+    lines = ["PRACTICE RECORD (mastery 0.00-1.00, from their own solved problems):"]
+    for name, entries in buckets.items():
+        if entries:
+            lines.append(f"- {name}: {', '.join(entries)}")
+    hidden = len(candidates) - len(shown)
+    if hidden:
+        lines.append(
+            f"- (plus {hidden} more not listed — these are the {limit} weakest/most overdue, "
+            "not the whole record.)"
+        )
+    lines.append(
+        "Skills absent from this list have never been practised at all."
+    )
+    return "\n".join(lines)
+
+
 def chat_system_prompt(existing_plan: bool) -> str:
     plan_note = (
         "\n\nA learning plan already exists for this session. If the user asks to CHANGE it "
@@ -139,4 +219,4 @@ def chat_system_prompt(existing_plan: bool) -> str:
         if existing_plan
         else "\n\nNo learning plan exists yet for this session."
     )
-    return CHAT_SYSTEM_PROMPT_BASE + plan_note
+    return CHAT_SYSTEM_PROMPT_BASE + plan_note + "\n\n" + COACHING_PROMPT

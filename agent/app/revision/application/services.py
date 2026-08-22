@@ -55,7 +55,12 @@ class RevisionService:
             skill_name = await self._skill_repository.get_name(state.skill_id) or state.skill_id
             candidates.append(
                 RevisionCandidate(
-                    skill_id=state.skill_id, skill_name=skill_name, reason=reason, priority=priority
+                    skill_id=state.skill_id,
+                    skill_name=skill_name,
+                    reason=reason,
+                    priority=priority,
+                    mastery_score=state.mastery_score,
+                    days_since_seen=days_since_seen,
                 )
             )
 
