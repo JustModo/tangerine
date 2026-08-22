@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { MetaFunction } from "react-router";
 import { useParams } from "react-router";
 import { CodeWorkbench } from "@/components/code-workbench/CodeWorkbench";
 import { PageHeader } from "@/components/PageHeader";
@@ -14,6 +15,11 @@ interface ProblemSessionData {
   source_code: string | null;
   status: string;
 }
+
+export const meta: MetaFunction = () => [
+  { title: "Problem · Tangerine" },
+  { name: "description", content: "Solve the problem, run it against the examples, and submit for hidden tests." },
+];
 
 export default function ProblemSessionScreen() {
   const { id } = useParams();

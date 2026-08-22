@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Sharp corners and a heavy geometric T, to match the app's uppercase black type. -->
+  <rect width="100" height="100" fill="#000000"/>
+  <path d="M16 20h68v17H58v43H42V37H16z" fill="#ffffff"/>
+</svg>

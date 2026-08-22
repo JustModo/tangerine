@@ -13,6 +13,11 @@ import AppLayout from "./components/Layout";
 import { HealthGate } from "./components/HealthGate";
 
 export const links: Route.LinksFunction = () => [
+  // SVG first for browsers that take it, .ico as the universal fallback. Both are a white
+  // T on black, drawn natively at each size so the 16px tab icon stays sharp.
+  { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+  { rel: "icon", href: "/favicon.ico", sizes: "any" },
+  { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
   {
     rel: "preconnect",
@@ -23,6 +28,18 @@ export const links: Route.LinksFunction = () => [
     rel: "stylesheet",
     href: "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap",
   },
+];
+
+/** Fallback for any route that does not set its own. React Router uses the leaf route's
+ * meta when there is one, so each screen below overrides this. */
+export const meta: Route.MetaFunction = () => [
+  { title: "Tangerine" },
+  {
+    name: "description",
+    content:
+      "Tangerine builds you a personal DSA course, then coaches you through it: a lesson plan, notes, practice problems, and a mentor that has read your code.",
+  },
+  { name: "theme-color", content: "#000000" },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { MetaFunction } from "react-router";
 import { useNavigate, useParams } from "react-router";
 import { ListTree, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,11 @@ interface SessionDetail {
 interface LessonPlanSummary {
   id: string;
 }
+
+export const meta: MetaFunction = () => [
+  { title: "Plan Chat · Tangerine" },
+  { name: "description", content: "Tell Tangerine what you want to get better at, and it builds or edits your DSA learning plan." },
+];
 
 export default function SessionChat() {
   const { id } = useParams();

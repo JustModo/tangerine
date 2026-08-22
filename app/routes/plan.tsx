@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { MetaFunction } from "react-router";
 import { useNavigate, useParams } from "react-router";
 import { BookOpen, CheckCircle2, Lock, MessageSquare, Play, RefreshCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,11 @@ interface LessonPlan {
   level: string;
   nodes: LessonNode[];
 }
+
+export const meta: MetaFunction = () => [
+  { title: "Learning Plan · Tangerine" },
+  { name: "description", content: "Your DSA course, step by step. Read the notes, then solve the problem for each step." },
+];
 
 export default function PlanScreen() {
   const { id } = useParams();

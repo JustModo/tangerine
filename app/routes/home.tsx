@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { MetaFunction } from "react-router";
 import { Link, useNavigate } from "react-router";
 import { BarChart3, ListTree, MessageSquare, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,11 @@ interface LessonPlanSummary {
   id: string;
   topic: string;
 }
+
+export const meta: MetaFunction = () => [
+  { title: "Learning Sessions · Tangerine" },
+  { name: "description", content: "Your Tangerine sessions. Start a new one, or pick up a plan you are partway through." },
+];
 
 export default function Home() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { MetaFunction } from "react-router";
 import { useNavigate } from "react-router";
 import { Flag, Flame, Play, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </div>
   );
 }
+
+export const meta: MetaFunction = () => [
+  { title: "Progress · Tangerine" },
+  { name: "description", content: "What you have practised, what you are weak in, and which skills are due for revision." },
+];
 
 export default function ProgressScreen() {
   const [progress, setProgress] = useState<Progress | null>(null);
