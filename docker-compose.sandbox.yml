@@ -1,0 +1,26 @@
+# Local development overlay: run ONLY the sandbox in Docker, the app from source.
+#
+# The base file keeps citron on the `judge` network, which is `internal: true` — nothing
+# outside the compose project can reach the code executor, not even the host. That is right
+# for a deployment and impossible to work with locally, where the agent runs on the host.
+#
+# Publishing a port is not enough on its own: Docker cannot publish from an internal-only
+# network, and the `ports:` entry is silently ignored. Citron has to be attached to the
+# non-internal `public` network as well, and is then bound to loopback so it is still not
+# reachable from outside this machine.
+#
+# Opt-in via -f, so the base file never gains this hole by accident.
+#
+# `node scripts/run.js dev` brings this up on its own. To do it by hand:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d citron
+#
+# Do not run the `app` service alongside dev: it binds :8000, the port the dev agent needs,
+# and the browser then silently gets the image's baked-in frontend instead of your code.
+services:
+  citron:
+    networks:
+      - judge
+      - public
+    ports:
+      - "127.0.0.1:2358:2358"
