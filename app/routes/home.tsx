@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { ListTree, MessageSquare, Settings } from "lucide-react";
+import { BarChart3, ListTree, MessageSquare, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useStatus } from "~/lib/status";
@@ -79,6 +79,15 @@ export default function Home() {
           <p className="text-sm font-bold uppercase tracking-wide">Learning Sessions</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Progress"
+            onClick={() => navigate("/progress")}
+            className="text-zinc-500 hover:text-white"
+          >
+            <BarChart3 className="w-4 h-4" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"

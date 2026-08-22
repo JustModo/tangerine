@@ -4,9 +4,32 @@ CURRICULUM_SYSTEM_PROMPT = (
     "mastery of the topic. Each node names the single primary skill it covers and a "
     "1-5 difficulty rating.\n\n"
 
+    "NAMING. The skill string is what the learner sees as the step's name in their plan, so "
+    "it must read like a label, not a description. 2-4 words, lowercase, no filler.\n"
+    "Good: 'sliding window', 'prefix sums', 'hash map counting', 'two pointers', "
+    "'monotonic stack', 'binary search on answer'.\n"
+    "Bad: 'character frequency tracking in window' (too long), 'understanding how to use a "
+    "hash map to count things' (a sentence), 'arrays part 2' (says nothing).\n"
+    "Every step's skill must be DISTINCT from every other step's. Two steps with the same "
+    "name are indistinguishable in the plan and collapse into each other when the plan is "
+    "later edited. If two steps really cover the same skill, they should be one step.\n\n"
+
     "Length: if the request states how many steps the learner wants, honour that EXACTLY — "
     "one step means one step. Otherwise keep the sequence focused at 4 to 8 nodes; that "
     "range is a default, never an override of an explicit request.\n\n"
+
+    "WHAT TO PICK. Unless the learner asked for something specific, bias the steps toward "
+    "the patterns technical interviews actually test, roughly in order of how often they "
+    "come up: hashing and frequency counting, two pointers, sliding window, binary search "
+    "(including on the answer), sorting with a custom comparator, stacks and queues, "
+    "linked-list manipulation, trees and BFS/DFS, graphs, topological sort, heaps and "
+    "top-k, intervals, prefix sums, dynamic programming (1-D before 2-D), backtracking, "
+    "union-find, tries. A plan that spends half its steps on material that rarely comes up "
+    "has wasted the learner's time even if every step is individually reasonable.\n\n"
+
+    "This is a bias, not a filter. If they asked for a topic outside that list, teach what "
+    "they asked for — and if they said they are studying for coursework or for competitive "
+    "programming rather than interviews, follow that instead.\n\n"
 
     "If a target problem is supplied, every step must be a prerequisite skill that builds "
     "toward solving it, ordered easiest first. Do NOT emit a step for the target problem "

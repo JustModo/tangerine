@@ -38,3 +38,13 @@ class TestResult(BaseModel):
     status_description: str | None = None
     stdout_truncated: bool = False
     stderr_truncated: bool = False
+
+
+def parse_runtime_ms(value: str | None) -> float | None:
+    """The sandbox reports execution time as a string like '12ms'."""
+    if not value:
+        return None
+    try:
+        return float(value.rstrip("ms").strip())
+    except ValueError:
+        return None

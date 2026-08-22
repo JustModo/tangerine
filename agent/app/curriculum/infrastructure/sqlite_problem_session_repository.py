@@ -14,10 +14,12 @@ class SqliteProblemSessionRepository:
         async with connect(self._database_path) as db:
             await db.execute(
                 "INSERT INTO problem_sessions "
-                "(id, lesson_node_id, lesson_plan_id, problem_id, user_id, source_code, status, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "(id, lesson_node_id, lesson_plan_id, problem_id, user_id, source_code, "
+                "status, flagged, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET "
-                "source_code=excluded.source_code, status=excluded.status, updated_at=excluded.updated_at",
+                "source_code=excluded.source_code, status=excluded.status, "
+                "flagged=excluded.flagged, updated_at=excluded.updated_at",
                 (
                     session.id,
                     session.lesson_node_id,
@@ -26,6 +28,7 @@ class SqliteProblemSessionRepository:
                     session.user_id,
                     session.source_code,
                     session.status.value,
+                    int(session.flagged),
                     session.created_at.isoformat(),
                     session.updated_at.isoformat(),
                 ),
@@ -48,6 +51,24 @@ class SqliteProblemSessionRepository:
             )
             row = await cursor.fetchone()
             return self._hydrate(row) if row else None
+
+    async def list_problem_ids_for_user(self, user_id: str) -> list[str]:
+        """Everything this learner has already been served, so selection never hands back a
+        problem they have seen."""
+        async with connect(self._database_path) as db:
+            cursor = await db.execute(
+                "SELECT DISTINCT problem_id FROM problem_sessions WHERE user_id = ?", (user_id,)
+            )
+            return [row[0] for row in await cursor.fetchall()]
+
+    async def list_for_user(self, user_id: str) -> list[ProblemSession]:
+        async with connect(self._database_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM problem_sessions WHERE user_id = ? ORDER BY updated_at DESC",
+                (user_id,),
+            )
+            return [self._hydrate(row) for row in await cursor.fetchall()]
 
     async def add_chat_message(self, message: ProblemChatMessage) -> None:
         async with connect(self._database_path) as db:
@@ -93,6 +114,7 @@ class SqliteProblemSessionRepository:
             user_id=row["user_id"],
             source_code=row["source_code"],
             status=row["status"],
+            flagged=bool(row["flagged"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

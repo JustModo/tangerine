@@ -105,16 +105,48 @@ PROBLEM_SYSTEM_PROMPT = (
     "never revealing the full solution; and 2-4 short topical tags (e.g. 'two-pointers', "
     "'hash-map').\n\n"
 
+    "stress_test: ONE more stdin input, separate from the others, sized at the top of the "
+    "constraints you stated — big enough that an optimal solution and a brute-force one "
+    "take visibly different amounts of time, while your reference solution still finishes "
+    "in well under a second. Same stdin format as everything else. If the problem has no "
+    "meaningful size to scale (fixed-size input, pure arithmetic), omit it rather than "
+    "inventing one.\n\n"
+
     "hidden_tests: 3-5 ADDITIONAL stdin inputs used only for grading, never shown to the "
     "learner. Same stdin format as the examples, but different values, chosen to catch the "
-    "mistakes the examples don't — empty or single-element input, all-equal values, the "
-    "minimum and maximum of the stated constraints, negative numbers, no-answer-exists. "
-    "Give inputs only; expected outputs come from running the reference solution."
+    "mistakes the examples don't — a single-element input, all-equal values, the minimum "
+    "and maximum of the stated constraints, negative numbers, no-answer-exists. "
+    "Give inputs only; expected outputs come from running the reference solution.\n\n"
+
+    "EVERY INPUT MUST BE READABLE BY YOUR OWN HARNESS. Each example input, each hidden "
+    "test and the stress test is fed to the program as stdin exactly as written, and your "
+    "pre_code/post_code must be able to parse all of them. In particular:\n"
+    "- NEVER give a completely empty input. `input()` raises EOFError on empty stdin, and "
+    "Scanner/cin/scanf fare no better — the reference crashes on its own test case and the "
+    "whole problem is discarded.\n"
+    "- To test the empty-collection case, say it in a form your parser can read: if "
+    "pre_code reads a count first, that is a line containing `0` (followed by an empty "
+    "line only if your parser reads one). If your format has no count, the smallest valid "
+    "input is one element — use that instead and do not test empty at all.\n"
+    "- Read your own pre_code and post_code back against each input line by line. If any "
+    "input would leave a read with nothing to consume, fix the input, not the harness."
 )
 
 
-def problem_user_prompt(skill: str, language: str, difficulty: str) -> str:
-    return f"Skill: {skill}\nLanguage: {language}\nDifficulty: {difficulty}"
+def problem_user_prompt(
+    skill: str, language: str, difficulty: str, avoid_titles: list[str] | None = None
+) -> str:
+    prompt = f"Skill: {skill}\nLanguage: {language}\nDifficulty: {difficulty}"
+    if avoid_titles:
+        # Without this the model reaches for the same canonical problem every time, and a
+        # learner practising a skill twice gets the same question back.
+        listed = "\n".join(f"- {title}" for title in avoid_titles)
+        prompt += (
+            "\n\nThe learner has ALREADY been given these problems for this skill. Write a "
+            "genuinely different one — a different question, not a reworded version of any "
+            f"of them:\n{listed}"
+        )
+    return prompt
 
 
 def adapt_problem_user_prompt(source_problem: str, language: str) -> str:

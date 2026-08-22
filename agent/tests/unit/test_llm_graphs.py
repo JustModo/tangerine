@@ -10,15 +10,14 @@ from tests.fakes import FakeLLMProvider
 
 async def test_generate_curriculum_retries_on_invalid_then_succeeds() -> None:
     good = GeneratedCurriculum(
-        title="Prefix Sums",
-        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
+        nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)],
     )
     provider = FakeLLMProvider(structured_responses=[SchemaValidationError("bad json"), good])
 
     result = await generate_curriculum(provider, "prefix sums", "python", "beginner")
 
-    assert result.title == "Prefix Sums"
     assert len(result.nodes) == 1
+    assert result.nodes[0].skill == "prefix-sum"
 
 
 async def test_generate_curriculum_gives_up_after_max_attempts() -> None:

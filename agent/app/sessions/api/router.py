@@ -20,7 +20,10 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 def get_service() -> SessionService:
     curriculum_service = CurriculumService(
-        SqliteLessonPlanRepository(), GeminiProvider(), llm_cache=SqliteLLMCache()
+        SqliteLessonPlanRepository(),
+        GeminiProvider(),
+        llm_cache=SqliteLLMCache(),
+        mastery_repository=SqliteUserSkillStateRepository(),
     )
     return SessionService(
         SqliteSessionRepository(),

@@ -5,6 +5,18 @@ from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepos
 from app.revision.domain.models import RevisionCandidate
 
 _OVERDUE_DAYS = 7.0
+# Applied on read rather than by a background job: nothing else needs to run, and a score
+# that only moves when someone looks at it is indistinguishable from one that decays
+# continuously. Full strength for a fortnight, then down to a floor over ~three months.
+_DECAY_GRACE_DAYS = 14.0
+_DECAY_PER_DAY = 0.004
+_DECAY_FLOOR = 0.3
+
+
+def decayed_score(mastery_score: float, days_since_seen: float) -> float:
+    """A skill practised once in March should not still read as mastered in August."""
+    stale_days = max(0.0, days_since_seen - _DECAY_GRACE_DAYS)
+    return max(mastery_score * _DECAY_FLOOR, mastery_score - stale_days * _DECAY_PER_DAY)
 
 
 def suggest_difficulty(mastery_score: float | None, sequence_index: int) -> str:
@@ -41,11 +53,12 @@ class RevisionService:
         candidates = []
         for state in states:
             days_since_seen = (now - state.last_seen_at).total_seconds() / 86400
-            weak_skill_weight = (1.0 - state.mastery_score) * 2
+            score = decayed_score(state.mastery_score, days_since_seen)
+            weak_skill_weight = (1.0 - score) * 2
             overdue_weight = min(days_since_seen / _OVERDUE_DAYS, 1.0)
             priority = weak_skill_weight + overdue_weight
 
-            if state.mastery_score < 0.5:
+            if score < 0.5:
                 reason = "weak_skill"
             elif days_since_seen >= _OVERDUE_DAYS:
                 reason = "overdue_revision"
@@ -59,7 +72,7 @@ class RevisionService:
                     skill_name=skill_name,
                     reason=reason,
                     priority=priority,
-                    mastery_score=state.mastery_score,
+                    mastery_score=score,
                     days_since_seen=days_since_seen,
                 )
             )

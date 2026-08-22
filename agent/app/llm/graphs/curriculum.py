@@ -61,13 +61,18 @@ async def generate_curriculum(
     cache: SqliteLLMCache | None = None,
     step_count: int | None = None,
     target_problem: str | None = None,
+    known_skills: list[str] | None = None,
 ) -> GeneratedCurriculum:
-    # Same (topic, language, level) always warrants the same curriculum — a safe, valuable
-    # cache candidate, unlike per-submission coaching feedback.
-    # A pasted target problem makes the curriculum one-of-a-kind, so it is never cached;
-    # an explicit step count is part of the identity of the result, so it joins the key.
+    # Same request always warrants the same curriculum — a safe, valuable cache candidate,
+    # unlike per-submission coaching feedback.
+    # A pasted target problem makes the curriculum one-of-a-kind, so it is never cached; an
+    # explicit step count is part of the identity of the result, so it joins the key. So do
+    # the skills the learner has already mastered: without them a returning learner gets the
+    # same plan as a total beginner, forever.
     key = (
-        cache_key("curriculum", topic, language, level, str(step_count))
+        cache_key(
+            "curriculum", topic, language, level, str(step_count), *sorted(known_skills or [])
+        )
         if cache is not None and not target_problem
         else None
     )

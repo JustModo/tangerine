@@ -12,6 +12,7 @@ from app.problems.domain.models import (
 )
 from app.shared.config import get_settings
 from app.shared.database import connect
+from app.shared.types import Language
 
 
 class SqliteProblemRepository:
@@ -47,7 +48,10 @@ class SqliteProblemRepository:
             conditions.append(f"p.id NOT IN ({placeholders})")
             params.extend(criteria.exclude_problem_ids)
 
-        query += " WHERE " + " AND ".join(conditions) + " LIMIT 1"
+        # RANDOM(), not the first row: without it a skill with several bank problems would
+        # serve the same one to everybody forever, and exclude_problem_ids would be the only
+        # thing that ever varied the answer.
+        query += " WHERE " + " AND ".join(conditions) + " ORDER BY RANDOM() LIMIT 1"
 
         async with connect(self._database_path) as db:
             db.row_factory = aiosqlite.Row
@@ -66,6 +70,30 @@ class SqliteProblemRepository:
             )
             rows = await cursor.fetchall()
             return [await self._hydrate(db, row) for row in rows]
+
+    async def find_by_conceptual_id(self, conceptual_id: str, language: Language) -> Problem | None:
+        """Duplicate check: two generations for the same skill routinely land on the same
+        classic problem, and without this the bank fills with near-identical rows."""
+        async with connect(self._database_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM problems WHERE conceptual_id = ? AND language = ? AND status = ? LIMIT 1",
+                (conceptual_id, language.value, ProblemStatus.AVAILABLE.value),
+            )
+            row = await cursor.fetchone()
+            return await self._hydrate(db, row) if row else None
+
+    async def list_titles(self, skill_id: str, language: Language) -> list[str]:
+        """Titles already in the bank for a skill, fed to the generator as a do-not-repeat
+        list so a second problem is actually a second problem."""
+        async with connect(self._database_path) as db:
+            cursor = await db.execute(
+                "SELECT DISTINCT p.title FROM problems p "
+                "JOIN problem_skills ps ON ps.problem_id = p.id "
+                "WHERE ps.skill_id = ? AND p.language = ? AND p.status = ?",
+                (skill_id, language.value, ProblemStatus.AVAILABLE.value),
+            )
+            return [row[0] for row in await cursor.fetchall()]
 
     async def save(self, problem: Problem) -> None:
         async with connect(self._database_path) as db:
@@ -98,8 +126,9 @@ class SqliteProblemRepository:
             await db.execute(
                 "INSERT INTO problem_versions "
                 "(id, problem_id, version, statement_md, reference_solution, user_code, "
-                "pre_code, post_code, constraints, hints_json, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "pre_code, post_code, constraints, hints_json, stress_input, "
+                "stress_runtime_ms, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     version.id,
                     version.problem_id,
@@ -111,6 +140,8 @@ class SqliteProblemRepository:
                     version.post_code,
                     version.constraints,
                     json.dumps(version.hints),
+                    version.stress_input,
+                    version.stress_runtime_ms,
                     version.created_at.isoformat(),
                 ),
             )
@@ -159,6 +190,8 @@ class SqliteProblemRepository:
                 post_code=row["post_code"],
                 constraints=row["constraints"],
                 hints=json.loads(row["hints_json"] or "[]"),
+                stress_input=row["stress_input"],
+                stress_runtime_ms=row["stress_runtime_ms"],
                 created_at=row["created_at"],
                 examples=[
                     ProblemExample(id=e["id"], input=e["input"], output=e["output"], explanation=e["explanation"])

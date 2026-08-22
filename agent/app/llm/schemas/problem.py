@@ -30,6 +30,13 @@ class GeneratedProblem(BaseModel):
         "the examples' inputs. Must be different from the examples and should probe edge "
         "cases. No expected outputs — those come from running the reference solution.",
     )
+    stress_test: str | None = Field(
+        default=None,
+        description="ONE extra stdin input at the top of the stated constraint range, in "
+        "the same format as the examples. Used to tell an optimal solution from a "
+        "brute-force one — it must be large enough that the difference in running time is "
+        "obvious, while the reference solution still finishes comfortably.",
+    )
     constraints: str | None = None
     hints: list[str] = []
     tags: list[str] = []

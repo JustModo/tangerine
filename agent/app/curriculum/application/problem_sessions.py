@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -8,7 +7,6 @@ from app.curriculum.domain.problem_session import ProblemSession, ProblemSession
 from app.curriculum.domain.problem_session_repository import ProblemSessionRepository
 from app.curriculum.domain.repository import LessonPlanRepository
 from app.mastery.domain.repository import UserSkillStateRepository
-from app.problems.application.prefetch import PrefetchService
 from app.problems.application.services import ProblemSelectionService
 from app.problems.application.validation import ProblemValidationService
 from app.problems.domain.models import ProblemCriteria
@@ -20,43 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 
-# asyncio only holds a WEAK reference to a running task, so a task whose only strong
-# reference is a local can be garbage-collected mid-flight — the exact case the asyncio
-# docs warn about, and why prefetch would work most of the time and inexplicably not the
-# rest. Keeping them here also gives shutdown something to cancel.
-_background_tasks: set[asyncio.Task] = set()
-
-PREFETCH_TIMEOUT_S = 180
-
-
-async def _guarded(coro) -> None:
-    async with asyncio.timeout(PREFETCH_TIMEOUT_S):
-        await coro
-
-
-def _spawn_prefetch(coro) -> asyncio.Task:
-    task = asyncio.create_task(_guarded(coro))
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-    task.add_done_callback(
-        lambda t: not t.cancelled()
-        and t.exception()
-        and logger.warning("Prefetch task failed", exc_info=t.exception())
-    )
-    return task
-
-
-async def cancel_background_tasks() -> None:
-    """Called from the app lifespan so a hung prefetch can't block shutdown."""
-    for task in list(_background_tasks):
-        task.cancel()
-    if _background_tasks:
-        await asyncio.gather(*_background_tasks, return_exceptions=True)
-
-
 class ProblemSessionService:
     """Selects/generates the problem for a lesson node, tracks the user's local source
-    file against it, and progresses the curriculum on a passing submission."""
+    file against it, and progresses the curriculum on a passing submission.
+
+    Generation happens when the learner presses Start on a node, and only then: nothing is
+    produced ahead of time for a step they may never reach."""
 
     def __init__(
         self,
@@ -66,7 +33,6 @@ class ProblemSessionService:
         problem_validation: ProblemValidationService,
         skill_repository: SqliteSkillRepository | None = None,
         mastery_repository: UserSkillStateRepository | None = None,
-        prefetch_service: PrefetchService | None = None,
     ) -> None:
         self._plan_repository = plan_repository
         self._session_repository = session_repository
@@ -74,7 +40,6 @@ class ProblemSessionService:
         self._problem_validation = problem_validation
         self._skill_repository = skill_repository or SqliteSkillRepository()
         self._mastery_repository = mastery_repository
-        self._prefetch_service = prefetch_service
 
     async def next_problem(self, plan_id: str, user_id: str) -> ProblemSession:
         plan = await self._plan_repository.get(plan_id)
@@ -84,6 +49,10 @@ class ProblemSessionService:
         node = next((n for n in plan.nodes if n.status != LessonNodeStatus.DONE), None)
         if node is None:
             raise NotFoundError(f"Lesson plan {plan_id} has no remaining nodes")
+
+        existing = await self._session_repository.get_by_node(node.id)
+        if existing is not None:
+            return existing
 
         skill_name = node.skill_name or await self._skill_repository.get_name(node.skill_id) or node.skill_id
 
@@ -103,23 +72,81 @@ class ProblemSessionService:
                 )
             return await self._start_session(plan, node, problem, user_id)
 
-        criteria = ProblemCriteria(skill_id=node.skill_id, language=plan.language)
-        problem = await self._problem_selection.find_suitable(criteria)
-        if problem is None:
-            mastery_score = None
-            if self._mastery_repository is not None:
-                state = await self._mastery_repository.get(user_id, node.skill_id)
-                mastery_score = state.mastery_score if state else None
-            # An explicit per-node difficulty (set by the curriculum, or by the user asking
-            # the chat to make a step harder/easier) wins over the mastery/position guess.
-            difficulty = node.difficulty or suggest_difficulty(mastery_score, node.sequence_index)
-            problem = await self._problem_validation.generate_and_validate(
-                skill_name, plan.language, difficulty
-            )
+        mastery_score = None
+        if self._mastery_repository is not None:
+            state = await self._mastery_repository.get(user_id, node.skill_id)
+            mastery_score = state.mastery_score if state else None
+        # An explicit per-node difficulty (set by the curriculum, or by the user asking the
+        # chat to make a step harder/easier) wins over the mastery/position guess. Computed
+        # BEFORE the bank lookup, not just for generation — a lookup that ignores it will
+        # happily hand back an easy problem for a step the learner asked to be hard.
+        difficulty = node.difficulty or suggest_difficulty(mastery_score, node.sequence_index)
+
+        problem = await self._select_or_generate(
+            node.skill_id, skill_name, plan.language, difficulty, user_id
+        )
         if problem is None:
             raise NotFoundError(f"Could not generate a valid problem for skill {skill_name}")
 
         return await self._start_session(plan, node, problem, user_id)
+
+    async def _select_or_generate(
+        self, skill_id: str, skill_name: str, language, difficulty: str, user_id: str
+    ):
+        """Bank first, generation on a miss — excluding everything this learner has already
+        been served, so practising a skill twice is never the same question twice."""
+        criteria = ProblemCriteria(
+            skill_id=skill_id,
+            language=language,
+            difficulty=difficulty,
+            exclude_problem_ids=await self._session_repository.list_problem_ids_for_user(user_id),
+        )
+        problem = await self._problem_selection.find_suitable(criteria)
+        if problem is not None:
+            return problem
+        return await self._problem_validation.generate_and_validate(
+            skill_name, language, difficulty
+        )
+
+    async def practice_problem(self, user_id: str, skill_id: str, language) -> ProblemSession:
+        """A problem for one skill, outside any plan — what the revision queue's Practice
+        button starts. Difficulty follows current mastery rather than a curriculum
+        position, since there is no position."""
+        skill_name = await self._skill_repository.get_name(skill_id) or skill_id
+
+        mastery_score = None
+        if self._mastery_repository is not None:
+            state = await self._mastery_repository.get(user_id, skill_id)
+            mastery_score = state.mastery_score if state else None
+
+        problem = await self._select_or_generate(
+            skill_id, skill_name, language, suggest_difficulty(mastery_score, 0), user_id
+        )
+        if problem is None:
+            raise NotFoundError(f"Could not generate a valid problem for skill {skill_name}")
+
+        now = datetime.now(timezone.utc)
+        session = ProblemSession(
+            id=str(uuid.uuid4()),
+            problem_id=problem.id,
+            user_id=user_id,
+            status=ProblemSessionStatus.NOT_STARTED,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._session_repository.save(session)
+        return session
+
+    async def set_flagged(self, session_id: str, flagged: bool) -> ProblemSession:
+        session = await self._require(session_id)
+        updated = session.model_copy(
+            update={"flagged": flagged, "updated_at": datetime.now(timezone.utc)}
+        )
+        await self._session_repository.save(updated)
+        return updated
+
+    async def list_for_user(self, user_id: str) -> list[ProblemSession]:
+        return await self._session_repository.list_for_user(user_id)
 
     async def _start_session(self, plan, node, problem, user_id: str) -> ProblemSession:
         now = datetime.now(timezone.utc)
@@ -135,23 +162,6 @@ class ProblemSessionService:
         )
         await self._session_repository.save(session)
         await self._plan_repository.update_node_status(node.id, LessonNodeStatus.IN_PROGRESS)
-
-        if self._prefetch_service is not None:
-            next_node = next((n for n in plan.nodes if n.sequence_index == node.sequence_index + 1), None)
-            # A pasted-problem node is adapted from its own statement, so there's nothing
-            # generic to prefetch for it.
-            if next_node is not None and not next_node.source_problem_md:
-                next_skill_name = (
-                    next_node.skill_name
-                    or await self._skill_repository.get_name(next_node.skill_id)
-                    or next_node.skill_id
-                )
-                next_difficulty = suggest_difficulty(None, next_node.sequence_index)
-                _spawn_prefetch(
-                    self._prefetch_service.prefetch(
-                        next_node.skill_id, next_skill_name, plan.language, next_difficulty
-                    )
-                )
 
         return session
 
@@ -190,7 +200,9 @@ class ProblemSessionService:
         )
         await self._session_repository.save(updated)
 
-        if passed:
+        # A practice session has no node to advance — it exists precisely to be outside
+        # the plan.
+        if passed and session.lesson_node_id is not None:
             node = await self._plan_repository.get_node(session.lesson_node_id)
             if node is not None:
                 await self._plan_repository.update_node_status(node.id, LessonNodeStatus.DONE)

@@ -9,6 +9,7 @@ from app.llm.graphs.lesson_notes import generate_lesson_notes
 from app.llm.graphs.plan_edit import revise_curriculum
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.schemas.lesson_notes import GeneratedLessonNotes
+from app.mastery.domain.repository import UserSkillStateRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.shared.errors import NotFoundError
 from app.shared.types import Language
@@ -22,6 +23,12 @@ def _difficulty_label(rating: int) -> str:
     return _DIFFICULTY_BY_RATING.get(rating, "medium")
 
 
+# Above this, a learner has repeatedly solved problems on the skill unaided. Making them
+# grind through it again to reach the step they actually wanted is the fastest way to lose
+# someone who is not a beginner.
+KNOWN_SKILL_THRESHOLD = 0.8
+
+
 class CurriculumService:
     """Lesson plan creation and per-node lesson notes. A plan's nodes are populated
     immediately via the curriculum LangGraph and are usable right
@@ -33,11 +40,13 @@ class CurriculumService:
         llm_provider: LLMProvider,
         skill_repository: SqliteSkillRepository | None = None,
         llm_cache: SqliteLLMCache | None = None,
+        mastery_repository: UserSkillStateRepository | None = None,
     ) -> None:
         self._repository = repository
         self._llm_provider = llm_provider
         self._skill_repository = skill_repository or SqliteSkillRepository()
         self._llm_cache = llm_cache
+        self._mastery_repository = mastery_repository
 
     async def create_draft(
         self,
@@ -47,10 +56,16 @@ class CurriculumService:
         level: str,
         step_count: int | None = None,
         target_problem: str | None = None,
+        user_id: str | None = None,
     ) -> LessonPlan:
         """step_count honours an explicit "just 2 lessons" request; target_problem is a
         question the learner pasted in, in which case the generated steps are prerequisites
-        and one extra final step is appended that serves that exact problem."""
+        and one extra final step is appended that serves that exact problem.
+
+        user_id lets the plan account for what this learner already knows — steps on skills
+        they have demonstrably mastered start DONE instead of blocking the ones they came
+        for."""
+        known_skills = await self._known_skills(user_id)
         plan = LessonPlan(
             id=str(uuid.uuid4()),
             session_id=session_id,
@@ -79,19 +94,21 @@ class CurriculumService:
                 cache=self._llm_cache,
                 step_count=prerequisite_count,
                 target_problem=target_problem,
+                known_skills=sorted(known_skills),
             )
             generated_nodes = generated.nodes
 
         nodes = []
         for index, generated_node in enumerate(generated_nodes):
             skill_id = await self._skill_repository.ensure_skill(generated_node.skill)
+            already_known = generated_node.skill.strip().lower() in known_skills
             nodes.append(
                 LessonNode(
                     id=str(uuid.uuid4()),
                     lesson_plan_id=plan.id,
                     skill_id=skill_id,
                     sequence_index=index,
-                    status=LessonNodeStatus.AVAILABLE if index == 0 else LessonNodeStatus.LOCKED,
+                    status=LessonNodeStatus.DONE if already_known else LessonNodeStatus.LOCKED,
                     difficulty=_difficulty_label(generated_node.difficulty),
                     created_at=datetime.now(timezone.utc),
                 )
@@ -106,17 +123,38 @@ class CurriculumService:
                     lesson_plan_id=plan.id,
                     skill_id=await self._skill_repository.ensure_skill(topic),
                     sequence_index=len(nodes),
-                    status=LessonNodeStatus.AVAILABLE if not nodes else LessonNodeStatus.LOCKED,
+                    status=LessonNodeStatus.LOCKED,
                     difficulty="hard",
                     source_problem_md=target_problem,
                     created_at=datetime.now(timezone.utc),
                 )
             )
 
+        # Whatever was skipped, the plan must still be startable: unlock the first step the
+        # learner actually has to do. Same rule edit_plan applies after a revision.
+        for index, node in enumerate(nodes):
+            if node.status != LessonNodeStatus.DONE:
+                nodes[index] = node.model_copy(update={"status": LessonNodeStatus.AVAILABLE})
+                break
+
         if nodes:
             await self._repository.save_nodes(nodes)
 
         return await self._repository.get(plan.id) or plan
+
+    async def _known_skills(self, user_id: str | None) -> set[str]:
+        """Normalised names of skills this learner has already demonstrated. Compared by
+        name because that is all the curriculum generator emits — it never sees skill ids."""
+        if user_id is None or self._mastery_repository is None:
+            return set()
+        known = set()
+        for state in await self._mastery_repository.list_for_user(user_id):
+            if state.mastery_score < KNOWN_SKILL_THRESHOLD:
+                continue
+            name = await self._skill_repository.get_name(state.skill_id)
+            if name:
+                known.add(name.strip().lower())
+        return known
 
     async def get(self, plan_id: str) -> LessonPlan | None:
         return await self._repository.get(plan_id)

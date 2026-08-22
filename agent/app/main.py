@@ -9,7 +9,6 @@ from pydantic import BaseModel
 
 from app.curriculum.api.problem_sessions_router import router as problem_sessions_router
 from app.curriculum.api.router import router as curriculum_router
-from app.curriculum.application.problem_sessions import cancel_background_tasks
 from app.problems.api.router import router as problems_router
 from app.sessions.api.router import router as sessions_router
 from app.setup.router import router as setup_router
@@ -34,7 +33,6 @@ async def lifespan(_app: FastAPI):
     # other eviction, so without this it grows for the life of the deployment.
     await SqliteLLMCache().prune()
     yield
-    await cancel_background_tasks()
     await _probe_client.aclose()
 
 

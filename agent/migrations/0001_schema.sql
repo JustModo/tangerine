@@ -1,10 +1,12 @@
 -- Tangerine schema, consolidated.
 --
--- This replaces migrations 0001-0015, which were squashed once the incremental history
--- stopped being worth carrying. Columns that nothing read or wrote were dropped in the
--- squash rather than being ALTERed away: attempts (whole table, superseded by
--- submissions + evaluations), problem_sessions.code_path, evaluations.feedback,
--- evaluations.complexity_verdict, lesson_plans.status and users.email.
+-- This replaces migrations 0001-0015, squashed once the incremental history stopped being
+-- worth carrying, plus the later learning-loop migrations folded in the same way while the
+-- app is still pre-release. Columns that nothing read or wrote were dropped rather than
+-- ALTERed away: attempts (whole table, superseded by submissions + evaluations),
+-- problem_sessions.code_path, evaluations.feedback, lesson_plans.status and users.email.
+-- generation_jobs went with the prefetch service: problems are generated when the learner
+-- presses Start, never ahead of time.
 -- problem_versions.boilerplate was renamed to user_code, which is what the domain model
 -- and the whole app have called it since the pre/user/post split.
 --
@@ -62,6 +64,11 @@ CREATE TABLE problem_versions (
     post_code TEXT NOT NULL DEFAULT '',
     constraints TEXT,
     hints_json TEXT NOT NULL DEFAULT '[]',
+    -- One input at the top of the stated constraint range, plus how long the reference
+    -- solution took on it. A learner's runtime only means something against that baseline.
+    -- Both null when the generator gave no stress input or it failed to run.
+    stress_input TEXT,
+    stress_runtime_ms REAL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -134,17 +141,22 @@ CREATE INDEX idx_lesson_nodes_plan ON lesson_nodes(lesson_plan_id);
 
 CREATE TABLE problem_sessions (
     id TEXT PRIMARY KEY,
-    lesson_node_id TEXT NOT NULL REFERENCES lesson_nodes(id),
+    -- Nullable: a practice session, started from the revision queue, belongs to a skill
+    -- rather than to a step in a plan.
+    lesson_node_id TEXT REFERENCES lesson_nodes(id),
     lesson_plan_id TEXT,
     problem_id TEXT NOT NULL REFERENCES problems(id),
     user_id TEXT NOT NULL REFERENCES users(id),
     source_code TEXT,
     status TEXT NOT NULL DEFAULT 'NOT_STARTED',
+    -- Learner-set "come back to this one".
+    flagged INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX idx_problem_sessions_node ON problem_sessions(lesson_node_id);
+CREATE INDEX idx_problem_sessions_user ON problem_sessions(user_id);
 
 -- Deliberately not chat_messages: that table is NOT NULL against learning_sessions, and
 -- its writer bumps learning_sessions.updated_at, so reusing it would drag code review into
@@ -166,6 +178,13 @@ CREATE TABLE submissions (
     problem_id TEXT NOT NULL REFERENCES problems(id),
     user_id TEXT NOT NULL REFERENCES users(id),
     code_snapshot TEXT NOT NULL,
+    -- What the attempt cost the learner. Reported by the client: the server sees neither
+    -- the editor clock nor which hints were revealed. Nullable, because a submission from
+    -- a context that doesn't track them should say nothing rather than claim zero.
+    duration_ms INTEGER,
+    run_count INTEGER,
+    hints_used INTEGER,
+    helper_used INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -180,6 +199,9 @@ CREATE TABLE evaluations (
     total_tests INTEGER NOT NULL,
     runtime_ms REAL,
     memory_mb REAL,
+    -- 'optimal' | 'acceptable' | 'slow'. Null when the problem has no stress input, or the
+    -- submission didn't pass every test: there is nothing to grade the speed of.
+    complexity_verdict TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -197,22 +219,6 @@ CREATE TABLE user_skill_state (
 CREATE INDEX idx_user_skill_state_user ON user_skill_state(user_id);
 
 -- ---------------------------------------------------------------- infrastructure
-
--- Background problem generation, so the bank already has a match by the time the learner
--- reaches the next node. Also prevents duplicate concurrent generation for one target.
-CREATE TABLE generation_jobs (
-    id TEXT PRIMARY KEY,
-    skill_id TEXT NOT NULL,
-    language TEXT NOT NULL,
-    difficulty TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'PENDING',
-    problem_id TEXT,
-    error TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX idx_generation_jobs_lookup ON generation_jobs(skill_id, language, difficulty, status);
 
 CREATE TABLE llm_cache (
     cache_key TEXT PRIMARY KEY,

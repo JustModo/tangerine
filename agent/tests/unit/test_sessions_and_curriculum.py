@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,8 @@ from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
 from app.llm.schemas.lesson_notes import GeneratedLessonNotes, LessonNoteStep
 from app.llm.schemas.plan_edit import RevisedCurriculum, RevisedStep
+from app.mastery.domain.models import UserSkillState
+from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.revision.domain.models import RevisionCandidate
 from app.sessions.application.services import SessionService
@@ -63,8 +66,7 @@ async def test_list_for_session_returns_the_newest_plan_first(db_path: str) -> N
     session = await sessions.create_session(user.id)
 
     generated = GeneratedCurriculum(
-        title="Prefix Sums",
-        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
+        nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)],
     )
     fake_llm = FakeLLMProvider(structured_responses=[generated, generated.model_copy()])
     curriculum = CurriculumService(
@@ -87,8 +89,7 @@ async def test_delete_session_cascades_to_chat_and_plans(db_path: str) -> None:
         pass
 
     generated = GeneratedCurriculum(
-        title="Prefix Sums",
-        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
+        nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)],
     )
     curriculum = CurriculumService(
         SqliteLessonPlanRepository(db_path),
@@ -132,8 +133,7 @@ async def test_unclear_message_streams_a_real_clarifying_question(db_path: str) 
 async def test_generate_plan_tool_call_persists_system_message_and_generates(db_path: str) -> None:
     user = await SqliteUserRepository(db_path).ensure_default_user()
     generated = GeneratedCurriculum(
-        title="Prefix Sums",
-        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
+        nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)],
     )
     llm = FakeLLMProvider(
         structured_responses=[generated],
@@ -176,8 +176,7 @@ async def test_generate_plan_tool_call_persists_system_message_and_generates(db_
 async def test_generate_plan_tool_call_says_updating_when_a_plan_already_exists(db_path: str) -> None:
     user = await SqliteUserRepository(db_path).ensure_default_user()
     generated = GeneratedCurriculum(
-        title="Prefix Sums",
-        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
+        nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)],
     )
     llm = FakeLLMProvider(structured_responses=[generated, generated.model_copy()])
     curriculum = CurriculumService(
@@ -214,8 +213,7 @@ async def test_tool_followup_never_leaks_a_raw_tool_call_to_the_user(db_path: st
     # readable prose, not a JSON blob.
     user = await SqliteUserRepository(db_path).ensure_default_user()
     generated = GeneratedCurriculum(
-        title="Prefix Sums",
-        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
+        nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)],
     )
     llm = FakeLLMProvider(
         structured_responses=[generated],
@@ -261,19 +259,18 @@ async def test_edit_plan_preserves_completed_steps_and_adds_new_ones(db_path: st
     session = await sessions.create_session(user.id)
 
     original = GeneratedCurriculum(
-        title="Prefix Sums",
         nodes=[
-            GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1),
-            GeneratedCurriculumNode(title="Range queries", skill="range-query", difficulty=3),
+            GeneratedCurriculumNode(skill="prefix-sum", difficulty=1),
+            GeneratedCurriculumNode(skill="range-query", difficulty=3),
         ],
     )
     # The revision keeps both existing skills verbatim (so their progress survives), bumps
     # range-query's difficulty, and inserts a brand new step.
     revised = RevisedCurriculum(
         steps=[
-            RevisedStep(title="Fundamentals", skill="prefix-sum", difficulty="easy"),
-            RevisedStep(title="Range queries", skill="range-query", difficulty="hard"),
-            RevisedStep(title="2D prefix sums", skill="prefix-sum-2d", difficulty="hard"),
+            RevisedStep(skill="prefix-sum", difficulty="easy"),
+            RevisedStep(skill="range-query", difficulty="hard"),
+            RevisedStep(skill="prefix-sum-2d", difficulty="hard"),
         ],
     )
     repo = SqliteLessonPlanRepository(db_path)
@@ -317,10 +314,9 @@ async def test_lesson_notes_refused_for_a_locked_node(db_path: str) -> None:
     sessions = SessionService(SqliteSessionRepository(db_path))
     session = await sessions.create_session(user.id)
     generated = GeneratedCurriculum(
-        title="Prefix Sums",
         nodes=[
-            GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1),
-            GeneratedCurriculumNode(title="Range queries", skill="range-query", difficulty=2),
+            GeneratedCurriculumNode(skill="prefix-sum", difficulty=1),
+            GeneratedCurriculumNode(skill="range-query", difficulty=2),
         ],
     )
     curriculum = CurriculumService(
@@ -340,8 +336,7 @@ async def test_lesson_notes_use_the_plans_language_and_level_and_cache(db_path: 
     sessions = SessionService(SqliteSessionRepository(db_path))
     session = await sessions.create_session(user.id)
     generated = GeneratedCurriculum(
-        title="Prefix Sums",
-        nodes=[GeneratedCurriculumNode(title="Fundamentals", skill="prefix-sum", difficulty=1)],
+        nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)],
     )
     notes = GeneratedLessonNotes(
         steps=[LessonNoteStep(title="The core idea", body_md="Keep a running total.")]
@@ -425,3 +420,69 @@ async def test_a_broken_mastery_lookup_still_returns_a_reply(db_path: str) -> No
     assert events[0]["type"] == "user_message"
     assert events[-1]["type"] == "done"
     assert events[-1]["content"]
+
+
+async def test_a_plan_skips_steps_the_learner_has_already_mastered(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session(user.id)
+
+    skill_repo = SqliteSkillRepository(db_path)
+    known_id = await skill_repo.ensure_skill("arrays")
+    mastery_repo = SqliteUserSkillStateRepository(db_path)
+    await mastery_repo.save(
+        UserSkillState(
+            user_id=user.id, skill_id=known_id, mastery_score=0.95, streak=6,
+            last_seen_at=datetime.now(timezone.utc),
+        )
+    )
+
+    generated = GeneratedCurriculum(
+        nodes=[
+            GeneratedCurriculumNode(skill="arrays", difficulty=1),
+            GeneratedCurriculumNode(skill="prefix-sum", difficulty=3),
+        ],
+    )
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path),
+        FakeLLMProvider(structured_responses=[generated]),
+        skill_repository=skill_repo,
+        mastery_repository=mastery_repo,
+    )
+
+    plan = await curriculum.create_draft(
+        session.id, "prefix sums", Language.PYTHON, "beginner", user_id=user.id
+    )
+
+    # The mastered step opens complete; the one they actually came for is startable, not
+    # locked behind it.
+    assert plan.nodes[0].status == LessonNodeStatus.DONE
+    assert plan.nodes[1].status == LessonNodeStatus.AVAILABLE
+
+
+async def test_a_plan_for_an_unknown_learner_starts_from_the_first_step(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session(user.id)
+
+    generated = GeneratedCurriculum(
+        nodes=[
+            GeneratedCurriculumNode(skill="arrays", difficulty=1),
+            GeneratedCurriculumNode(skill="prefix-sum", difficulty=3),
+        ],
+    )
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path),
+        FakeLLMProvider(structured_responses=[generated]),
+        skill_repository=SqliteSkillRepository(db_path),
+        mastery_repository=SqliteUserSkillStateRepository(db_path),
+    )
+
+    plan = await curriculum.create_draft(
+        session.id, "prefix sums", Language.PYTHON, "beginner", user_id=user.id
+    )
+
+    assert [n.status for n in plan.nodes] == [
+        LessonNodeStatus.AVAILABLE,
+        LessonNodeStatus.LOCKED,
+    ]

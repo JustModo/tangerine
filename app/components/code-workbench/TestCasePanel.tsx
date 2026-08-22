@@ -16,7 +16,16 @@ interface TestCasePanelProps {
    * the client at all, so this stays empty for those. */
   expectedById?: Record<string, string>;
   summary?: { passed: number; total: number } | null;
+  /** How the solution compares to the reference on a large input. Passing every test says
+   * the answer is right; this says whether it would survive an interview. */
+  complexityVerdict?: "optimal" | "acceptable" | "slow" | null;
 }
+
+const VERDICTS = {
+  optimal: { label: "Optimal", detail: "As fast as the reference on a large input.", tone: "border-green-500/30 text-green-500" },
+  acceptable: { label: "Acceptable", detail: "Slower than the reference, but not by an order of magnitude.", tone: "border-amber-500/30 text-amber-400" },
+  slow: { label: "Too slow", detail: "Passes, but an interview would push you for a faster approach.", tone: "border-red-500/30 text-red-500" },
+} as const;
 
 export function TestCasePanel({
   status,
@@ -25,6 +34,7 @@ export function TestCasePanel({
   hidden,
   expectedById,
   summary,
+  complexityVerdict,
 }: TestCasePanelProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -60,11 +70,29 @@ export function TestCasePanel({
     <ScrollArea className="h-full">
       <div className="p-6 space-y-5">
         {summary && (
-          <div className="flex items-center justify-between border border-white/10 bg-white/5 rounded-md px-4 py-2 text-sm">
-            <span className="font-bold uppercase tracking-widest text-[10px] text-zinc-500">Score</span>
-            <span className="font-black">
-              {summary.passed} / {summary.total}
-            </span>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between border border-white/10 bg-white/5 rounded-md px-4 py-2 text-sm">
+              <span className="font-bold uppercase tracking-widest text-[10px] text-zinc-500">Score</span>
+              <span className="font-black">
+                {summary.passed} / {summary.total}
+              </span>
+            </div>
+            {complexityVerdict && (
+              <div
+                className={cn(
+                  "flex items-center justify-between gap-3 border rounded-md px-4 py-2",
+                  VERDICTS[complexityVerdict].tone,
+                )}
+              >
+                <span className="font-bold uppercase tracking-widest text-[10px]">Speed</span>
+                <span className="flex items-baseline gap-2 text-right">
+                  <span className="font-black text-sm">{VERDICTS[complexityVerdict].label}</span>
+                  <span className="text-[10px] text-zinc-500">
+                    {VERDICTS[complexityVerdict].detail}
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
         )}
         <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(6.5rem, 1fr))" }}>

@@ -12,7 +12,6 @@ from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.llm.schemas.lesson_notes import GeneratedLessonNotes
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
-from app.problems.application.prefetch import PrefetchService
 from app.problems.application.services import ProblemSelectionService
 from app.problems.application.validation import ProblemValidationService
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
@@ -23,7 +22,12 @@ router = APIRouter(prefix="/learning-plans", tags=["curriculum"])
 
 
 def get_service() -> CurriculumService:
-    return CurriculumService(SqliteLessonPlanRepository(), GeminiProvider(), llm_cache=SqliteLLMCache())
+    return CurriculumService(
+        SqliteLessonPlanRepository(),
+        GeminiProvider(),
+        llm_cache=SqliteLLMCache(),
+        mastery_repository=SqliteUserSkillStateRepository(),
+    )
 
 
 def _build_validation_service() -> ProblemValidationService:
@@ -42,9 +46,6 @@ def get_problem_session_service() -> ProblemSessionService:
         ProblemSelectionService(SqliteProblemRepository()),
         _build_validation_service(),
         mastery_repository=SqliteUserSkillStateRepository(),
-        prefetch_service=PrefetchService(
-            ProblemSelectionService(SqliteProblemRepository()), _build_validation_service()
-        ),
     )
 
 
@@ -59,7 +60,9 @@ class CreatePlanBody(BaseModel):
 async def create_plan(
     body: CreatePlanBody, service: CurriculumService = Depends(get_service)
 ) -> LessonPlan:
-    return await service.create_draft(body.session_id, body.topic, body.language, body.level)
+    return await service.create_draft(
+        body.session_id, body.topic, body.language, body.level, user_id=LOCAL_USER_ID
+    )
 
 
 @router.get("")

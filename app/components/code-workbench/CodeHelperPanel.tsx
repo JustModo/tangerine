@@ -14,9 +14,13 @@ import type { HelperContext, ProblemChatMessage } from "~/lib/types";
 export function CodeHelperPanel({
   problemSessionId,
   getContext,
+  onFirstMessage,
 }: {
   problemSessionId: string;
   getContext: () => HelperContext;
+  /** Fires once, on the first question asked — a solution reached with the helper's help
+   * is weaker evidence of mastery than one reached without it. */
+  onFirstMessage?: () => void;
 }) {
   const [messages, setMessages] = useState<ProblemChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -44,6 +48,7 @@ export function CodeHelperPanel({
 
   async function send() {
     if (!draft.trim() || sending) return;
+    onFirstMessage?.();
     const content = draft;
     setDraft("");
     setSending(true);
@@ -85,11 +90,6 @@ export function CodeHelperPanel({
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
-        {messages.length === 0 && !streamingText && (
-          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-            Ask about your code — a review, why a test failed, or a faster approach.
-          </p>
-        )}
         {messages.map((message) => (
           <div key={message.id}>
             <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">

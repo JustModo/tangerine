@@ -1,15 +1,92 @@
-import { useState } from "react";
-import { Lightbulb } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { BookOpen, Flag, Lightbulb, Unlock } from "lucide-react";
 import { Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { LessonNotesPanel } from "@/components/LessonNotesPanel";
 import { CodeHelperPanel } from "./CodeHelperPanel";
+import { apiJson } from "~/lib/api";
 import { cn } from "~/lib/utils";
 import type { HelperContext, ProblemDetail } from "~/lib/types";
 
-function HintList({ hints }: { hints: string[] }) {
+// Minutes an interview would expect for each difficulty. Shown, never enforced and never
+// recorded: notes and the helper chat are free here, so a clock that fed into any score
+// would be measuring something it cannot see.
+const TARGET_MINUTES: Record<string, number> = { easy: 15, medium: 25, hard: 40 };
+
+function Timer({ difficulty }: { difficulty: string }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setElapsed((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const target = TARGET_MINUTES[difficulty.toLowerCase()];
+  const minutes = Math.floor(elapsed / 60);
+  const over = target !== undefined && minutes >= target;
+  return (
+    <span
+      className={cn(
+        "text-[10px] font-mono tabular-nums tracking-widest",
+        over ? "text-amber-500" : "text-zinc-600",
+      )}
+      title={target ? `Interviews usually allow about ${target} min for a ${difficulty}` : undefined}
+    >
+      {String(minutes).padStart(2, "0")}:{String(elapsed % 60).padStart(2, "0")}
+      {target !== undefined && <span className="text-zinc-700"> / {target}:00</span>}
+    </span>
+  );
+}
+
+function SolutionSection({ problemSessionId }: { problemSessionId: string }) {
+  const [solution, setSolution] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function reveal() {
+    try {
+      const data = await apiJson<{ reference_solution: string }>(
+        `/api/problem-sessions/${problemSessionId}/solution`,
+      );
+      setSolution(data.reference_solution);
+    } catch {
+      setError("Couldn't load the solution.");
+    }
+  }
+
+  return (
+    <div className="space-y-2 border-t border-white/10 pt-5">
+      <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+        Reference solution
+      </h3>
+      {solution === null ? (
+        <>
+          <p className="text-xs text-zinc-500">
+            You solved it. Comparing your approach to a clean one is where most of the
+            learning is.
+          </p>
+          <Button variant="secondary" size="sm" onClick={reveal}>
+            <Unlock className="w-3.5 h-3.5 mr-2" /> SHOW SOLUTION
+          </Button>
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </>
+      ) : (
+        <pre className="text-xs font-mono bg-zinc-900 border border-white/10 rounded-md p-3 overflow-x-auto">
+          {solution}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function HintList({
+  hints,
+  onRevealed,
+}: {
+  hints: string[];
+  onRevealed?: (count: number) => void;
+}) {
   const [revealed, setRevealed] = useState(0);
   if (hints.length === 0) return null;
 
@@ -31,7 +108,14 @@ function HintList({ hints }: { hints: string[] }) {
         {revealed < hints.length && (
           <button
             type="button"
-            onClick={() => setRevealed((n) => n + 1)}
+            onClick={() =>
+              setRevealed((n) => {
+                // Reported upward so mastery can tell "solved cold" from "solved after
+                // three hints" — the same pass otherwise scores identically either way.
+                onRevealed?.(n + 1);
+                return n + 1;
+              })
+            }
             className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 hover:text-white transition-colors"
           >
             Reveal hint {revealed + 1} of {hints.length}
@@ -47,22 +131,46 @@ export function ProblemPanel({
   lessonNodeId,
   problemSessionId,
   getContext,
+  onHintRevealed,
+  onHelperUsed,
+  solved = false,
 }: {
   problem: ProblemDetail;
   lessonNodeId?: string;
   problemSessionId?: string;
   getContext?: () => HelperContext;
+  onHintRevealed?: (count: number) => void;
+  onHelperUsed?: () => void;
+  solved?: boolean;
 }) {
-  const [tab, setTab] = useState<"statement" | "notes" | "helper">("statement");
-  // Mount the notes/helper panels only once first opened (so never-opened tabs cost zero
-  // tokens), then keep them mounted-but-hidden so toggling never refetches or loses a draft.
+  const [tab, setTab] = useState<"statement" | "helper">("statement");
+  // Notes sit under the statement rather than in a sibling tab: they are read WHILE
+  // thinking about the problem, and a tab hides the very thing they are about.
+  const [notesOpen, setNotesOpen] = useState(false);
   const [notesMounted, setNotesMounted] = useState(false);
+  // Mount the helper only once opened (so a never-opened tab costs zero tokens), then keep
+  // it mounted-but-hidden so toggling never refetches or loses a draft.
   const [helperMounted, setHelperMounted] = useState(false);
-  const tabs: ("statement" | "notes" | "helper")[] = [
+  const [flagged, setFlagged] = useState(false);
+  const tabs: ("statement" | "helper")[] = [
     "statement",
-    ...(lessonNodeId ? (["notes"] as const) : []),
     ...(problemSessionId && getContext ? (["helper"] as const) : []),
   ];
+
+  async function toggleFlag() {
+    if (!problemSessionId) return;
+    const next = !flagged;
+    setFlagged(next);
+    try {
+      await apiJson(`/api/problem-sessions/${problemSessionId}/flag`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flagged: next }),
+      });
+    } catch {
+      setFlagged(!next);
+    }
+  }
 
   return (
     // Fixed header + a single scrolling region below it. The helper tab fills that region
@@ -70,7 +178,24 @@ export function ProblemPanel({
     <div className="h-full flex flex-col bg-zinc-950 border-r border-white/10">
       <div className="flex-none px-8 pt-8 pb-4 space-y-4">
         <div className="space-y-3">
-          <h1 className="text-2xl font-black tracking-tighter uppercase">{problem.title}</h1>
+          <div className="flex items-start justify-between gap-3">
+            <h1 className="text-2xl font-black tracking-tighter uppercase">{problem.title}</h1>
+            <div className="flex items-center gap-2 flex-none pt-1">
+              <Timer difficulty={problem.difficulty} />
+              {problemSessionId && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={flagged ? "Unflag this problem" : "Flag to come back to"}
+                  aria-pressed={flagged}
+                  onClick={toggleFlag}
+                  className={flagged ? "text-amber-500" : "text-zinc-600 hover:text-white"}
+                >
+                  <Flag className={cn("w-4 h-4", flagged && "fill-current")} />
+                </Button>
+              )}
+            </div>
+          </div>
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">{problem.language}</Badge>
             <Badge variant="secondary">{problem.difficulty}</Badge>
@@ -92,7 +217,6 @@ export function ProblemPanel({
                 type="button"
                 onClick={() => {
                   setTab(value);
-                  if (value === "notes") setNotesMounted(true);
                   if (value === "helper") setHelperMounted(true);
                 }}
                 className={cn(
@@ -110,18 +234,16 @@ export function ProblemPanel({
       <div className="flex-1 min-h-0">
         {helperMounted && problemSessionId && getContext && (
           <div className={tab === "helper" ? "h-full px-8 pb-8" : "hidden"}>
-            <CodeHelperPanel problemSessionId={problemSessionId} getContext={getContext} />
+            <CodeHelperPanel
+              problemSessionId={problemSessionId}
+              getContext={getContext}
+              onFirstMessage={onHelperUsed}
+            />
           </div>
         )}
 
         <ScrollArea className={tab === "helper" ? "hidden" : "h-full"}>
           <div className="px-8 pb-8">
-        {notesMounted && lessonNodeId && (
-          <div className={tab === "notes" ? "" : "hidden"}>
-            <LessonNotesPanel lessonNodeId={lessonNodeId} />
-          </div>
-        )}
-
         <div className={tab === "statement" ? "space-y-6" : "hidden"}>
         <Markdown>{problem.statement_md}</Markdown>
 
@@ -166,7 +288,30 @@ export function ProblemPanel({
           </div>
         )}
 
-        <HintList hints={problem.hints} />
+        <HintList hints={problem.hints} onRevealed={onHintRevealed} />
+
+        {lessonNodeId && (
+          <div className="border-t border-white/10 pt-5">
+            <button
+              type="button"
+              onClick={() => {
+                setNotesMounted(true);
+                setNotesOpen((open) => !open);
+              }}
+              className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500 hover:text-white transition-colors"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              {notesOpen ? "Hide lesson notes" : "Lesson notes"}
+            </button>
+            {notesMounted && (
+              <div className={notesOpen ? "mt-4" : "hidden"}>
+                <LessonNotesPanel lessonNodeId={lessonNodeId} />
+              </div>
+            )}
+          </div>
+        )}
+
+        {solved && problemSessionId && <SolutionSection problemSessionId={problemSessionId} />}
         </div>
           </div>
         </ScrollArea>

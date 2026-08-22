@@ -22,6 +22,8 @@ class ProblemGraphState(TypedDict):
     difficulty: str
     # When set, the problem is adapted from this exact pasted statement instead of invented.
     source_problem: str | None
+    # Titles already in the bank for this skill — the model is told not to repeat them.
+    avoid_titles: list[str]
     result: GeneratedProblem | None
     error: str | None
     attempts: int
@@ -34,7 +36,12 @@ def build_problem_graph(provider: LLMProvider):
             user_prompt=(
                 adapt_problem_user_prompt(state["source_problem"], state["language"])
                 if state["source_problem"]
-                else problem_user_prompt(state["skill"], state["language"], state["difficulty"])
+                else problem_user_prompt(
+                    state["skill"],
+                    state["language"],
+                    state["difficulty"],
+                    state["avoid_titles"],
+                )
             ),
         )
         try:
@@ -62,13 +69,16 @@ async def generate_problem(
     difficulty: str,
     cache: SqliteLLMCache | None = None,
     source_problem: str | None = None,
+    avoid_titles: list[str] | None = None,
 ) -> GeneratedProblem:
-    # NOTE: this produces validated content only. Running the reference solution through
-    # the sandbox and persisting problem_versions/tests is milestone 6's job.
     # A pasted problem is one-of-a-kind — never cached under the generic skill key, which
     # would otherwise poison the bank with someone else's specific question.
+    #
+    # avoid_titles is part of the key, not just the prompt: without it every regeneration
+    # for a skill is a cache hit on the first problem ever made for it, so the bank could
+    # never hold more than one problem per (skill, language, difficulty).
     key = (
-        cache_key("problem", skill, language, difficulty)
+        cache_key("problem", skill, language, difficulty, *sorted(avoid_titles or []))
         if cache is not None and not source_problem
         else None
     )
@@ -84,6 +94,7 @@ async def generate_problem(
             "language": language,
             "difficulty": difficulty,
             "source_problem": source_problem,
+            "avoid_titles": avoid_titles or [],
             "result": None,
             "error": None,
             "attempts": 0,

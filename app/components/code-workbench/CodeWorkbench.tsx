@@ -5,7 +5,13 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Separator } from "@/components/ui/separator";
 import { useStatus } from "~/lib/status";
 import { ApiError } from "~/lib/api";
-import type { EvaluationResult, HelperContext, ProblemDetail, TestResult } from "~/lib/types";
+import type {
+  AttemptMetrics,
+  EvaluationResult,
+  HelperContext,
+  ProblemDetail,
+  TestResult,
+} from "~/lib/types";
 import { ProblemPanel } from "./ProblemPanel";
 import { MonacoEditor } from "./MonacoEditor";
 import { TestCasePanel, type TestPanelStatus } from "./TestCasePanel";
@@ -17,11 +23,14 @@ interface CodeWorkbenchProps {
   initialCode: string;
   onAutosave?: (code: string) => void;
   onRun: (code: string) => AsyncGenerator<TestResult>;
-  onSubmit: ((code: string) => Promise<EvaluationResult>) | null;
+  onSubmit: ((code: string, metrics: AttemptMetrics) => Promise<EvaluationResult>) | null;
   /** Enable the Notes and Helper tabs. Both absent in practice mode, which has neither a
    * lesson node nor a persisted problem session. */
   lessonNodeId?: string;
   problemSessionId?: string;
+  /** True when the session was already passing before this page load — otherwise
+   * revisiting a solved problem would hide the solution it had already earned. */
+  initiallySolved?: boolean;
 }
 
 export function CodeWorkbench({
@@ -32,6 +41,7 @@ export function CodeWorkbench({
   onSubmit,
   lessonNodeId,
   problemSessionId,
+  initiallySolved = false,
 }: CodeWorkbenchProps) {
   const [code, setCode] = useState(initialCode);
   const [isRunning, setIsRunning] = useState(false);
@@ -41,6 +51,7 @@ export function CodeWorkbench({
   const [panelResults, setPanelResults] = useState<TestResult[]>([]);
   const [panelHidden, setPanelHidden] = useState(false);
   const [summary, setSummary] = useState<{ passed: number; total: number } | null>(null);
+  const [verdict, setVerdict] = useState<EvaluationResult["complexity_verdict"]>(null);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // The helper chat reads these through a stable getter instead of props — passing `code`
   // down directly would re-render the chat (and its markdown) on every keystroke.
@@ -51,6 +62,18 @@ export function CodeWorkbench({
     () => ({ source_code: codeRef.current, last_run: lastRunRef.current }),
     [],
   );
+  // What the attempt cost. Refs, not state: none of it should re-render anything, and all
+  // of it is read once, at submit. The server has no way to observe any of it.
+  const startedAtRef = useRef(Date.now());
+  const runCountRef = useRef(0);
+  const hintsUsedRef = useRef(0);
+  const helperUsedRef = useRef(false);
+  const onHintRevealed = useCallback((count: number) => {
+    hintsUsedRef.current = count;
+  }, []);
+  const onHelperUsed = useCallback(() => {
+    helperUsedRef.current = true;
+  }, []);
   const { showError } = useStatus();
   const expectedById = useMemo(
     () => Object.fromEntries(problem.examples.map((example) => [example.id, example.output])),
@@ -66,6 +89,7 @@ export function CodeWorkbench({
   }, [code]);
 
   async function handleRun() {
+    runCountRef.current += 1;
     setIsRunning(true);
     setPanelStatus("running");
     setPanelResults([]);
@@ -105,11 +129,18 @@ export function CodeWorkbench({
     setPanelResults([]);
     setPanelHidden(true);
     setSummary(null);
+    setVerdict(null);
     setPanelLabel("Evaluating...");
     try {
-      const evaluation = await onSubmit(code);
+      const evaluation = await onSubmit(code, {
+        duration_ms: Date.now() - startedAtRef.current,
+        run_count: runCountRef.current,
+        hints_used: hintsUsedRef.current,
+        helper_used: helperUsedRef.current,
+      });
       setPanelResults(evaluation.results);
       setSummary({ passed: evaluation.passed_tests, total: evaluation.total_tests });
+      setVerdict(evaluation.complexity_verdict ?? null);
       lastRunRef.current = {
         kind: "submit",
         passed: evaluation.passed_tests,
@@ -126,6 +157,22 @@ export function CodeWorkbench({
   }
 
 
+  // Ctrl/Cmd+Enter to run, +Shift to submit — the bindings every editor-plus-runner uses.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.key !== "Enter") return;
+      if (isRunning || isSubmitting) return;
+      event.preventDefault();
+      if (event.shiftKey) {
+        if (onSubmit) handleSubmit();
+      } else {
+        handleRun();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
   return (
     <div className="h-full flex flex-col overflow-hidden bg-black text-white">
       <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0">
@@ -135,6 +182,9 @@ export function CodeWorkbench({
             lessonNodeId={lessonNodeId}
             problemSessionId={problemSessionId}
             getContext={getHelperContext}
+            onHintRevealed={onHintRevealed}
+            onHelperUsed={onHelperUsed}
+            solved={initiallySolved || (summary !== null && summary.passed === summary.total)}
           />
         </ResizablePanel>
         <ResizableHandle className="w-1 bg-white/5" />
@@ -157,7 +207,13 @@ export function CodeWorkbench({
                   Test Cases
                 </span>
                 <div className="flex items-center gap-2">
-                  <Button variant="secondary" size="sm" onClick={handleRun} disabled={isRunning || isSubmitting}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleRun}
+                    disabled={isRunning || isSubmitting}
+                    title="Ctrl/Cmd + Enter"
+                  >
                     {isRunning ? (
                       <RefreshCcw className="mr-2 h-3.5 w-3.5 animate-spin" />
                     ) : (
@@ -166,7 +222,12 @@ export function CodeWorkbench({
                     {isRunning ? "Running..." : "Run"}
                   </Button>
                   {onSubmit && (
-                    <Button size="sm" onClick={handleSubmit} disabled={isRunning || isSubmitting}>
+                    <Button
+                      size="sm"
+                      onClick={handleSubmit}
+                      disabled={isRunning || isSubmitting}
+                      title="Ctrl/Cmd + Shift + Enter"
+                    >
                       {isSubmitting ? (
                         <RefreshCcw className="mr-2 h-3.5 w-3.5 animate-spin" />
                       ) : null}
@@ -184,6 +245,7 @@ export function CodeWorkbench({
                   hidden={panelHidden}
                   expectedById={panelHidden ? undefined : expectedById}
                   summary={summary}
+                  complexityVerdict={verdict}
                 />
               </div>
             </ResizablePanel>

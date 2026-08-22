@@ -8,7 +8,7 @@ from app.mastery.application.services import MasteryService
 from app.mastery.domain.models import UserSkillState
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
-from app.revision.application.services import RevisionService, suggest_difficulty
+from app.revision.application.services import RevisionService, decayed_score, suggest_difficulty
 from app.revision.domain.models import RevisionCandidate
 from tests.db import apply_migrations, seed_skills, seed_users
 
@@ -119,3 +119,60 @@ def test_mastery_context_buckets_by_score_and_caps_the_list() -> None:
     capped = mastery_context([_candidate(f"s{i}", 0.1) for i in range(5)], limit=2)
     assert "s2" not in capped
     assert "plus 3 more not listed" in capped
+
+
+async def test_help_reduces_what_a_pass_is_worth(db_path: str) -> None:
+    service = MasteryService(SqliteUserSkillStateRepository(db_path))
+
+    unaided = await service.record_result("u1", "s1", passed=True)
+    assisted = await service.record_result("u2", "s1", passed=True, assistance=1.0)
+
+    assert assisted.mastery_score < unaided.mastery_score
+    # ...but never nothing: they did still solve it.
+    assert assisted.mastery_score > 0
+
+
+async def test_a_failure_is_a_failure_however_much_help_was_used(db_path: str) -> None:
+    service = MasteryService(SqliteUserSkillStateRepository(db_path))
+    await service.record_result("u1", "s1", passed=True)
+    await service.record_result("u2", "s1", passed=True)
+
+    unaided = await service.record_result("u1", "s1", passed=False)
+    assisted = await service.record_result("u2", "s1", passed=False, assistance=1.0)
+
+    assert assisted.mastery_score == pytest.approx(unaided.mastery_score)
+
+
+async def test_a_secondary_skill_moves_less_than_the_primary(db_path: str) -> None:
+    service = MasteryService(SqliteUserSkillStateRepository(db_path))
+
+    primary = await service.record_result("u1", "s1", passed=True)
+    secondary = await service.record_result("u1", "s2", passed=True, is_primary=False)
+
+    assert secondary.mastery_score < primary.mastery_score
+
+
+def test_a_stale_skill_stops_reading_as_mastered() -> None:
+    assert decayed_score(0.9, days_since_seen=3) == pytest.approx(0.9)  # inside the grace window
+    assert decayed_score(0.9, days_since_seen=120) < 0.6
+    assert decayed_score(0.9, days_since_seen=10_000) == pytest.approx(0.27)  # floors, never zero
+
+
+async def test_the_revision_queue_reports_the_decayed_score(db_path: str) -> None:
+    skill_repo = SqliteSkillRepository(db_path)
+    skill_id = await skill_repo.ensure_skill("long-forgotten")
+    mastery_repo = SqliteUserSkillStateRepository(db_path)
+    await mastery_repo.save(
+        UserSkillState(
+            user_id="u1",
+            skill_id=skill_id,
+            mastery_score=0.9,
+            streak=3,
+            last_seen_at=datetime.now(timezone.utc) - timedelta(days=200),
+        )
+    )
+
+    queue = await RevisionService(mastery_repo, skill_repo).get_revision_queue("u1")
+
+    assert queue[0].mastery_score < 0.5
+    assert queue[0].reason == "weak_skill"

@@ -15,6 +15,7 @@ from app.llm.prompts.chat import (
     mastery_context,
 )
 from app.revision.application.services import RevisionService
+from app.curriculum.domain.models import LessonNodeStatus
 from app.sessions.domain.models import ChatMessage, ChatRole, LearningSession, SessionStatus
 from app.sessions.domain.repository import SessionRepository
 from app.shared.types import Language
@@ -138,7 +139,7 @@ class SessionService:
                 yield {"type": "text_delta", "delta": chunk.text_delta}
             if chunk.tool_call is not None and chunk.tool_call.name == "generate_learning_plan":
                 async for event in self._handle_generate_plan(
-                    session_id, chunk.tool_call.args, history, message, existing_plan
+                    session_id, chunk.tool_call.args, history, message, existing_plan, user_id
                 ):
                     yield event
                 return
@@ -173,6 +174,7 @@ class SessionService:
         history: list[ChatTurn],
         user_message: str,
         existing_plan: bool,
+        user_id: str | None,
     ) -> AsyncIterator[dict]:
         # Enforced here, not just in the prompt: a plan in a language the learner never
         # chose — or one the sandbox cannot run — is worse than no plan, and
@@ -233,15 +235,27 @@ class SessionService:
                     level,
                     step_count=int(step_count) if step_count else None,
                     target_problem=target_problem,
+                    user_id=user_id,
                 )
             except Exception:
                 logger.warning("Plan generation failed for session %s", session_id, exc_info=True)
 
-        result_summary = (
-            f"Generated a learning plan for '{plan.topic}' with {len(plan.nodes)} steps."
-            if plan is not None
-            else "Plan generation failed — tell the user something went wrong and they can try again."
-        )
+        if plan is not None:
+            # Steps that start DONE were skipped because the learner has already proven the
+            # skill. Saying so matters: a plan that opens half-complete looks like a bug.
+            skipped = sum(1 for node in plan.nodes if node.status == LessonNodeStatus.DONE)
+            result_summary = (
+                f"Generated a learning plan for '{plan.topic}' with {len(plan.nodes)} steps."
+            )
+            if skipped:
+                result_summary += (
+                    f" {skipped} of them are already marked done because their practice "
+                    "record shows they've mastered those skills — mention this."
+                )
+        else:
+            result_summary = (
+                "Plan generation failed — tell the user something went wrong and they can try again."
+            )
         fallback = (
             "Your learning plan is ready — check the corner button to view it."
             if plan is not None

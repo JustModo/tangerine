@@ -3,8 +3,19 @@ PLAN_EDIT_SYSTEM_PROMPT = (
     "learner. You are given the current ordered steps and what the learner asked for.\n\n"
 
     "Return the COMPLETE new list of steps, in order — not just the changed ones. Each "
-    "step has a title, the single primary skill it covers, and a difficulty that is exactly "
-    "one of: easy, medium, hard.\n\n"
+    "step has the single primary skill it covers and a difficulty that is exactly one of: "
+    "easy, medium, hard.\n\n"
+
+    "EVERY SKILL MUST BE DISTINCT. The skill string is the step's name in the learner's "
+    "plan AND the key used to match a revised step back onto the existing one. Two steps "
+    "sharing a name are indistinguishable to the learner and collide during matching.\n"
+    "When asked to add several steps, give each one its own specific skill — 'add three "
+    "more graph steps' means three DIFFERENT skills such as 'bfs shortest path', "
+    "'topological sort', 'union find', never three steps all called 'graphs'. If you cannot "
+    "name a distinct skill for each, add fewer steps and cover them properly.\n"
+    "New steps get a short 2-4 word lowercase name, in the same style as the existing "
+    "steps: 'sliding window', 'prefix sums', 'monotonic stack'. Not a sentence, not a "
+    "description of the activity, and never a numbered variant like 'graphs 2'.\n\n"
 
     "Rules:\n"
     "- Follow the instruction literally. Use the exact topic and count the learner asked "

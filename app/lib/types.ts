@@ -45,7 +45,52 @@ export interface TestResult {
 export interface EvaluationResult {
   passed_tests: number;
   total_tests: number;
+  /** How the solution compares to the reference on a large input. Null when the problem
+   * has no stress input, or the submission didn't pass everything. */
+  complexity_verdict?: "optimal" | "acceptable" | "slow" | null;
   results: TestResult[];
+}
+
+/** What the attempt cost. Only the browser knows any of it, so the client reports it. */
+export interface AttemptMetrics {
+  duration_ms: number;
+  run_count: number;
+  hints_used: number;
+  helper_used: boolean;
+}
+
+export interface SkillProgress {
+  skill_id: string;
+  skill_name: string;
+  mastery_score: number;
+  streak: number;
+  last_seen_at: string;
+}
+
+export interface RevisionCandidate {
+  skill_id: string;
+  skill_name: string;
+  reason: "weak_skill" | "overdue_revision" | "review";
+  priority: number;
+  mastery_score: number;
+  days_since_seen: number;
+}
+
+export interface FlaggedProblem {
+  problem_session_id: string;
+  problem_id: string;
+  title: string;
+  difficulty: string;
+  updated_at: string;
+}
+
+export interface Progress {
+  skills: SkillProgress[];
+  best_streak: number;
+  solved_total: number;
+  solved_this_week: number;
+  revision_queue: RevisionCandidate[];
+  flagged: FlaggedProblem[];
 }
 
 export interface ProblemChatMessage {

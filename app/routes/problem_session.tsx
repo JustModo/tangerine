@@ -4,12 +4,12 @@ import { CodeWorkbench } from "@/components/code-workbench/CodeWorkbench";
 import { PageHeader } from "@/components/PageHeader";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
-import type { EvaluationResult, ProblemDetail, TestResult } from "~/lib/types";
+import type { AttemptMetrics, EvaluationResult, ProblemDetail, TestResult } from "~/lib/types";
 
 interface ProblemSessionData {
   id: string;
   problem_id: string;
-  lesson_node_id: string;
+  lesson_node_id: string | null;
   lesson_plan_id: string | null;
   source_code: string | null;
   status: string;
@@ -65,11 +65,11 @@ export default function ProblemSessionScreen() {
     for (const result of results) yield result;
   }
 
-  async function submitCode(code: string): Promise<EvaluationResult> {
+  async function submitCode(code: string, metrics: AttemptMetrics): Promise<EvaluationResult> {
     return apiJson<EvaluationResult>(`/api/problem-sessions/${id}/submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source_code: code }),
+      body: JSON.stringify({ source_code: code, metrics }),
     });
   }
 
@@ -77,10 +77,11 @@ export default function ProblemSessionScreen() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      {/* A practice session has no plan to go back to — it came from the progress screen. */}
       <PageHeader
         title={problem.title}
         subtitle={`${problem.language} · ${problem.difficulty}`}
-        backTo={session.lesson_plan_id ? `/plans/${session.lesson_plan_id}` : undefined}
+        backTo={session.lesson_plan_id ? `/plans/${session.lesson_plan_id}` : "/progress"}
       />
       <div className="flex-1 min-h-0">
         <CodeWorkbench
@@ -89,8 +90,9 @@ export default function ProblemSessionScreen() {
           onAutosave={autosave}
           onRun={runCode}
           onSubmit={submitCode}
-          lessonNodeId={session.lesson_node_id}
+          lessonNodeId={session.lesson_node_id ?? undefined}
           problemSessionId={session.id}
+          initiallySolved={session.status === "COMPLETED"}
         />
       </div>
     </div>
