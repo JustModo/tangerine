@@ -8,7 +8,7 @@ import type { HelperContext, ProblemChatMessage } from "~/lib/types";
 
 /**
  * Code review chat for one problem. The learner's code and last test run are read at send
- * time through getContext() rather than passed as props — otherwise every keystroke in the
+ * time through getContext() rather than passed as props - otherwise every keystroke in the
  * editor would re-render this panel and its markdown.
  */
 export function CodeHelperPanel({
@@ -18,7 +18,7 @@ export function CodeHelperPanel({
 }: {
   problemSessionId: string;
   getContext: () => HelperContext;
-  /** Fires once, on the first question asked — a solution reached with the helper's help
+  /** Fires once, on the first question asked - a solution reached with the helper's help
    * is weaker evidence of mastery than one reached without it. */
   onFirstMessage?: () => void;
 }) {
@@ -33,7 +33,7 @@ export function CodeHelperPanel({
     try {
       setMessages(await apiJson<ProblemChatMessage[]>(`/api/problem-sessions/${problemSessionId}/chat`));
     } catch {
-      // Non-critical — an empty history just means starting fresh.
+      // Non-critical - an empty history just means starting fresh.
     }
   }
 
@@ -77,7 +77,7 @@ export function CodeHelperPanel({
       });
       await Promise.all(pending);
     } catch (err) {
-      // A stream that ends without a reply must say so — silence reads as the helper
+      // A stream that ends without a reply must say so - silence reads as the helper
       // choosing to ignore the question.
       setError(err instanceof ApiError ? err.message : "The helper couldn't reply.");
       await loadMessages();

@@ -57,7 +57,7 @@ export default function PlanScreen() {
 
   async function startNext() {
     setBusy(true);
-    // Staged, not real backend progress — the bank-hit path is instant, but a miss
+    // Staged, not real backend progress - the bank-hit path is instant, but a miss
     // triggers generation + sandbox validation, which can take a few seconds.
     setBusyMessage("Selecting problem...");
     const generatingTimer = setTimeout(() => setBusyMessage("Generating problem..."), 1200);

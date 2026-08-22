@@ -23,14 +23,14 @@ function extractErrorMessage(body: unknown, fallback: string): string {
 /**
  * fetch() wrapped so a network failure (e.g. the agent process restarting mid-request
  * under `--reload` in dev) surfaces as a clear, distinguishable error instead of an
- * unhandled rejection or a misleading "not found" — a dropped connection isn't the same
+ * unhandled rejection or a misleading "not found" - a dropped connection isn't the same
  * thing as the server telling us the resource doesn't exist.
  */
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(path, init);
   } catch {
-    throw new ApiError("Could not reach the server — it may be restarting. Try again in a moment.");
+    throw new ApiError("Could not reach the server - it may be restarting. Try again in a moment.");
   }
 }
 
@@ -54,7 +54,7 @@ export async function apiJson<T = unknown>(path: string, init?: RequestInit): Pr
  * Consumes an SSE response body, invoking `onEvent` for each `data:` frame.
  *
  * The agent guarantees every stream ends with either `event: done` or an
- * `{type: "error"}` frame (agent/app/shared/sse.py) — but a dropped connection can still
+ * `{type: "error"}` frame (agent/app/shared/sse.py) - but a dropped connection can still
  * end one mid-flight, so a stream that stops without either is reported as an error too.
  * Silently ending is the one outcome the UI must never show, because it is
  * indistinguishable from the assistant deciding to say nothing.

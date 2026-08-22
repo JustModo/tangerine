@@ -28,7 +28,7 @@ interface CodeWorkbenchProps {
    * lesson node nor a persisted problem session. */
   lessonNodeId?: string;
   problemSessionId?: string;
-  /** True when the session was already passing before this page load — otherwise
+  /** True when the session was already passing before this page load - otherwise
    * revisiting a solved problem would hide the solution it had already earned. */
   initiallySolved?: boolean;
 }
@@ -53,7 +53,7 @@ export function CodeWorkbench({
   const [summary, setSummary] = useState<{ passed: number; total: number } | null>(null);
   const [verdict, setVerdict] = useState<EvaluationResult["complexity_verdict"]>(null);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  // The helper chat reads these through a stable getter instead of props — passing `code`
+  // The helper chat reads these through a stable getter instead of props - passing `code`
   // down directly would re-render the chat (and its markdown) on every keystroke.
   const codeRef = useRef(code);
   codeRef.current = code;
@@ -157,7 +157,7 @@ export function CodeWorkbench({
   }
 
 
-  // Ctrl/Cmd+Enter to run, +Shift to submit — the bindings every editor-plus-runner uses.
+  // Ctrl/Cmd+Enter to run, +Shift to submit - the bindings every editor-plus-runner uses.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey) || event.key !== "Enter") return;

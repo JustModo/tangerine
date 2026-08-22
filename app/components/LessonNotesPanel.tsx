@@ -5,7 +5,7 @@ import type { LessonNotes } from "~/lib/types";
 
 /**
  * Teaching cheat sheet for one lesson node, revealed a step at a time. Fetching happens on
- * mount — both callers only mount this once the user actually opens notes, so mounting IS
+ * mount - both callers only mount this once the user actually opens notes, so mounting IS
  * the lazy trigger and a node whose notes are never opened costs zero tokens.
  */
 export function LessonNotesPanel({ lessonNodeId }: { lessonNodeId: string }) {
@@ -20,7 +20,7 @@ export function LessonNotesPanel({ lessonNodeId }: { lessonNodeId: string }) {
     setRevealed(1);
     apiJson<LessonNotes>(`/api/learning-plans/nodes/${lessonNodeId}/notes`)
       .then((data) => !cancelled && setNotes(data))
-      // Deliberately not showError() — a cheat sheet failing shouldn't throw a global
+      // Deliberately not showError() - a cheat sheet failing shouldn't throw a global
       // banner over the editor. Inline message is enough.
       .catch(() => !cancelled && setFailed(true));
     return () => {

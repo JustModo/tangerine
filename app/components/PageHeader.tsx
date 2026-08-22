@@ -12,7 +12,7 @@ export function PageHeader({
   title?: React.ReactNode;
   subtitle?: React.ReactNode;
   actions?: React.ReactNode;
-  /** Explicit destination for the back button — e.g. chat/plan always go home, the code
+  /** Explicit destination for the back button - e.g. chat/plan always go home, the code
    * window always goes back to its plan. Falls back to browser history if omitted. */
   backTo?: string;
   showBack?: boolean;

@@ -7,7 +7,7 @@ import { loader } from "@monaco-editor/react";
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 
-// Self-hosted, not the CDN @monaco-editor/react defaults to (cdn.jsdelivr.net) — this is
+// Self-hosted, not the CDN @monaco-editor/react defaults to (cdn.jsdelivr.net) - this is
 // a local-first tool (local SQLite, local Citron sandbox), so the editor has to work
 // without internet access too.
 self.MonacoEnvironment = {

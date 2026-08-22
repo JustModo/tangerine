@@ -37,7 +37,7 @@ export default function Home() {
     try {
       const data = await apiJson<SessionSummary[]>("/api/sessions");
       setSessions(data);
-      // One lookup per session to know whether it already has a plan — a session with a
+      // One lookup per session to know whether it already has a plan - a session with a
       // plan should lead with "continue learning", not "continue chat".
       const entries = await Promise.all(
         data.map(async (session) => {

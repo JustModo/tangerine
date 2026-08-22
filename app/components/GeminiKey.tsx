@@ -140,7 +140,7 @@ export function GeminiKeySettings() {
       />
       {fromEnv ? (
         <p className="text-xs text-zinc-500">
-          Environment keys take priority and can't be changed from here — edit the .env file
+          Environment keys take priority and can't be changed from here - edit the .env file
           instead.
         </p>
       ) : (

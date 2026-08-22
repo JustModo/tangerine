@@ -50,7 +50,7 @@ export default function ProblemSessionScreen() {
         body: JSON.stringify({ source_code: code }),
       });
     } catch {
-      // Non-critical — a failed autosave tick just means the next one (or Run/Submit,
+      // Non-critical - a failed autosave tick just means the next one (or Run/Submit,
       // which also save) will catch it up. Not worth interrupting the user for.
     }
   }
@@ -64,7 +64,7 @@ export default function ProblemSessionScreen() {
     if (!response.ok) throw new ApiError(`Run failed (${response.status})`, response.status);
 
     // Buffered rather than yielded frame-by-frame: consumeSSE is callback-based, and the
-    // sandbox returns every result in one response anyway, so nothing is lost — but an
+    // sandbox returns every result in one response anyway, so nothing is lost - but an
     // error frame now reaches the caller instead of the stream just ending.
     const results: TestResult[] = [];
     await consumeSSE(response, (event) => results.push(event as unknown as TestResult));
@@ -83,7 +83,7 @@ export default function ProblemSessionScreen() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      {/* A practice session has no plan to go back to — it came from the progress screen. */}
+      {/* A practice session has no plan to go back to - it came from the progress screen. */}
       <PageHeader
         title={problem.title}
         subtitle={`${problem.language} · ${problem.difficulty}`}

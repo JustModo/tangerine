@@ -5,8 +5,8 @@ import remarkBreaks from "remark-breaks";
 import rehypeKatex from "rehype-katex";
 import { cn } from "~/lib/utils";
 
-// Single place every LLM-authored markdown surface renders through — chat replies, problem
-// statements, example explanations and lesson notes — so math and line-break behaviour can
+// Single place every LLM-authored markdown surface renders through - chat replies, problem
+// statements, example explanations and lesson notes - so math and line-break behaviour can
 // never drift between them.
 //   remark-math + rehype-katex: $inline$ and $$display$$ math (problem statements lean on
 //     this heavily for complexity and formulas).

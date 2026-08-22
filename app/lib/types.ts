@@ -100,7 +100,7 @@ export interface ProblemChatMessage {
   created_at: string;
 }
 
-/** What the helper chat sends alongside a question — read fresh at send time. */
+/** What the helper chat sends alongside a question - read fresh at send time. */
 export interface HelperContext {
   source_code: string;
   last_run: {

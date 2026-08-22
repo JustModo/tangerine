@@ -60,7 +60,7 @@ export default function SessionChat() {
     try {
       setPlans(await apiJson<LessonPlanSummary[]>(`/api/learning-plans?session_id=${id}`));
     } catch {
-      // Non-critical — the "View Plan" button just stays hidden if this fails.
+      // Non-critical - the "View Plan" button just stays hidden if this fails.
     }
   }
 
@@ -222,7 +222,7 @@ export default function SessionChat() {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Message..."
-            // Grows from 1 line up to 3, then scrolls — see the autosize effect above.
+            // Grows from 1 line up to 3, then scrolls - see the autosize effect above.
             className="flex-1 resize-none min-h-0 py-2 overflow-y-auto leading-6"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {

@@ -111,7 +111,7 @@ function HintList({
             onClick={() =>
               setRevealed((n) => {
                 // Reported upward so mastery can tell "solved cold" from "solved after
-                // three hints" — the same pass otherwise scores identically either way.
+                // three hints" - the same pass otherwise scores identically either way.
                 onRevealed?.(n + 1);
                 return n + 1;
               })
@@ -174,7 +174,7 @@ export function ProblemPanel({
 
   return (
     // Fixed header + a single scrolling region below it. The helper tab fills that region
-    // exactly, so only its message list scrolls — the panel itself never does.
+    // exactly, so only its message list scrolls - the panel itself never does.
     <div className="h-full flex flex-col bg-zinc-950 border-r border-white/10">
       <div className="flex-none px-8 pt-8 pb-4 space-y-4">
         <div className="space-y-3">

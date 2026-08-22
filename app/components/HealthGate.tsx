@@ -9,7 +9,7 @@ interface HealthResponse {
 }
 
 // Fast while something is down (the user is watching and waiting), slow once everything
-// is up — the check still runs for the whole session so a service dying mid-session is
+// is up - the check still runs for the whole session so a service dying mid-session is
 // noticed, but at 30s it isn't hammering /health (and through it Citron) all day.
 const POLL_DEGRADED_MS = 3000;
 const POLL_HEALTHY_MS = 30000;
@@ -32,7 +32,7 @@ export function HealthGate({ children }: { children: React.ReactNode }) {
     }
   }
 
-  // Polls for the whole session, not just until the first "ok" — otherwise a service that
+  // Polls for the whole session, not just until the first "ok" - otherwise a service that
   // dies mid-session is never noticed and every later request just fails.
   useEffect(() => {
     check();
@@ -44,7 +44,7 @@ export function HealthGate({ children }: { children: React.ReactNode }) {
     return () => clearInterval(timerRef.current);
   }, [health?.status]);
 
-  // Blank until the first check resolves — rendering the gate optimistically flashes
+  // Blank until the first check resolves - rendering the gate optimistically flashes
   // "Waiting for services" on every page load before /health has even answered.
   if (health === null) return null;
   if (health.status === "ok") return <>{children}</>;
@@ -53,7 +53,7 @@ export function HealthGate({ children }: { children: React.ReactNode }) {
     {
       key: "citron",
       label: "Citron sandbox",
-      hint: "Citron unreachable — start the judge service and retry.",
+      hint: "Citron unreachable - start the judge service and retry.",
     },
     { key: "gemini", label: "Gemini API key", hint: "No API key configured yet." },
   ];

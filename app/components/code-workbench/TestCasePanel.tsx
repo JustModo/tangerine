@@ -11,7 +11,7 @@ interface TestCasePanelProps {
   runningLabel: string;
   results: TestResult[];
   hidden: boolean;
-  /** Real expected output per test id — only meaningful (and only ever passed) for
+  /** Real expected output per test id - only meaningful (and only ever passed) for
    * visible-example runs. Hidden/graded tests never have their expected value sent to
    * the client at all, so this stays empty for those. */
   expectedById?: Record<string, string>;
@@ -141,7 +141,7 @@ export function TestCasePanel({
                 </pre>
               ) : (
                 <pre className="mt-1 font-mono text-[13px] bg-zinc-900 border border-white/10 rounded-md p-3 whitespace-pre-wrap">
-                  {expectedById?.[selected.id] ?? <span className="italic text-zinc-600">—</span>}
+                  {expectedById?.[selected.id] ?? <span className="italic text-zinc-600">-</span>}
                 </pre>
               )}
             </div>
