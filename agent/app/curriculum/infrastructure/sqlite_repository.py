@@ -40,7 +40,9 @@ class SqliteLessonPlanRepository:
             await db.execute(
                 "INSERT INTO lesson_plans (id, session_id, topic, language, level, version, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET version=excluded.version",
+                "ON CONFLICT(id) DO UPDATE SET "
+                "version=excluded.version, language=excluded.language, "
+                "topic=excluded.topic, level=excluded.level",
                 (
                     plan.id,
                     plan.session_id,

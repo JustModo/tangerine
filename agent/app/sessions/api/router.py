@@ -32,6 +32,7 @@ def get_service() -> SessionService:
         GeminiProvider(),
         llm_cache=SqliteLLMCache(),
         mastery_repository=SqliteUserSkillStateRepository(),
+        problem_session_repository=SqliteProblemSessionRepository(),
     )
     problem_session_service = ProblemSessionService(
         SqliteLessonPlanRepository(),

@@ -27,6 +27,7 @@ def get_service() -> CurriculumService:
         GeminiProvider(),
         llm_cache=SqliteLLMCache(),
         mastery_repository=SqliteUserSkillStateRepository(),
+        problem_session_repository=SqliteProblemSessionRepository(),
     )
 
 

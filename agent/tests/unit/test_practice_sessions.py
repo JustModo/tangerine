@@ -7,18 +7,24 @@ from pathlib import Path
 import pytest
 
 from app.curriculum.application.problem_sessions import ProblemSessionService
+from app.curriculum.application.services import CurriculumService
 from app.curriculum.domain.problem_session import ProblemSessionStatus
 from app.curriculum.infrastructure.sqlite_problem_session_repository import (
     SqliteProblemSessionRepository,
 )
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
+from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
+from app.llm.schemas.plan_edit import RevisedCurriculum, RevisedStep
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
 from app.problems.application.services import ProblemSelectionService
 from app.problems.domain.models import Problem, ProblemStatus
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
+from app.sessions.application.services import SessionService
+from app.sessions.infrastructure.sqlite_repository import SqliteSessionRepository
 from app.shared.types import Language
-from tests.db import apply_migrations, seed_skills, seed_users
+from tests.db import apply_migrations, seed_lesson_node, seed_skills, seed_users
+from tests.fakes import FakeLLMProvider
 
 
 @pytest.fixture
@@ -141,6 +147,259 @@ async def test_set_flagged_for_problem_reuses_the_existing_session(db_path: str)
     assert flagged.id == first.id
     assert unflagged.id == first.id
     assert unflagged.flagged is False
+
+
+async def test_edit_plan_regenerates_a_step_whose_difficulty_actually_changed(db_path: str) -> None:
+    # The bug: "make step 1 very hard" updated the node's difficulty column, but the
+    # already-selected (or in-progress) EASY problem for that node kept being handed back —
+    # nothing invalidated it, same root cause as the language-swap bug.
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session("local-user")
+    await SqliteProblemRepository(db_path).save(
+        Problem(
+            id="p-easy", conceptual_id="c-easy", title="Easy One", language=Language.PYTHON,
+            difficulty="easy", status=ProblemStatus.AVAILABLE, skill_ids=["skill-1"],
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    await SqliteProblemRepository(db_path).save(
+        Problem(
+            id="p-hard", conceptual_id="c-hard", title="Hard One", language=Language.PYTHON,
+            difficulty="hard", status=ProblemStatus.AVAILABLE, skill_ids=["skill-1"],
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="skill-1", difficulty=1)])
+    revised = RevisedCurriculum(steps=[RevisedStep(skill="skill-1", difficulty="hard")])
+    llm = FakeLLMProvider(structured_responses=[generated, revised])
+    plan_repo = SqliteLessonPlanRepository(db_path)
+    curriculum = CurriculumService(
+        plan_repo, llm, skill_repository=SqliteSkillRepository(db_path),
+        problem_session_repository=SqliteProblemSessionRepository(db_path),
+    )
+    plan = await curriculum.create_draft(session.id, "topic", Language.PYTHON, "beginner")
+    assert plan.nodes[0].difficulty == "easy"
+
+    problem_sessions = ProblemSessionService(
+        plan_repo, SqliteProblemSessionRepository(db_path),
+        ProblemSelectionService(SqliteProblemRepository(db_path)), _NeverGenerates(),
+        SqliteSkillRepository(db_path), mastery_repository=SqliteUserSkillStateRepository(db_path),
+    )
+    first = await problem_sessions.next_problem(plan.id, "local-user")
+    assert first.problem_id == "p-easy"
+
+    await curriculum.edit_plan(plan.id, "make step 1 very hard")
+    second = await problem_sessions.next_problem(plan.id, "local-user")
+
+    assert second.id != first.id
+    assert second.problem_id == "p-hard"
+
+
+async def test_edit_plan_leaves_an_unchanged_step_alone(db_path: str) -> None:
+    # An edit to a different step ("add one more on hash maps") must not touch this
+    # step's already-selected problem just because it was part of the same revision.
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session("local-user")
+    await _seed_bank_problem(db_path, "p-easy")
+    generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="skill-1", difficulty=1)])
+    revised = RevisedCurriculum(steps=[RevisedStep(skill="skill-1", difficulty="easy")])
+    llm = FakeLLMProvider(structured_responses=[generated, revised])
+    plan_repo = SqliteLessonPlanRepository(db_path)
+    curriculum = CurriculumService(
+        plan_repo, llm, skill_repository=SqliteSkillRepository(db_path),
+        problem_session_repository=SqliteProblemSessionRepository(db_path),
+    )
+    plan = await curriculum.create_draft(session.id, "topic", Language.PYTHON, "beginner")
+
+    problem_sessions = ProblemSessionService(
+        plan_repo, SqliteProblemSessionRepository(db_path),
+        ProblemSelectionService(SqliteProblemRepository(db_path)), _NeverGenerates(),
+        SqliteSkillRepository(db_path), mastery_repository=SqliteUserSkillStateRepository(db_path),
+    )
+    first = await problem_sessions.next_problem(plan.id, "local-user")
+
+    await curriculum.edit_plan(plan.id, "leave step 1 exactly as it is")
+    second = await problem_sessions.next_problem(plan.id, "local-user")
+
+    assert second.id == first.id
+
+
+async def test_set_step_difficulty_regenerates_only_the_targeted_step(db_path: str) -> None:
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session("local-user")
+    for problem_id, difficulty in [("p-easy", "easy"), ("p-hard", "hard")]:
+        await SqliteProblemRepository(db_path).save(
+            Problem(
+                id=problem_id, conceptual_id=f"c-{problem_id}", title=problem_id,
+                language=Language.PYTHON, difficulty=difficulty, status=ProblemStatus.AVAILABLE,
+                skill_ids=["skill-1"], created_at=datetime.now(timezone.utc),
+            )
+        )
+    generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="skill-1", difficulty=1)])
+    plan_repo = SqliteLessonPlanRepository(db_path)
+    curriculum = CurriculumService(
+        plan_repo, FakeLLMProvider(structured_responses=[generated]),
+        skill_repository=SqliteSkillRepository(db_path),
+        problem_session_repository=SqliteProblemSessionRepository(db_path),
+    )
+    plan = await curriculum.create_draft(session.id, "topic", Language.PYTHON, "beginner")
+
+    problem_sessions = ProblemSessionService(
+        plan_repo, SqliteProblemSessionRepository(db_path),
+        ProblemSelectionService(SqliteProblemRepository(db_path)), _NeverGenerates(),
+        SqliteSkillRepository(db_path), mastery_repository=SqliteUserSkillStateRepository(db_path),
+    )
+    first = await problem_sessions.next_problem(plan.id, "local-user")
+    assert first.problem_id == "p-easy"
+
+    # No LLM response is queued beyond create_draft's — this must not call the LLM at all.
+    updated = await curriculum.set_step_difficulty(plan.id, "1", "hard")
+    assert updated.nodes[0].difficulty == "hard"
+
+    second = await problem_sessions.next_problem(plan.id, "local-user")
+    assert second.id != first.id
+    assert second.problem_id == "p-hard"
+
+
+async def test_set_step_difficulty_is_a_no_op_when_difficulty_is_unchanged(db_path: str) -> None:
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session("local-user")
+    await _seed_bank_problem(db_path, "p-easy")
+    generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="skill-1", difficulty=1)])
+    plan_repo = SqliteLessonPlanRepository(db_path)
+    curriculum = CurriculumService(
+        plan_repo, FakeLLMProvider(structured_responses=[generated]),
+        skill_repository=SqliteSkillRepository(db_path),
+        problem_session_repository=SqliteProblemSessionRepository(db_path),
+    )
+    plan = await curriculum.create_draft(session.id, "topic", Language.PYTHON, "beginner")
+    problem_sessions = ProblemSessionService(
+        plan_repo, SqliteProblemSessionRepository(db_path),
+        ProblemSelectionService(SqliteProblemRepository(db_path)), _NeverGenerates(),
+        SqliteSkillRepository(db_path), mastery_repository=SqliteUserSkillStateRepository(db_path),
+    )
+    first = await problem_sessions.next_problem(plan.id, "local-user")
+
+    await curriculum.set_step_difficulty(plan.id, "1", "easy")
+    second = await problem_sessions.next_problem(plan.id, "local-user")
+
+    assert second.id == first.id
+
+
+async def test_delete_unsubmitted_for_node_removes_not_started_and_in_progress_only(
+    db_path: str,
+) -> None:
+    seed_lesson_node(db_path, "node-1", user_id="local-user", skill_id="skill-1")
+    seed_lesson_node(db_path, "node-2", user_id="local-user", skill_id="skill-1")
+    await _seed_bank_problem(db_path, "p1")
+    await _seed_bank_problem(db_path, "p2")
+    repo = SqliteProblemSessionRepository(db_path)
+    problem_sessions = _service(db_path)
+
+    not_started = await problem_sessions.next_problem("lp-node-1", "local-user")
+    other_node_session = await problem_sessions.next_problem("lp-node-2", "local-user")
+
+    await repo.delete_unsubmitted_for_node("node-1")
+
+    assert await repo.get(not_started.id) is None
+    # A different node's session is untouched.
+    assert await repo.get(other_node_session.id) is not None
+
+
+async def test_delete_unsubmitted_for_node_preserves_a_submitted_session(db_path: str) -> None:
+    seed_lesson_node(db_path, "node-1", user_id="local-user", skill_id="skill-1")
+    await _seed_bank_problem(db_path, "p1")
+    repo = SqliteProblemSessionRepository(db_path)
+    problem_sessions = _service(db_path)
+
+    session = await problem_sessions.next_problem("lp-node-1", "local-user")
+    await problem_sessions.save_code(session.id, "code")
+    await problem_sessions.record_submission(session.id, passed=False)
+
+    await repo.delete_unsubmitted_for_node("node-1")
+
+    assert await repo.get(session.id) is not None
+
+
+async def test_set_plan_language_regenerates_an_untouched_next_problem(db_path: str) -> None:
+    # The bug: a language swap updated the plan row, but next_problem's get_by_node
+    # short-circuit returned the pre-existing NOT_STARTED session in the OLD language
+    # regardless — because nothing ever invalidated it. A NOT_STARTED session has had no
+    # code saved against it, so nothing is lost by discarding it.
+    seed_lesson_node(db_path, "node-1", user_id="local-user", skill_id="skill-1")
+    plan_repo = SqliteLessonPlanRepository(db_path)
+    await _seed_bank_problem(db_path, "p-py")
+    await SqliteProblemRepository(db_path).save(
+        Problem(
+            id="p-java", conceptual_id="c-java", title="Bank Problem Java",
+            language=Language.JAVA, difficulty="easy", status=ProblemStatus.AVAILABLE,
+            skill_ids=["skill-1"], created_at=datetime.now(timezone.utc),
+        )
+    )
+    problem_sessions = _service(db_path)
+    curriculum = CurriculumService(
+        plan_repo, FakeLLMProvider(), problem_session_repository=SqliteProblemSessionRepository(db_path)
+    )
+
+    first = await problem_sessions.next_problem("lp-node-1", "local-user")
+    assert first.problem_id == "p-py"
+
+    await curriculum.set_plan_language("lp-node-1", Language.JAVA)
+    second = await problem_sessions.next_problem("lp-node-1", "local-user")
+
+    assert second.id != first.id
+    assert second.problem_id == "p-java"
+
+
+async def test_set_plan_language_also_regenerates_an_in_progress_session(db_path: str) -> None:
+    # In-progress means code was saved but never submitted — realizing mid-attempt that
+    # it's the wrong language is exactly the case a swap needs to unblock, so an
+    # unsubmitted attempt is discarded just like an untouched one.
+    seed_lesson_node(db_path, "node-1", user_id="local-user", skill_id="skill-1")
+    plan_repo = SqliteLessonPlanRepository(db_path)
+    await _seed_bank_problem(db_path, "p-py")
+    await SqliteProblemRepository(db_path).save(
+        Problem(
+            id="p-java", conceptual_id="c-java", title="Bank Problem Java",
+            language=Language.JAVA, difficulty="easy", status=ProblemStatus.AVAILABLE,
+            skill_ids=["skill-1"], created_at=datetime.now(timezone.utc),
+        )
+    )
+    problem_sessions = _service(db_path)
+    curriculum = CurriculumService(
+        plan_repo, FakeLLMProvider(), problem_session_repository=SqliteProblemSessionRepository(db_path)
+    )
+
+    first = await problem_sessions.next_problem("lp-node-1", "local-user")
+    await problem_sessions.save_code(first.id, "print('hi')")
+
+    await curriculum.set_plan_language("lp-node-1", Language.JAVA)
+    second = await problem_sessions.next_problem("lp-node-1", "local-user")
+
+    assert second.id != first.id
+    assert second.problem_id == "p-java"
+
+
+async def test_set_plan_language_preserves_a_submitted_session(db_path: str) -> None:
+    # A SUBMITTED (failed grading) or COMPLETED attempt is real, graded work — unlike
+    # NOT_STARTED/IN_PROGRESS it must never be silently discarded by a language swap.
+    seed_lesson_node(db_path, "node-1", user_id="local-user", skill_id="skill-1")
+    plan_repo = SqliteLessonPlanRepository(db_path)
+    await _seed_bank_problem(db_path, "p-py")
+    problem_sessions = _service(db_path)
+    curriculum = CurriculumService(
+        plan_repo, FakeLLMProvider(), problem_session_repository=SqliteProblemSessionRepository(db_path)
+    )
+
+    first = await problem_sessions.next_problem("lp-node-1", "local-user")
+    await problem_sessions.save_code(first.id, "print('hi')")
+    await problem_sessions.record_submission(first.id, passed=False)
+
+    await curriculum.set_plan_language("lp-node-1", Language.JAVA)
+    second = await problem_sessions.next_problem("lp-node-1", "local-user")
+
+    assert second.id == first.id
+    assert second.problem_id == "p-py"
 
 
 async def test_flagging_round_trips(db_path: str) -> None:

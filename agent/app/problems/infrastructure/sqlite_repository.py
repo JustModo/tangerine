@@ -61,7 +61,7 @@ class SqliteProblemRepository:
             return await self._hydrate(db, row) if row else None
 
     async def list_all(
-        self, page: int, page_size: int, query: str | None = None
+        self, page: int, page_size: int, query: str | None = None, language: str | None = None
     ) -> tuple[list[Problem], int]:
         """Every AVAILABLE problem ever generated, newest first, for the "all problems"
         browser — `find_suitable` picks one at random for practice, this lists all of them.
@@ -80,7 +80,11 @@ class SqliteProblemRepository:
                 "ORDER BY version DESC LIMIT 1) AS description "
                 "FROM problems p WHERE p.status = ?"
             )
-            cursor = await db.execute(base, (ProblemStatus.AVAILABLE.value,))
+            params: list[str] = [ProblemStatus.AVAILABLE.value]
+            if language:
+                base += " AND p.language = ?"
+                params.append(language)
+            cursor = await db.execute(base, params)
             rows = await cursor.fetchall()
 
         if query:

@@ -71,8 +71,11 @@ async def list_all_problems(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     q: str | None = Query(default=None),
+    language: Language | None = Query(default=None),
 ) -> ProblemsPage:
-    items, total = await SqliteProblemRepository().list_all(page, page_size, q)
+    items, total = await SqliteProblemRepository().list_all(
+        page, page_size, q, language.value if language else None
+    )
     sessions = await SqliteProblemSessionRepository().list_for_user(LOCAL_USER_ID)
     flagged_problem_ids = {s.problem_id for s in sessions if s.flagged}
     return ProblemsPage(

@@ -29,13 +29,13 @@ def db_path(tmp_path: Path, monkeypatch) -> str:
     get_settings.cache_clear()
 
 
-async def _seed(db_path: str, problem_id: str) -> None:
+async def _seed(db_path: str, problem_id: str, language: Language = Language.PYTHON) -> None:
     await SqliteProblemRepository(db_path).save(
         Problem(
             id=problem_id,
             conceptual_id=f"c-{problem_id}",
             title="Two Sum",
-            language=Language.PYTHON,
+            language=language,
             difficulty="easy",
             status=ProblemStatus.AVAILABLE,
             created_at=datetime.now(timezone.utc),
@@ -65,6 +65,17 @@ async def test_all_problems_endpoint_does_not_get_shadowed_by_problem_id_route(d
 
     assert response.status_code == 200
     assert response.json()["items"] == []
+
+
+async def test_all_problems_endpoint_filters_by_language(db_path: str) -> None:
+    await _seed(db_path, "p1", language=Language.PYTHON)
+    await _seed(db_path, "p2", language=Language.JAVA)
+
+    with TestClient(app) as client:
+        response = client.get("/api/problems/all", params={"language": "java"})
+
+    items = response.json()["items"]
+    assert [item["id"] for item in items] == ["p2"]
 
 
 async def test_all_problems_endpoint_marks_flagged_items(db_path: str) -> None:

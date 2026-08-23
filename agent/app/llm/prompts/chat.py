@@ -101,29 +101,88 @@ GENERATE_PLAN_TOOL = ToolDeclaration(
 EDIT_PLAN_TOOL = ToolDeclaration(
     name="edit_learning_plan",
     description=(
-        "Revise the EXISTING learning plan in place when the user asks for a change to it "
-        "— adding or removing a step, making one step harder or easier, reordering, or "
-        "reworking the whole plan. Preserves steps the user has already completed. Use "
-        "this instead of generate_learning_plan whenever a plan already exists and the "
-        "user wants it changed rather than replaced from scratch."
+        "Change one specific thing about the EXISTING learning plan, or rework it broadly. "
+        "Pick the operation that matches what the user asked for EXACTLY — most requests "
+        "are one of the structured operations below, applied instantly with no other step "
+        "touched; 'rework' is the fallback for requests that genuinely don't fit one of "
+        "them. Use this instead of generate_learning_plan whenever a plan already exists "
+        "and the user wants it changed rather than replaced from scratch."
     ),
     parameters_schema={
         "type": "object",
         "properties": {
+            "operation": {
+                "type": "string",
+                "enum": [
+                    "change_language",
+                    "change_step_difficulty",
+                    "add_step",
+                    "remove_step",
+                    "reorder_step",
+                    "rework",
+                ],
+                "description": (
+                    "change_language: switch what language the whole plan's remaining "
+                    "problems generate in ('swap this to Python', 'do it in Java instead') "
+                    "— requires language.\n"
+                    "change_step_difficulty: make one existing step easier/harder "
+                    "('make step 3 harder') — requires step and difficulty.\n"
+                    "add_step: insert a new step ('add one on hash maps') — requires "
+                    "skill, optionally difficulty and position.\n"
+                    "remove_step: drop one existing step ('drop the recursion step') — "
+                    "requires step.\n"
+                    "reorder_step: move one existing step to a different position "
+                    "('move step 4 to the start') — requires step and to_position.\n"
+                    "rework: anything that doesn't fit the above — a genuinely broad "
+                    "change ('redo the whole thing around graphs', 'focus more on "
+                    "interview patterns') — requires instruction."
+                ),
+            },
+            "language": {
+                "type": "string",
+                "enum": [language.value for language in Language],
+                "description": "change_language only: the language to switch the plan to.",
+            },
+            "step": {
+                "type": "string",
+                "description": (
+                    "change_step_difficulty/remove_step/reorder_step only: which existing "
+                    "step, EXACTLY as the user identified it — its number as shown in the "
+                    "plan (e.g. '3') or its skill/topic name (e.g. 'hash maps'). Never "
+                    "guess a step the user didn't name."
+                ),
+            },
+            "difficulty": {
+                "type": "string",
+                "enum": ["easy", "medium", "hard"],
+                "description": "change_step_difficulty: the step's new difficulty. add_step: the new step's difficulty, if the user said one.",
+            },
+            "skill": {
+                "type": "string",
+                "description": "add_step only: the exact topic/skill of the new step, faithful to what the user asked for.",
+            },
+            "position": {
+                "type": "integer",
+                "description": (
+                    "add_step only: 1-indexed position to insert at, ONLY if the user said "
+                    "where (e.g. 'after step 2' means position 3). Omit to append at the end."
+                ),
+            },
+            "to_position": {
+                "type": "integer",
+                "description": "reorder_step only: the 1-indexed position to move the step to.",
+            },
             "instruction": {
                 "type": "string",
                 "description": (
-                    "What to change, in plain language, FAITHFUL to what the user actually "
-                    "asked — e.g. 'add one more step on hash maps after step 2', 'make step "
-                    "3 harder', 'drop the recursion step'. Keep their exact subject and "
-                    "count: if they say 'add one lesson on arrays', the instruction is "
-                    "about arrays and adds exactly one, even if another topic seems more "
-                    "relevant to the problem. Never substitute your own judgement for their "
-                    "request. If the user named a step number, include that number."
+                    "rework only: what to change, in plain language, FAITHFUL to what the "
+                    "user actually asked — e.g. 'redo the whole thing around graphs'. Keep "
+                    "their exact subject and count. Never substitute your own judgement "
+                    "for their request."
                 ),
-            }
+            },
         },
-        "required": ["instruction"],
+        "required": ["operation"],
     },
 )
 
@@ -253,12 +312,14 @@ def chat_system_prompt(existing_plan: bool, default_language: str = "ask") -> st
     )
     plan_note = (
         "\n\nA learning plan already exists for this session. If the user asks to CHANGE it "
-        "— add or remove a step, make a specific step harder or easier, reorder, or rework "
-        "it — call edit_learning_plan with their instruction; it edits in place and keeps "
-        "steps they've already completed. Only call generate_learning_plan again if they "
-        "want a plan for a genuinely different topic, language, or level. If they are only "
-        "ASKING about the existing plan rather than asking you to change it, answer in "
-        "words and call no tool at all."
+        "in ANY way — its language, one step's difficulty, adding/removing/reordering a "
+        "step, or a broader rework — call edit_learning_plan and pick the operation that "
+        "matches exactly; it edits in place and keeps steps they've already completed. "
+        "Never call generate_learning_plan for a change to the plan that already exists — "
+        "that discards their progress and builds from scratch. Only call "
+        "generate_learning_plan if they want a plan for a genuinely different topic or "
+        "level. If they are only ASKING about the existing plan rather than asking you to "
+        "change it, answer in words and call no tool at all."
         if existing_plan
         else "\n\nNo learning plan exists yet for this session."
     )

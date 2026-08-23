@@ -65,6 +65,28 @@ class SqliteProblemSessionRepository:
             row = await cursor.fetchone()
             return self._hydrate(row) if row else None
 
+    async def delete_unsubmitted_for_node(self, lesson_node_id: str) -> None:
+        """Discards this node's session if it's NOT_STARTED/IN_PROGRESS — neither has been
+        submitted for grading, so nothing graded is lost. A SUBMITTED (failed) or COMPLETED
+        session is real, graded work and is left untouched.
+
+        The single primitive behind "the problem a node would generate no longer matches
+        what's selected" — used whenever an edit changes what a node's problem should be
+        (the plan's language, or that node's difficulty): without it, next_problem's
+        get_by_node short-circuit would keep resurfacing the stale problem forever, even for
+        an in-progress attempt the learner realizes no longer fits."""
+        async with connect(self._database_path) as db:
+            await db.execute(
+                "DELETE FROM problem_chat_messages WHERE problem_session_id IN ("
+                "SELECT id FROM problem_sessions WHERE lesson_node_id = ? AND status IN (?, ?))",
+                (lesson_node_id, "NOT_STARTED", "IN_PROGRESS"),
+            )
+            await db.execute(
+                "DELETE FROM problem_sessions WHERE lesson_node_id = ? AND status IN (?, ?)",
+                (lesson_node_id, "NOT_STARTED", "IN_PROGRESS"),
+            )
+            await db.commit()
+
     async def list_problem_ids_for_user(self, user_id: str) -> list[str]:
         """Everything this learner has already been served, so selection never hands back a
         problem they have seen."""

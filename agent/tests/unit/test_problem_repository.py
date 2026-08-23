@@ -180,6 +180,17 @@ async def test_list_all_matches_a_tag_even_behind_a_long_problem_statement(db_pa
     assert items[0].id == "p1"
 
 
+async def test_list_all_filters_by_language(db_path: str) -> None:
+    repo = SqliteProblemRepository(db_path)
+    await _save_with_version(repo, id="p1", conceptual_id="c1", language=Language.PYTHON)
+    await _save_with_version(repo, id="p2", conceptual_id="c2", language=Language.JAVA)
+
+    items, total = await repo.list_all(page=1, page_size=10, language="java")
+
+    assert total == 1
+    assert items[0].id == "p2"
+
+
 async def test_list_all_falls_back_to_closest_matches_when_nothing_clears_the_threshold(
     db_path: str,
 ) -> None:

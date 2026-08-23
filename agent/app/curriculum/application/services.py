@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.curriculum.domain.models import LessonNode, LessonNodeStatus, LessonPlan
+from app.curriculum.domain.problem_session_repository import ProblemSessionRepository
 from app.curriculum.domain.repository import LessonPlanRepository
 from app.llm.domain.provider import LLMProvider
 from app.llm.graphs.curriculum import generate_curriculum
@@ -41,12 +42,14 @@ class CurriculumService:
         skill_repository: SqliteSkillRepository | None = None,
         llm_cache: SqliteLLMCache | None = None,
         mastery_repository: UserSkillStateRepository | None = None,
+        problem_session_repository: ProblemSessionRepository | None = None,
     ) -> None:
         self._repository = repository
         self._llm_provider = llm_provider
         self._skill_repository = skill_repository or SqliteSkillRepository()
         self._llm_cache = llm_cache
         self._mastery_repository = mastery_repository
+        self._problem_session_repository = problem_session_repository
 
     async def create_draft(
         self,
@@ -159,14 +162,137 @@ class CurriculumService:
     async def get(self, plan_id: str) -> LessonPlan | None:
         return await self._repository.get(plan_id)
 
+    async def set_plan_language(self, plan_id: str, language: Language) -> LessonPlan:
+        """Switches what language the plan's remaining problems generate in — a pure
+        language swap, not a step revision, so unlike edit_plan this touches no step, no
+        LLM call, and no node reconciliation. Every node's NOT_STARTED/IN_PROGRESS problem
+        session is discarded (see _invalidate_unsubmitted) so it regenerates fresh in the
+        new language next time it's opened — a SUBMITTED or COMPLETED session is real,
+        graded work and is left exactly as it is."""
+        plan = await self._require_plan(plan_id)
+        if language == plan.language:
+            return plan
+        updated = plan.model_copy(update={"language": language, "version": plan.version + 1})
+        await self._repository.save(updated)
+        await self._invalidate_unsubmitted(node.id for node in plan.nodes)
+        return await self._repository.get(plan_id) or updated
+
+    async def _invalidate_unsubmitted(self, lesson_node_ids) -> None:
+        """Discards a node's problem session unless it's been submitted for grading — the
+        shared hook behind "what a node's problem should be just changed": a language swap
+        (every node) or an edited step's difficulty (that one node). Without this,
+        next_problem's get_by_node short-circuit keeps resurfacing the stale problem, even
+        for an in-progress attempt that no longer fits."""
+        if self._problem_session_repository is None:
+            return
+        for lesson_node_id in lesson_node_ids:
+            await self._problem_session_repository.delete_unsubmitted_for_node(lesson_node_id)
+
+    def _resolve_step(self, plan: LessonPlan, step: str) -> LessonNode:
+        """A step named either by its 1-indexed position (as shown in the plan UI) or its
+        skill name — whichever the user actually said. Shared by every operation that
+        targets one existing step, so "which step did they mean" is resolved exactly the
+        same way everywhere."""
+        stripped = step.strip()
+        if stripped.isdigit():
+            index = int(stripped) - 1
+            if 0 <= index < len(plan.nodes):
+                return plan.nodes[index]
+        normalized = stripped.lower()
+        for node in plan.nodes:
+            if (node.skill_name or "").strip().lower() == normalized:
+                return node
+        raise NotFoundError(f"No step matching '{step}' in this plan")
+
+    @staticmethod
+    def _ensure_startable(nodes: list[LessonNode]) -> list[LessonNode]:
+        """Reindexes sequentially and unlocks the first unfinished step — every structural
+        change (add/remove/reorder a step, or an LLM-driven rework) must leave the plan in a
+        state the learner can actually continue from, never all-locked."""
+        ordered = [node.model_copy(update={"sequence_index": index}) for index, node in enumerate(nodes)]
+        for index, node in enumerate(ordered):
+            if node.status != LessonNodeStatus.DONE:
+                if node.status == LessonNodeStatus.LOCKED:
+                    ordered[index] = node.model_copy(update={"status": LessonNodeStatus.AVAILABLE})
+                break
+        return ordered
+
+    async def _require_plan(self, plan_id: str) -> LessonPlan:
+        plan = await self._repository.get(plan_id)
+        if plan is None:
+            raise NotFoundError(f"Lesson plan {plan_id} not found")
+        return plan
+
+    async def set_step_difficulty(self, plan_id: str, step: str, difficulty: str) -> LessonPlan:
+        """Changes one step's difficulty in place — no LLM call, no other step touched.
+        Invalidates only that step's not-yet-submitted problem session (see
+        _invalidate_unsubmitted) so it regenerates at the new difficulty."""
+        plan = await self._require_plan(plan_id)
+        target = self._resolve_step(plan, step)
+        if difficulty == target.difficulty:
+            return plan
+        nodes = [
+            node.model_copy(update={"difficulty": difficulty}) if node.id == target.id else node
+            for node in plan.nodes
+        ]
+        await self._repository.replace_nodes(plan.id, nodes)
+        await self._invalidate_unsubmitted([target.id])
+        return await self._repository.get(plan_id) or plan
+
+    async def add_step(
+        self, plan_id: str, skill: str, difficulty: str | None = None, position: int | None = None
+    ) -> LessonPlan:
+        """Inserts a brand new step — no existing step's row, session, or progress is
+        touched, so nothing needs invalidating."""
+        plan = await self._require_plan(plan_id)
+        new_node = LessonNode(
+            id=str(uuid.uuid4()),
+            lesson_plan_id=plan.id,
+            skill_id=await self._skill_repository.ensure_skill(skill),
+            sequence_index=0,  # reindexed below
+            status=LessonNodeStatus.LOCKED,
+            difficulty=difficulty or "medium",
+            created_at=datetime.now(timezone.utc),
+        )
+        nodes = list(plan.nodes)
+        insert_at = len(nodes) if position is None else max(0, min(position - 1, len(nodes)))
+        nodes.insert(insert_at, new_node)
+        await self._repository.replace_nodes(plan.id, self._ensure_startable(nodes))
+        return await self._repository.get(plan_id) or plan
+
+    async def remove_step(self, plan_id: str, step: str) -> LessonPlan:
+        """Drops one step. Refuses to remove a completed one — matching the rest of this
+        file, finished work is never silently discarded. replace_nodes already cascades the
+        dropped node's problem session (see its docstring)."""
+        plan = await self._require_plan(plan_id)
+        target = self._resolve_step(plan, step)
+        if target.status == LessonNodeStatus.DONE:
+            raise NotFoundError("Can't remove a completed step")
+        nodes = [node for node in plan.nodes if node.id != target.id]
+        await self._repository.replace_nodes(plan.id, self._ensure_startable(nodes))
+        return await self._repository.get(plan_id) or plan
+
+    async def reorder_step(self, plan_id: str, step: str, to_position: int) -> LessonPlan:
+        """Moves one step to a new position. The step's own problem is still exactly as
+        valid as it was — nothing about what it should contain changed — so no session is
+        invalidated."""
+        plan = await self._require_plan(plan_id)
+        target = self._resolve_step(plan, step)
+        nodes = [node for node in plan.nodes if node.id != target.id]
+        insert_at = max(0, min(to_position - 1, len(nodes)))
+        nodes.insert(insert_at, target)
+        await self._repository.replace_nodes(plan.id, self._ensure_startable(nodes))
+        return await self._repository.get(plan_id) or plan
+
     async def edit_plan(self, plan_id: str, instruction: str) -> LessonPlan:
         """Applies a free-text revision ("add a step on hash maps", "make step 3 harder",
         "redo the whole thing") to an existing plan. Steps the revision leaves alone keep
         their identity — and therefore their DONE status and problem sessions — so editing
-        a plan never costs the learner finished work."""
-        plan = await self._repository.get(plan_id)
-        if plan is None:
-            raise NotFoundError(f"Lesson plan {plan_id} not found")
+        a plan never costs the learner finished work. A step whose difficulty the revision
+        actually changed has its not-yet-submitted problem session invalidated (see
+        _invalidate_unsubmitted), so "make step 3 harder" regenerates step 3's problem
+        instead of leaving the old, now-mismatched one in place."""
+        plan = await self._require_plan(plan_id)
 
         current_steps = "\n".join(
             f"{node.sequence_index + 1}. {node.skill_name or node.skill_id} "
@@ -190,6 +316,10 @@ class CurriculumService:
 
         nodes: list[LessonNode] = []
         matched_ids: set[str] = set()
+        # A matched node keeps its row (and therefore its problem session) — but if the
+        # revision actually changed its difficulty, the session that was already selected or
+        # started no longer matches what the step is supposed to be, and must regenerate.
+        redifficultied_ids: set[str] = set()
         for step in revised.steps:
             candidates = existing_by_skill.get(step.skill.strip().lower(), [])
             match = next((c for c in candidates if c.id not in matched_ids), None)
@@ -198,6 +328,8 @@ class CurriculumService:
             difficulty = step.difficulty
             if match is not None:
                 matched_ids.add(match.id)
+                if difficulty != match.difficulty:
+                    redifficultied_ids.add(match.id)
                 nodes.append(match.model_copy(update={"difficulty": difficulty}))
             else:
                 nodes.append(
@@ -220,15 +352,8 @@ class CurriculumService:
         )
         nodes = rescued + nodes
 
-        ordered = [node.model_copy(update={"sequence_index": index}) for index, node in enumerate(nodes)]
-        # Keep the plan startable: the first unfinished step must never be left LOCKED.
-        for index, node in enumerate(ordered):
-            if node.status != LessonNodeStatus.DONE:
-                if node.status == LessonNodeStatus.LOCKED:
-                    ordered[index] = node.model_copy(update={"status": LessonNodeStatus.AVAILABLE})
-                break
-
-        await self._repository.replace_nodes(plan.id, ordered)
+        await self._repository.replace_nodes(plan.id, self._ensure_startable(nodes))
+        await self._invalidate_unsubmitted(redifficultied_ids)
         return await self._repository.get(plan.id) or plan
 
     async def get_node_notes(self, node_id: str) -> GeneratedLessonNotes:

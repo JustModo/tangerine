@@ -336,6 +336,338 @@ async def test_edit_plan_preserves_completed_steps_and_adds_new_ones(db_path: st
     assert edited.nodes[1].status == LessonNodeStatus.AVAILABLE
 
 
+async def test_set_plan_language_changes_and_persists(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session(user.id)
+    generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)])
+    repo = SqliteLessonPlanRepository(db_path)
+    curriculum = CurriculumService(
+        repo, FakeLLMProvider(structured_responses=[generated]), skill_repository=SqliteSkillRepository(db_path)
+    )
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.JAVA, "beginner")
+
+    updated = await curriculum.set_plan_language(plan.id, Language.PYTHON)
+
+    assert updated.language == Language.PYTHON
+    reloaded = await repo.get(plan.id)
+    assert reloaded is not None
+    assert reloaded.language == Language.PYTHON
+
+
+async def test_set_plan_language_preserves_steps_and_completed_status(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session(user.id)
+    generated = GeneratedCurriculum(
+        nodes=[
+            GeneratedCurriculumNode(skill="prefix-sum", difficulty=1),
+            GeneratedCurriculumNode(skill="range-query", difficulty=2),
+        ],
+    )
+    repo = SqliteLessonPlanRepository(db_path)
+    curriculum = CurriculumService(
+        repo, FakeLLMProvider(structured_responses=[generated]), skill_repository=SqliteSkillRepository(db_path)
+    )
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.JAVA, "beginner")
+    await repo.update_node_status(plan.nodes[0].id, LessonNodeStatus.DONE)
+
+    updated = await curriculum.set_plan_language(plan.id, Language.PYTHON)
+
+    assert [n.id for n in updated.nodes] == [n.id for n in plan.nodes]
+    assert updated.nodes[0].status == LessonNodeStatus.DONE
+    assert updated.topic == plan.topic
+
+
+async def test_edit_plan_tool_call_change_language_switches_the_plan(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)])
+    llm = FakeLLMProvider(structured_responses=[generated])
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path), llm, skill_repository=SqliteSkillRepository(db_path)
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, curriculum)
+    session = await service.create_session(user.id)
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.JAVA, "beginner")
+
+    llm._chat_streams = [
+        [
+            ChatChunk(
+                tool_call=ToolCallResult(
+                    name="edit_learning_plan",
+                    args={"operation": "change_language", "language": "python"},
+                )
+            ),
+            ChatChunk(done=True),
+        ],
+        [ChatChunk(text_delta="Switched to Python."), ChatChunk(done=True)],
+    ]
+
+    events = [event async for event in service.add_message(session.id, "swap this to python")]
+
+    updated = await curriculum.get(plan.id)
+    assert updated is not None
+    assert updated.language == Language.PYTHON
+    assert [n.id for n in updated.nodes] == [n.id for n in plan.nodes]
+    assert events[-1]["type"] == "done"
+
+
+async def test_edit_plan_tool_call_change_language_asks_for_an_unsupported_language(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)])
+    llm = FakeLLMProvider(structured_responses=[generated])
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path), llm, skill_repository=SqliteSkillRepository(db_path)
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, curriculum)
+    session = await service.create_session(user.id)
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.JAVA, "beginner")
+
+    llm._chat_streams = [
+        [
+            ChatChunk(
+                tool_call=ToolCallResult(
+                    name="edit_learning_plan",
+                    args={"operation": "change_language", "language": "rust"},
+                )
+            ),
+            ChatChunk(done=True),
+        ],
+        [ChatChunk(text_delta="Rust isn't supported."), ChatChunk(done=True)],
+    ]
+
+    events = [event async for event in service.add_message(session.id, "swap this to rust")]
+
+    assert events[-1]["type"] == "done"
+    unchanged = await curriculum.get(plan.id)
+    assert unchanged is not None
+    assert unchanged.language == Language.JAVA
+
+
+async def test_edit_plan_tool_call_change_step_difficulty(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)])
+    llm = FakeLLMProvider(structured_responses=[generated])
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path), llm, skill_repository=SqliteSkillRepository(db_path)
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, curriculum)
+    session = await service.create_session(user.id)
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+    assert plan.nodes[0].difficulty == "easy"
+
+    llm._chat_streams = [
+        [
+            ChatChunk(
+                tool_call=ToolCallResult(
+                    name="edit_learning_plan",
+                    args={"operation": "change_step_difficulty", "step": "1", "difficulty": "hard"},
+                )
+            ),
+            ChatChunk(done=True),
+        ],
+        [ChatChunk(text_delta="Made step 1 harder."), ChatChunk(done=True)],
+    ]
+    events = [event async for event in service.add_message(session.id, "make step 1 harder")]
+
+    updated = await curriculum.get(plan.id)
+    assert updated is not None
+    assert updated.nodes[0].difficulty == "hard"
+    assert events[-1]["type"] == "done"
+
+
+async def test_edit_plan_tool_call_add_step(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)])
+    llm = FakeLLMProvider(structured_responses=[generated])
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path), llm, skill_repository=SqliteSkillRepository(db_path)
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, curriculum)
+    session = await service.create_session(user.id)
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+
+    llm._chat_streams = [
+        [
+            ChatChunk(
+                tool_call=ToolCallResult(
+                    name="edit_learning_plan",
+                    args={"operation": "add_step", "skill": "hash maps"},
+                )
+            ),
+            ChatChunk(done=True),
+        ],
+        [ChatChunk(text_delta="Added it."), ChatChunk(done=True)],
+    ]
+    events = [event async for event in service.add_message(session.id, "add a step on hash maps")]
+
+    updated = await curriculum.get(plan.id)
+    assert updated is not None
+    assert len(updated.nodes) == 2
+    assert updated.nodes[1].skill_name == "hash maps"
+    assert events[-1]["type"] == "done"
+
+
+async def test_edit_plan_tool_call_remove_step(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    generated = GeneratedCurriculum(
+        nodes=[
+            GeneratedCurriculumNode(skill="prefix-sum", difficulty=1),
+            GeneratedCurriculumNode(skill="range-query", difficulty=2),
+        ],
+    )
+    llm = FakeLLMProvider(structured_responses=[generated])
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path), llm, skill_repository=SqliteSkillRepository(db_path)
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, curriculum)
+    session = await service.create_session(user.id)
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+
+    llm._chat_streams = [
+        [
+            ChatChunk(
+                tool_call=ToolCallResult(
+                    name="edit_learning_plan", args={"operation": "remove_step", "step": "2"}
+                )
+            ),
+            ChatChunk(done=True),
+        ],
+        [ChatChunk(text_delta="Removed it."), ChatChunk(done=True)],
+    ]
+    events = [event async for event in service.add_message(session.id, "drop step 2")]
+
+    updated = await curriculum.get(plan.id)
+    assert updated is not None
+    assert [n.skill_name for n in updated.nodes] == ["prefix-sum"]
+    assert events[-1]["type"] == "done"
+
+
+async def test_edit_plan_tool_call_reorder_step(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    generated = GeneratedCurriculum(
+        nodes=[
+            GeneratedCurriculumNode(skill="prefix-sum", difficulty=1),
+            GeneratedCurriculumNode(skill="range-query", difficulty=2),
+        ],
+    )
+    llm = FakeLLMProvider(structured_responses=[generated])
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path), llm, skill_repository=SqliteSkillRepository(db_path)
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, curriculum)
+    session = await service.create_session(user.id)
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+
+    llm._chat_streams = [
+        [
+            ChatChunk(
+                tool_call=ToolCallResult(
+                    name="edit_learning_plan",
+                    args={"operation": "reorder_step", "step": "2", "to_position": 1},
+                )
+            ),
+            ChatChunk(done=True),
+        ],
+        [ChatChunk(text_delta="Moved it."), ChatChunk(done=True)],
+    ]
+    events = [event async for event in service.add_message(session.id, "move step 2 to the start")]
+
+    updated = await curriculum.get(plan.id)
+    assert updated is not None
+    assert [n.skill_name for n in updated.nodes] == ["range-query", "prefix-sum"]
+    assert events[-1]["type"] == "done"
+
+
+async def _two_step_plan(db_path: str) -> tuple[CurriculumService, "LessonPlan"]:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session(user.id)
+    generated = GeneratedCurriculum(
+        nodes=[
+            GeneratedCurriculumNode(skill="arrays", difficulty=1),
+            GeneratedCurriculumNode(skill="hash-maps", difficulty=2),
+        ],
+    )
+    repo = SqliteLessonPlanRepository(db_path)
+    curriculum = CurriculumService(
+        repo, FakeLLMProvider(structured_responses=[generated]),
+        skill_repository=SqliteSkillRepository(db_path),
+    )
+    plan = await curriculum.create_draft(session.id, "topic", Language.PYTHON, "beginner")
+    return curriculum, plan
+
+
+async def test_add_step_appends_a_new_step_without_touching_existing_ones(db_path: str) -> None:
+    curriculum, plan = await _two_step_plan(db_path)
+
+    updated = await curriculum.add_step(plan.id, "tries", difficulty="hard")
+
+    assert len(updated.nodes) == 3
+    assert updated.nodes[0].id == plan.nodes[0].id
+    assert updated.nodes[1].id == plan.nodes[1].id
+    assert updated.nodes[2].skill_name == "tries"
+    assert updated.nodes[2].difficulty == "hard"
+
+
+async def test_add_step_can_be_inserted_at_a_specific_position(db_path: str) -> None:
+    curriculum, plan = await _two_step_plan(db_path)
+
+    updated = await curriculum.add_step(plan.id, "tries", position=1)
+
+    assert [n.skill_name for n in updated.nodes] == ["tries", "arrays", "hash-maps"]
+
+
+async def test_remove_step_by_number_drops_it_and_reindexes(db_path: str) -> None:
+    curriculum, plan = await _two_step_plan(db_path)
+
+    updated = await curriculum.remove_step(plan.id, "1")
+
+    assert [n.skill_name for n in updated.nodes] == ["hash-maps"]
+    assert updated.nodes[0].sequence_index == 0
+
+
+async def test_remove_step_by_skill_name_also_works(db_path: str) -> None:
+    curriculum, plan = await _two_step_plan(db_path)
+
+    updated = await curriculum.remove_step(plan.id, "hash-maps")
+
+    assert [n.skill_name for n in updated.nodes] == ["arrays"]
+
+
+async def test_remove_step_refuses_a_completed_step(db_path: str) -> None:
+    curriculum, plan = await _two_step_plan(db_path)
+    repo = SqliteLessonPlanRepository(db_path)
+    await repo.update_node_status(plan.nodes[0].id, LessonNodeStatus.DONE)
+
+    with pytest.raises(NotFoundError):
+        await curriculum.remove_step(plan.id, "1")
+
+    # Nothing was touched by the refused removal.
+    unchanged = await curriculum.get(plan.id)
+    assert unchanged is not None
+    assert len(unchanged.nodes) == 2
+
+
+async def test_reorder_step_moves_it_without_changing_its_identity(db_path: str) -> None:
+    curriculum, plan = await _two_step_plan(db_path)
+
+    updated = await curriculum.reorder_step(plan.id, "2", 1)
+
+    assert [n.skill_name for n in updated.nodes] == ["hash-maps", "arrays"]
+    assert updated.nodes[0].id == plan.nodes[1].id
+
+
+async def test_resolving_an_unknown_step_raises(db_path: str) -> None:
+    curriculum, plan = await _two_step_plan(db_path)
+
+    with pytest.raises(NotFoundError):
+        await curriculum.remove_step(plan.id, "graph-theory")
+
+    with pytest.raises(NotFoundError):
+        await curriculum.remove_step(plan.id, "99")
+
+
 async def test_lesson_notes_404_for_unknown_node(db_path: str) -> None:
     service = CurriculumService(
         SqliteLessonPlanRepository(db_path),

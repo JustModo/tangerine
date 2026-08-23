@@ -19,6 +19,7 @@ from app.revision.application.services import RevisionService
 from app.curriculum.domain.models import LessonNodeStatus
 from app.sessions.domain.models import ChatMessage, ChatRole, LearningSession, SessionStatus
 from app.sessions.domain.repository import SessionRepository
+from app.shared.errors import NotFoundError
 from app.shared.preferences import get_preferences
 from app.shared.types import Language
 
@@ -380,6 +381,11 @@ class SessionService:
         ):
             yield event
 
+    @staticmethod
+    def _plan_step_summary(plan) -> str:
+        steps = ", ".join(f"{n.sequence_index + 1}. {n.skill_name or n.skill_id}" for n in plan.nodes)
+        return f"It now has {len(plan.nodes)} steps: {steps}."
+
     async def _handle_edit_plan(
         self,
         session_id: str,
@@ -387,7 +393,118 @@ class SessionService:
         history: list[ChatTurn],
         user_message: str,
     ) -> AsyncIterator[dict]:
-        label = "Updating your learning plan..."
+        """Single entry point for every kind of plan edit — the operation named in `args`
+        picks a deterministic, targeted CurriculumService method (no LLM call, no other
+        step touched) for everything except "rework", the only operation that still calls
+        revise_curriculum for a genuinely broad, unstructured change."""
+        operation = args.get("operation") or "rework"
+
+        plan_id = None
+        if self._curriculum_service is not None:
+            try:
+                # list_for_session is newest-first, so [0] is the session's active plan.
+                plans = await self._curriculum_service.list_for_session(session_id)
+                plan_id = plans[0].id if plans else None
+            except Exception:
+                logger.warning("Failed to look up the active plan for session %s", session_id, exc_info=True)
+
+        if plan_id is None:
+            async for event in self._stream_tool_followup(
+                session_id, history, user_message, True, "edit_learning_plan",
+                "NOT RUN — there is no plan for this session to edit. Tell the user "
+                "something went wrong and they can try again.",
+                "I couldn't find a plan to edit — want to try again?",
+                None,
+            ):
+                yield event
+            return
+
+        if operation == "change_language":
+            requested_language = (args.get("language") or "").strip().lower()
+            try:
+                language = Language(requested_language)
+            except ValueError:
+                supported = ", ".join(SUPPORTED_LANGUAGES)
+                async for event in self._stream_tool_followup(
+                    session_id, history, user_message, True, "edit_learning_plan",
+                    f"NOT RUN — '{requested_language or 'no language'}' is not a supported "
+                    f"language. Nothing was changed. Tell the user the supported languages "
+                    f"are {supported} and ask them to pick one.",
+                    f"I can do {supported} — which would you like?",
+                    None,
+                ):
+                    yield event
+                return
+            label = f"Switching the plan to {language.value}..."
+            action = lambda: self._curriculum_service.set_plan_language(plan_id, language)
+            done_text = lambda plan: (
+                f"Switched the plan to {plan.language.value}. Steps and completed progress "
+                "are unchanged; new problems will generate in the new language."
+            )
+        elif operation == "change_step_difficulty":
+            step = str(args.get("step") or "").strip()
+            difficulty = (args.get("difficulty") or "").strip().lower()
+            if not step or difficulty not in {"easy", "medium", "hard"}:
+                async for event in self._stream_tool_followup(
+                    session_id, history, user_message, True, "edit_learning_plan",
+                    "NOT RUN — missing which step or what difficulty to set. Ask the user "
+                    "which step and how much harder/easier.",
+                    "Which step, and how much harder or easier?", None,
+                ):
+                    yield event
+                return
+            label = f"Adjusting step {step}..."
+            action = lambda: self._curriculum_service.set_step_difficulty(plan_id, step, difficulty)
+            done_text = lambda plan: f"Updated that step's difficulty. {self._plan_step_summary(plan)}"
+        elif operation == "add_step":
+            skill = str(args.get("skill") or "").strip()
+            if not skill:
+                async for event in self._stream_tool_followup(
+                    session_id, history, user_message, True, "edit_learning_plan",
+                    "NOT RUN — no skill/topic given for the new step. Ask the user what it "
+                    "should cover.",
+                    "What should the new step cover?", None,
+                ):
+                    yield event
+                return
+            difficulty = args.get("difficulty") or None
+            position = args.get("position")
+            label = f"Adding a step on {skill}..."
+            action = lambda: self._curriculum_service.add_step(plan_id, skill, difficulty, position)
+            done_text = lambda plan: f"Added the new step. {self._plan_step_summary(plan)}"
+        elif operation == "remove_step":
+            step = str(args.get("step") or "").strip()
+            if not step:
+                async for event in self._stream_tool_followup(
+                    session_id, history, user_message, True, "edit_learning_plan",
+                    "NOT RUN — no step named to remove. Ask the user which one.",
+                    "Which step should I remove?", None,
+                ):
+                    yield event
+                return
+            label = f"Removing step {step}..."
+            action = lambda: self._curriculum_service.remove_step(plan_id, step)
+            done_text = lambda plan: f"Removed that step. {self._plan_step_summary(plan)}"
+        elif operation == "reorder_step":
+            step = str(args.get("step") or "").strip()
+            to_position = args.get("to_position")
+            if not step or to_position is None:
+                async for event in self._stream_tool_followup(
+                    session_id, history, user_message, True, "edit_learning_plan",
+                    "NOT RUN — missing which step or where to move it. Ask the user for both.",
+                    "Which step, and where should it move to?", None,
+                ):
+                    yield event
+                return
+            label = f"Reordering step {step}..."
+            action = lambda: self._curriculum_service.reorder_step(plan_id, step, to_position)
+            done_text = lambda plan: f"Reordered the plan. {self._plan_step_summary(plan)}"
+        else:
+            instruction = args.get("instruction") or user_message
+            label = "Updating your learning plan..."
+            action = lambda: self._curriculum_service.edit_plan(plan_id, instruction)
+            done_text = lambda plan: f"Updated the plan. {self._plan_step_summary(plan)}"
+
         system_note = ChatMessage(
             id=str(uuid.uuid4()),
             session_id=session_id,
@@ -398,23 +515,24 @@ class SessionService:
         await self._repository.add_message(system_note)
         yield {"type": "tool_start", "label": label, "message_id": system_note.id}
 
-        instruction = args.get("instruction") or user_message
         plan = None
-        if self._curriculum_service is not None:
-            try:
-                # list_for_session is newest-first, so [0] is the session's active plan.
-                plans = await self._curriculum_service.list_for_session(session_id)
-                if plans:
-                    plan = await self._curriculum_service.edit_plan(plans[0].id, instruction)
-            except Exception:
-                logger.warning("Plan edit failed for session %s", session_id, exc_info=True)
+        not_found: NotFoundError | None = None
+        try:
+            plan = await action()
+        except NotFoundError as exc:
+            not_found = exc
+        except Exception:
+            logger.warning("Plan edit (%s) failed for session %s", operation, session_id, exc_info=True)
 
         if plan is not None:
-            steps = ", ".join(
-                f"{n.sequence_index + 1}. {n.skill_name or n.skill_id}" for n in plan.nodes
+            result_summary = done_text(plan)
+            fallback = "Updated your plan — open it with the corner button to see the changes."
+        elif not_found is not None:
+            result_summary = (
+                f"NOT RUN — {not_found}. Nothing was changed. Tell the user this plainly and "
+                "ask them to clarify or try something else."
             )
-            result_summary = f"Updated the plan. It now has {len(plan.nodes)} steps: {steps}."
-            fallback = "I've updated your plan — open it with the corner button to see the changes."
+            fallback = f"{not_found} — want to try something else?"
         else:
             result_summary = "Plan edit failed — tell the user something went wrong and they can try again."
             fallback = "Something went wrong updating the plan — want to try again?"

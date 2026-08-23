@@ -10,6 +10,9 @@ import { cn } from "~/lib/utils";
 import type { Progress, ProblemSummary, ProblemsPage } from "~/lib/types";
 
 const SKILLS_PAGE_SIZE = 10;
+// Mirrors the backend's Language enum (agent/app/shared/types.py) — no endpoint exposes
+// the language list to the frontend today, so this is the one place it's hardcoded.
+const LANGUAGES = ["python", "cpp", "c", "java"];
 
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -78,6 +81,7 @@ export default function ProgressScreen() {
   const { showError, setBusyMessage } = useStatus();
 
   const [query, setQuery] = useState("");
+  const [languageFilter, setLanguageFilter] = useState("");
   const [problemsPage, setProblemsPage] = useState(1);
   const [problems, setProblems] = useState<ProblemsPage | null>(null);
   const [openingProblemId, setOpeningProblemId] = useState<string | null>(null);
@@ -91,10 +95,11 @@ export default function ProgressScreen() {
     }
   }
 
-  async function loadProblems(page: number, q: string) {
+  async function loadProblems(page: number, q: string, language: string) {
     try {
       const params = new URLSearchParams({ page: String(page), page_size: "10" });
       if (q.trim()) params.set("q", q.trim());
+      if (language) params.set("language", language);
       setProblems(await apiJson<ProblemsPage>(`/api/problems/all?${params}`));
     } catch (err) {
       showError(err instanceof ApiError ? err.message : "Failed to load problems");
@@ -110,14 +115,22 @@ export default function ProgressScreen() {
   useEffect(() => {
     const handle = setTimeout(() => {
       setProblemsPage(1);
-      loadProblems(1, query);
+      loadProblems(1, query, languageFilter);
     }, 300);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
+  // A language change re-filters immediately (no debounce needed for a select) and also
+  // restarts pagination at page 1.
   useEffect(() => {
-    loadProblems(problemsPage, query);
+    setProblemsPage(1);
+    loadProblems(1, query, languageFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [languageFilter]);
+
+  useEffect(() => {
+    loadProblems(problemsPage, query, languageFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [problemsPage]);
 
@@ -258,14 +271,28 @@ export default function ProgressScreen() {
           )}
 
           <Section title="All problems">
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search title, description, tags, language..."
-                className="pl-9 h-9 text-xs"
-              />
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search title, description, tags, language..."
+                  className="pl-9 h-9 text-xs"
+                />
+              </div>
+              <select
+                value={languageFilter}
+                onChange={(event) => setLanguageFilter(event.target.value)}
+                className="bg-zinc-950 border-l border-white/20 h-9 text-xs px-3 flex-none"
+              >
+                <option value="">All languages</option>
+                {LANGUAGES.map((language) => (
+                  <option key={language} value={language}>
+                    {language}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {problems && problems.items.length === 0 && (
