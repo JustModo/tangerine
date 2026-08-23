@@ -1,19 +1,15 @@
 import { useEffect, useState } from "react";
 import type { MetaFunction } from "react-router";
 import { useNavigate } from "react-router";
-import { Flag, Flame, Play, RefreshCcw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Flag, Flame, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/PageHeader";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiJson } from "~/lib/api";
 import { cn } from "~/lib/utils";
-import type { Progress, RevisionCandidate } from "~/lib/types";
+import type { Progress, ProblemSummary, ProblemsPage } from "~/lib/types";
 
-const REASON_LABEL: Record<RevisionCandidate["reason"], string> = {
-  weak_skill: "Struggled with this",
-  overdue_revision: "Not seen in a while",
-  review: "Keep it warm",
-};
+const SKILLS_PAGE_SIZE = 10;
 
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -33,6 +29,43 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/** Local prev/next pager, shared by the Skills list (paged client-side, already in hand)
+ * and the All problems list (paged server-side). */
+function Pager({
+  page,
+  totalPages,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  onChange: (page: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between pt-1">
+      <button
+        type="button"
+        disabled={page <= 1}
+        onClick={() => onChange(page - 1)}
+        className="text-zinc-500 hover:text-white disabled:opacity-30 disabled:hover:text-zinc-500"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </button>
+      <p className="text-[10px] uppercase tracking-widest text-zinc-500">
+        Page {page} of {totalPages}
+      </p>
+      <button
+        type="button"
+        disabled={page >= totalPages}
+        onClick={() => onChange(page + 1)}
+        className="text-zinc-500 hover:text-white disabled:opacity-30 disabled:hover:text-zinc-500"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
 export const meta: MetaFunction = () => [
   { title: "Progress · Tangerine" },
   { name: "description", content: "What you have practised, what you are weak in, and which skills are due for revision." },
@@ -40,9 +73,14 @@ export const meta: MetaFunction = () => [
 
 export default function ProgressScreen() {
   const [progress, setProgress] = useState<Progress | null>(null);
-  const [startingSkillId, setStartingSkillId] = useState<string | null>(null);
+  const [skillsPage, setSkillsPage] = useState(1);
   const navigate = useNavigate();
   const { showError, setBusyMessage } = useStatus();
+
+  const [query, setQuery] = useState("");
+  const [problemsPage, setProblemsPage] = useState(1);
+  const [problems, setProblems] = useState<ProblemsPage | null>(null);
+  const [openingProblemId, setOpeningProblemId] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -53,40 +91,90 @@ export default function ProgressScreen() {
     }
   }
 
+  async function loadProblems(page: number, q: string) {
+    try {
+      const params = new URLSearchParams({ page: String(page), page_size: "10" });
+      if (q.trim()) params.set("q", q.trim());
+      setProblems(await apiJson<ProblemsPage>(`/api/problems/all?${params}`));
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to load problems");
+    }
+  }
+
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Practice needs a language, and a skill on its own doesn't carry one. Python is the
-   * default rather than a prompt: this is a one-click button, and a modal to pick a
-   * language would defeat the point. */
-  async function practice(skillId: string) {
-    setStartingSkillId(skillId);
-    setBusyMessage("Finding a problem...");
+  // Debounced search: a fresh query always restarts pagination at page 1.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setProblemsPage(1);
+      loadProblems(1, query);
+    }, 300);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  useEffect(() => {
+    loadProblems(problemsPage, query);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [problemsPage]);
+
+  async function toggleFlag(problem: ProblemSummary) {
+    const next = !problem.flagged;
+    setProblems((prev) =>
+      prev
+        ? { ...prev, items: prev.items.map((p) => (p.id === problem.id ? { ...p, flagged: next } : p)) }
+        : prev,
+    );
     try {
-      const session = await apiJson<{ id: string }>("/api/problem-sessions/practice", {
+      await apiJson("/api/problem-sessions/flag-for-problem", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ problem_id: problem.id, flagged: next }),
+      });
+    } catch (err) {
+      setProblems((prev) =>
+        prev
+          ? { ...prev, items: prev.items.map((p) => (p.id === problem.id ? { ...p, flagged: !next } : p)) }
+          : prev,
+      );
+      showError(err instanceof ApiError ? err.message : "Couldn't update the flag");
+    }
+  }
+
+  async function openProblem(problem: ProblemSummary) {
+    setOpeningProblemId(problem.id);
+    setBusyMessage("Opening problem...");
+    try {
+      const session = await apiJson<{ id: string }>("/api/problem-sessions/start-for-problem", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skill_id: skillId, language: "python" }),
+        body: JSON.stringify({ problem_id: problem.id }),
       });
       navigate(`/problem-sessions/${session.id}`);
     } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Couldn't start a practice problem");
+      showError(err instanceof ApiError ? err.message : "Couldn't open that problem");
     } finally {
-      setStartingSkillId(null);
+      setOpeningProblemId(null);
       setBusyMessage(null);
     }
   }
 
   if (!progress) return null;
 
-  const due = progress.revision_queue.slice(0, 3);
   const hasRecord = progress.skills.length > 0;
+  const skillsTotalPages = Math.max(1, Math.ceil(progress.skills.length / SKILLS_PAGE_SIZE));
+  const visibleSkills = progress.skills.slice(
+    (skillsPage - 1) * SKILLS_PAGE_SIZE,
+    skillsPage * SKILLS_PAGE_SIZE,
+  );
+  const problemsTotalPages = Math.max(1, Math.ceil((problems?.total ?? 0) / (problems?.page_size ?? 10)));
 
   return (
     <div className="flex-1 flex flex-col min-h-0 w-full">
-      <PageHeader title="Progress" subtitle="What you've practised and what's due" backTo="/" />
+      <PageHeader title="Progress" subtitle="What you've practised and what's due" />
       <div className="flex-1 min-h-0 overflow-y-auto w-full">
         <div className="max-w-3xl mx-auto flex flex-col gap-10 py-10 px-10">
           {!hasRecord && (
@@ -111,45 +199,9 @@ export default function ProgressScreen() {
                 />
               </div>
 
-              {due.length > 0 && (
-                <Section title="Due today">
-                  <div className="flex flex-col divide-y divide-white/5 border-y border-white/10">
-                    {due.map((candidate) => (
-                      <div
-                        key={candidate.skill_id}
-                        className="py-4 flex items-center justify-between gap-4"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm font-bold uppercase tracking-wide truncate">
-                            {candidate.skill_name}
-                          </p>
-                          <p className="text-zinc-500 text-[10px] uppercase tracking-widest">
-                            {REASON_LABEL[candidate.reason]} ·{" "}
-                            {Math.round(candidate.days_since_seen)}d ago
-                          </p>
-                        </div>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={startingSkillId !== null}
-                          onClick={() => practice(candidate.skill_id)}
-                        >
-                          {startingSkillId === candidate.skill_id ? (
-                            <RefreshCcw className="w-3.5 h-3.5 mr-2 animate-spin" />
-                          ) : (
-                            <Play className="w-3.5 h-3.5 mr-2" />
-                          )}
-                          PRACTISE
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </Section>
-              )}
-
               <Section title="Skills">
                 <div className="space-y-2">
-                  {progress.skills.map((skill) => (
+                  {visibleSkills.map((skill) => (
                     <div key={skill.skill_id} className="space-y-1">
                       <div className="flex items-baseline justify-between gap-3">
                         <span className="text-xs uppercase tracking-wide truncate">
@@ -175,6 +227,7 @@ export default function ProgressScreen() {
                     </div>
                   ))}
                 </div>
+                <Pager page={skillsPage} totalPages={skillsTotalPages} onChange={setSkillsPage} />
               </Section>
             </>
           )}
@@ -203,6 +256,62 @@ export default function ProgressScreen() {
               </div>
             </Section>
           )}
+
+          <Section title="All problems">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search title, description, tags, language..."
+                className="pl-9 h-9 text-xs"
+              />
+            </div>
+
+            {problems && problems.items.length === 0 && (
+              <p className="text-zinc-500 text-xs uppercase tracking-widest py-6 text-center">
+                {query.trim() ? "No matches." : "Nothing generated yet."}
+              </p>
+            )}
+
+            {problems && problems.items.length > 0 && (
+              <div className="flex flex-col divide-y divide-white/5 border-y border-white/10">
+                {problems.items.map((problem) => (
+                  <div key={problem.id} className="flex items-center gap-2 px-2">
+                    <button
+                      type="button"
+                      disabled={openingProblemId !== null}
+                      onClick={() => openProblem(problem)}
+                      className="flex-1 min-w-0 py-4 flex items-center justify-between gap-4 text-left hover:bg-zinc-950 transition-colors disabled:opacity-50"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold uppercase tracking-wide truncate">
+                          {problem.title}
+                        </p>
+                        <p className="text-zinc-500 text-[10px] uppercase tracking-widest truncate">
+                          {problem.language} · {problem.difficulty}
+                          {problem.tags.length > 0 && ` · ${problem.tags.join(", ")}`}
+                        </p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={problem.flagged ? "Unflag this problem" : "Flag to come back to"}
+                      aria-pressed={problem.flagged}
+                      onClick={() => toggleFlag(problem)}
+                      className={cn(
+                        "flex-none p-1",
+                        problem.flagged ? "text-amber-500" : "text-zinc-600 hover:text-white",
+                      )}
+                    >
+                      <Flag className={cn("w-4 h-4", problem.flagged && "fill-current")} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <Pager page={problemsPage} totalPages={problemsTotalPages} onChange={setProblemsPage} />
+          </Section>
         </div>
       </div>
     </div>

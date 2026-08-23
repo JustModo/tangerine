@@ -7,6 +7,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiJson } from "~/lib/api";
 import { GeminiKeySettings } from "@/components/GeminiKey";
+import { AppSettings } from "@/components/AppSettings";
+import { Separator } from "@/components/ui/separator";
 
 interface SessionSummary {
   id: string;
@@ -112,8 +114,21 @@ export default function Home() {
 
       {settingsOpen && (
         <div className="flex-none w-full border-b border-white/10 bg-zinc-950 px-10 py-5">
-          <div className="max-w-3xl mx-auto w-full">
-            <GeminiKeySettings />
+          <div className="max-w-3xl mx-auto w-full space-y-5">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-3">
+                Gemini
+              </p>
+              <Separator className="bg-white/10 mb-4" />
+              <GeminiKeySettings />
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-3">
+                Preferences
+              </p>
+              <Separator className="bg-white/10 mb-4" />
+              <AppSettings />
+            </div>
           </div>
         </div>
       )}

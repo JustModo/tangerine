@@ -11,6 +11,7 @@ from app.curriculum.api.problem_sessions_router import router as problem_session
 from app.curriculum.api.router import router as curriculum_router
 from app.problems.api.router import router as problems_router
 from app.sessions.api.router import router as sessions_router
+from app.settings.router import router as settings_router
 from app.setup.router import router as setup_router
 from app.shared.config import get_settings
 from app.shared.database import run_migrations
@@ -44,6 +45,7 @@ app.include_router(curriculum_router, prefix="/api")
 app.include_router(users_router, prefix="/api")
 app.include_router(problem_sessions_router, prefix="/api")
 app.include_router(setup_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
 
 
 class HealthResponse(BaseModel):

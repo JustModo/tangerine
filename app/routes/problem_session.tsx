@@ -14,6 +14,7 @@ interface ProblemSessionData {
   lesson_plan_id: string | null;
   source_code: string | null;
   status: string;
+  flagged: boolean;
 }
 
 export const meta: MetaFunction = () => [
@@ -83,11 +84,9 @@ export default function ProblemSessionScreen() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      {/* A practice session has no plan to go back to - it came from the progress screen. */}
       <PageHeader
         title={problem.title}
         subtitle={`${problem.language} · ${problem.difficulty}`}
-        backTo={session.lesson_plan_id ? `/plans/${session.lesson_plan_id}` : "/progress"}
       />
       <div className="flex-1 min-h-0">
         <CodeWorkbench
@@ -99,6 +98,7 @@ export default function ProblemSessionScreen() {
           lessonNodeId={session.lesson_node_id ?? undefined}
           problemSessionId={session.id}
           initiallySolved={session.status === "COMPLETED"}
+          initiallyFlagged={session.flagged}
         />
       </div>
     </div>

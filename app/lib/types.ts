@@ -76,6 +76,23 @@ export interface RevisionCandidate {
   days_since_seen: number;
 }
 
+export interface ProblemSummary {
+  id: string;
+  title: string;
+  language: string;
+  difficulty: string;
+  tags: string[];
+  created_at: string;
+  flagged: boolean;
+}
+
+export interface ProblemsPage {
+  items: ProblemSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 export interface FlaggedProblem {
   problem_session_id: string;
   problem_id: string;

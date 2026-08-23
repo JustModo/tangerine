@@ -52,6 +52,19 @@ class SqliteProblemSessionRepository:
             row = await cursor.fetchone()
             return self._hydrate(row) if row else None
 
+    async def find_for_problem(self, user_id: str, problem_id: str) -> ProblemSession | None:
+        """An existing session for this exact problem, so opening it from the "all
+        problems" list resumes rather than orphaning progress with a duplicate row."""
+        async with connect(self._database_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM problem_sessions WHERE user_id = ? AND problem_id = ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (user_id, problem_id),
+            )
+            row = await cursor.fetchone()
+            return self._hydrate(row) if row else None
+
     async def list_problem_ids_for_user(self, user_id: str) -> list[str]:
         """Everything this learner has already been served, so selection never hands back a
         problem they have seen."""

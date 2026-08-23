@@ -139,6 +139,10 @@ COACHING_PROMPT = (
     "is not something to bring up unprompted.\n"
     "Then recommend concretely: two or three specific topics, a few words on why each, and ask "
     "if they want a plan for one. Not a syllabus.\n"
+    "If instead they want something to practice RIGHT NOW rather than a full plan ('give me "
+    "something to practice', 'let's do the graphs one right now'), call "
+    "suggest_practice_problem with that skill's id (each entry below shows its id in "
+    "parentheses) instead of generate_learning_plan.\n"
     "A skill the record calls weak is one they practised and struggled with — the strongest "
     "signal there is. A skill missing from the record has never been tried, which is a gap, not "
     "a strength: never call an absent skill mastered. If the record is empty, say plainly that "
@@ -149,6 +153,38 @@ COACHING_PROMPT = (
     "record and level rather than reciting the list.\n"
     "When they accept a recommendation ('yes', 'that one', 'do the graphs one'), that topic is "
     "the topic — go build it. ACT OR ASK still applies, and you still never assume the language.\n"
+)
+
+SUGGEST_PRACTICE_TOOL = ToolDeclaration(
+    name="suggest_practice_problem",
+    description=(
+        "Hand the learner a single practice problem for one skill right now, outside any "
+        "plan — for when they want something to work on immediately rather than a full "
+        "learning plan. Call get_practice_record first if you don't already know their "
+        "skill_ids from this conversation."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "skill_id": {
+                "type": "string",
+                "description": (
+                    "The exact skill id (from a prior get_practice_record result or the "
+                    "user's plan) to practice — not the display name."
+                ),
+            },
+            "language": {
+                "type": "string",
+                "enum": [language.value for language in Language],
+                "description": (
+                    "Programming language for the problem. Set this ONLY to a language the "
+                    "user actually stated for this request. Omit it otherwise — a configured "
+                    "default or a clarifying question handles the rest."
+                ),
+            },
+        },
+        "required": ["skill_id"],
+    },
 )
 
 PRACTICE_RECORD_TOOL = ToolDeclaration(
@@ -187,7 +223,7 @@ def mastery_context(candidates: list[RevisionCandidate], limit: int = 8) -> str:
         else:
             bucket = "In progress"
         buckets[bucket].append(
-            f"{candidate.skill_name} ({candidate.mastery_score:.2f}, "
+            f"{candidate.skill_name} (id: {candidate.skill_id}, {candidate.mastery_score:.2f}, "
             f"last practised {round(candidate.days_since_seen)}d ago)"
         )
 
@@ -207,7 +243,14 @@ def mastery_context(candidates: list[RevisionCandidate], limit: int = 8) -> str:
     return "\n".join(lines)
 
 
-def chat_system_prompt(existing_plan: bool) -> str:
+def chat_system_prompt(existing_plan: bool, default_language: str = "ask") -> str:
+    language_note = (
+        f"\n\nThe user's configured default language is {default_language} — use it without "
+        "asking whenever a language is needed and they haven't said one for THIS request. "
+        "If they explicitly ask for a different language this time, use that instead."
+        if default_language != "ask"
+        else ""
+    )
     plan_note = (
         "\n\nA learning plan already exists for this session. If the user asks to CHANGE it "
         "— add or remove a step, make a specific step harder or easier, reorder, or rework "
@@ -219,4 +262,4 @@ def chat_system_prompt(existing_plan: bool) -> str:
         if existing_plan
         else "\n\nNo learning plan exists yet for this session."
     )
-    return CHAT_SYSTEM_PROMPT_BASE + plan_note + "\n\n" + COACHING_PROMPT
+    return CHAT_SYSTEM_PROMPT_BASE + language_note + plan_note + "\n\n" + COACHING_PROMPT

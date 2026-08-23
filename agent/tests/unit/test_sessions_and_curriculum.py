@@ -19,6 +19,7 @@ from app.revision.domain.models import RevisionCandidate
 from app.sessions.application.services import SessionService
 from app.sessions.domain.models import ChatRole
 from app.sessions.infrastructure.sqlite_repository import SqliteSessionRepository
+from app.shared.config import get_settings
 from app.shared.database import MIGRATIONS_DIR
 from app.shared.errors import NotFoundError
 from app.shared.types import Language
@@ -35,10 +36,15 @@ def _apply_migrations(db_path: str) -> None:
 
 
 @pytest.fixture
-def db_path(tmp_path: Path) -> str:
+def db_path(tmp_path: Path, monkeypatch) -> str:
     path = str(tmp_path / "test.db")
     _apply_migrations(path)
-    return path
+    # app.shared.preferences reads/writes through get_settings().database_path (same global
+    # settings store as the Gemini key), so it needs to land in this test's own DB too.
+    monkeypatch.setenv("DATABASE_PATH", path)
+    get_settings.cache_clear()
+    yield path
+    get_settings.cache_clear()
 
 
 async def test_session_create_and_add_message(db_path: str) -> None:
@@ -171,6 +177,40 @@ async def test_generate_plan_tool_call_persists_system_message_and_generates(db_
     assert plans[0].topic == "prefix sums"
 
     assert any(e["type"] == "tool_start" for e in events)
+
+
+async def test_generate_plan_tool_call_falls_back_to_configured_default_language(db_path: str) -> None:
+    from app.shared.preferences import set_preference
+
+    await set_preference("default_language", "java")
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)])
+    llm = FakeLLMProvider(
+        structured_responses=[generated],
+        chat_streams=[
+            [
+                ChatChunk(
+                    tool_call=ToolCallResult(
+                        name="generate_learning_plan", args={"topic": "prefix sums", "level": "beginner"}
+                    )
+                ),
+                ChatChunk(done=True),
+            ],
+            [ChatChunk(text_delta="Ready!"), ChatChunk(done=True)],
+        ],
+    )
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path), llm, skill_repository=SqliteSkillRepository(db_path)
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, curriculum)
+    session = await service.create_session(user.id)
+
+    async for _ in service.add_message(session.id, "teach me prefix sums"):
+        pass
+
+    plans = await curriculum.list_for_session(session.id)
+    assert len(plans) == 1
+    assert plans[0].language == Language.JAVA
 
 
 async def test_generate_plan_tool_call_says_updating_when_a_plan_already_exists(db_path: str) -> None:
@@ -393,13 +433,113 @@ async def test_practice_record_tool_answers_from_the_real_record(db_path: str) -
 
     # The follow-up turn is what carries the record back to the model.
     assert llm.last_chat_request is not None
-    assert "graphs (0.10" in llm.last_chat_request.message
+    assert "graphs (id: s1, 0.10" in llm.last_chat_request.message
     assert events[-1]["type"] == "done"
     assert events[-1]["content"] == "Graphs is worth a look."
     # Read-only: no "Generating a learning plan..." note gets persisted.
     fetched = await service.get_session(session.id)
     assert fetched is not None
     assert [m.role for m in fetched.messages] == [ChatRole.USER, ChatRole.ASSISTANT]
+
+
+class _StubProblemSessionService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, object]] = []
+
+    async def practice_problem(self, user_id, skill_id, language):
+        self.calls.append((user_id, skill_id, language))
+        return _FakeSession(f"ps-{skill_id}-{language}")
+
+
+class _FakeSession:
+    def __init__(self, id: str) -> None:
+        self.id = id
+
+
+async def test_suggest_practice_tool_uses_explicit_language(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    llm = FakeLLMProvider(
+        chat_streams=[
+            [
+                ChatChunk(
+                    tool_call=ToolCallResult(
+                        name="suggest_practice_problem",
+                        args={"skill_id": "s1", "language": "java"},
+                    )
+                ),
+                ChatChunk(done=True),
+            ],
+            [ChatChunk(text_delta="Here's one on graphs."), ChatChunk(done=True)],
+        ]
+    )
+    problem_sessions = _StubProblemSessionService()
+    service = SessionService(
+        SqliteSessionRepository(db_path), llm, None,
+        _StubRevisionService([]), problem_sessions,
+    )
+    session = await service.create_session(user.id)
+
+    events = [event async for event in service.add_message(session.id, "give me something to practice")]
+
+    assert problem_sessions.calls == [(user.id, "s1", Language.JAVA)]
+    assert events[-1]["type"] == "done"
+    assert events[-1]["problem_session_id"] == "ps-s1-java"
+
+
+async def test_suggest_practice_tool_falls_back_to_configured_default_language(db_path: str) -> None:
+    from app.shared.preferences import set_preference
+
+    await set_preference("default_language", "cpp")
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    llm = FakeLLMProvider(
+        chat_streams=[
+            [
+                ChatChunk(
+                    tool_call=ToolCallResult(name="suggest_practice_problem", args={"skill_id": "s1"})
+                ),
+                ChatChunk(done=True),
+            ],
+            [ChatChunk(text_delta="Here's one."), ChatChunk(done=True)],
+        ]
+    )
+    problem_sessions = _StubProblemSessionService()
+    service = SessionService(
+        SqliteSessionRepository(db_path), llm, None,
+        _StubRevisionService([]), problem_sessions,
+    )
+    session = await service.create_session(user.id)
+
+    events = [event async for event in service.add_message(session.id, "give me something to practice")]
+
+    assert problem_sessions.calls[-1] == (user.id, "s1", Language.CPP)
+    assert events[-1]["type"] == "done"
+
+
+async def test_suggest_practice_tool_asks_when_no_language_is_known(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    llm = FakeLLMProvider(
+        chat_streams=[
+            [
+                ChatChunk(
+                    tool_call=ToolCallResult(name="suggest_practice_problem", args={"skill_id": "s1"})
+                ),
+                ChatChunk(done=True),
+            ],
+            [ChatChunk(text_delta="Which language?"), ChatChunk(done=True)],
+        ]
+    )
+    problem_sessions = _StubProblemSessionService()
+    service = SessionService(
+        SqliteSessionRepository(db_path), llm, None,
+        _StubRevisionService([]), problem_sessions,
+    )
+    session = await service.create_session(user.id)
+
+    events = [event async for event in service.add_message(session.id, "give me something to practice")]
+
+    assert problem_sessions.calls == []
+    assert events[-1]["type"] == "done"
+    assert events[-1].get("problem_session_id") is None
 
 
 async def test_a_broken_mastery_lookup_still_returns_a_reply(db_path: str) -> None:

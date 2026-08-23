@@ -99,6 +99,50 @@ async def test_practice_never_repeats_a_problem_the_learner_has_seen(db_path: st
         await service.practice_problem("local-user", "skill-1", Language.PYTHON)
 
 
+async def test_start_for_problem_creates_a_new_session(db_path: str) -> None:
+    problem = await _seed_bank_problem(db_path)
+    service = _service(db_path)
+
+    session = await service.start_for_problem("local-user", problem.id)
+
+    assert session.problem_id == problem.id
+    assert session.lesson_node_id is None
+    assert session.status == ProblemSessionStatus.NOT_STARTED
+
+
+async def test_start_for_problem_resumes_an_existing_session(db_path: str) -> None:
+    problem = await _seed_bank_problem(db_path)
+    service = _service(db_path)
+    first = await service.start_for_problem("local-user", problem.id)
+
+    second = await service.start_for_problem("local-user", problem.id)
+
+    assert second.id == first.id
+
+
+async def test_set_flagged_for_problem_creates_a_session_if_needed(db_path: str) -> None:
+    problem = await _seed_bank_problem(db_path)
+    service = _service(db_path)
+
+    session = await service.set_flagged_for_problem("local-user", problem.id, True)
+
+    assert session.flagged is True
+    assert session.problem_id == problem.id
+
+
+async def test_set_flagged_for_problem_reuses_the_existing_session(db_path: str) -> None:
+    problem = await _seed_bank_problem(db_path)
+    service = _service(db_path)
+    first = await service.start_for_problem("local-user", problem.id)
+
+    flagged = await service.set_flagged_for_problem("local-user", problem.id, True)
+    unflagged = await service.set_flagged_for_problem("local-user", problem.id, False)
+
+    assert flagged.id == first.id
+    assert unflagged.id == first.id
+    assert unflagged.flagged is False
+
+
 async def test_flagging_round_trips(db_path: str) -> None:
     await _seed_bank_problem(db_path)
     service = _service(db_path)

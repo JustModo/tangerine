@@ -1,3 +1,4 @@
+import difflib
 import json
 
 import aiosqlite
@@ -58,6 +59,67 @@ class SqliteProblemRepository:
             cursor = await db.execute(query, params)
             row = await cursor.fetchone()
             return await self._hydrate(db, row) if row else None
+
+    async def list_all(
+        self, page: int, page_size: int, query: str | None = None
+    ) -> tuple[list[Problem], int]:
+        """Every AVAILABLE problem ever generated, newest first, for the "all problems"
+        browser — `find_suitable` picks one at random for practice, this lists all of them.
+
+        Without a query this pages straight off SQL. With one, every AVAILABLE problem
+        (title + latest statement_md + tags + language) is ranked in Python via difflib
+        and then paged — ponytail: fine at the hundreds-of-rows scale a single local
+        learner's bank reaches; move ranking into SQL/FTS if the bank grows into the
+        thousands.
+        """
+        async with connect(self._database_path) as db:
+            db.row_factory = aiosqlite.Row
+            base = (
+                "SELECT p.*, "
+                "(SELECT statement_md FROM problem_versions pv WHERE pv.problem_id = p.id "
+                "ORDER BY version DESC LIMIT 1) AS description "
+                "FROM problems p WHERE p.status = ?"
+            )
+            cursor = await db.execute(base, (ProblemStatus.AVAILABLE.value,))
+            rows = await cursor.fetchall()
+
+        if query:
+            needle = query.lower().strip()
+
+            def score(row: aiosqlite.Row) -> float:
+                # Longest common contiguous substring, normalised by query length — tolerant
+                # of a typo'd or partial query without penalising a short query against a
+                # long description the way SequenceMatcher.ratio() would.
+                haystack = " ".join(
+                    [row["title"], row["description"] or "", row["language"], row["tags_json"] or ""]
+                ).lower()
+                # autojunk=False: the default heuristic marks characters "popular" (and
+                # ignores them) once the haystack passes ~200 chars, which a real problem
+                # statement always does — left on, it can silently zero out an otherwise
+                # exact substring match (verified: "hash" against a >200-char haystack
+                # containing "hash-table" returns a length-0 match with it left on).
+                matcher = difflib.SequenceMatcher(None, needle, haystack, autojunk=False)
+                match = matcher.find_longest_match(0, len(needle), 0, len(haystack))
+                return match.size / max(len(needle), 1)
+
+            ranked = sorted(((row, score(row)) for row in rows), key=lambda pair: pair[1], reverse=True)
+            threshold = 0.5
+            matched = [row for row, s in ranked if s >= threshold]
+            # A query with no match at or above the threshold still gets the closest results
+            # instead of a blank list — "closest match" beats "nothing", same as any other
+            # fuzzy search.
+            rows = matched or [row for row, _ in ranked[:page_size]]
+        else:
+            rows = sorted(rows, key=lambda row: row["created_at"], reverse=True)
+
+        total = len(rows)
+        start = (page - 1) * page_size
+        page_rows = rows[start : start + page_size]
+
+        async with connect(self._database_path) as db:
+            db.row_factory = aiosqlite.Row
+            items = [await self._hydrate(db, row) for row in page_rows]
+        return items, total
 
     async def list_by_skill(self, skill_id: str) -> list[Problem]:
         async with connect(self._database_path) as db:

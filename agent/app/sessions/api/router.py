@@ -3,11 +3,19 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.curriculum.application.problem_sessions import ProblemSessionService
 from app.curriculum.application.services import CurriculumService
+from app.curriculum.infrastructure.sqlite_problem_session_repository import (
+    SqliteProblemSessionRepository,
+)
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
+from app.execution.infrastructure.citron_adapter import CitronAdapter
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
+from app.problems.application.services import ProblemSelectionService
+from app.problems.application.validation import ProblemValidationService
+from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.revision.application.services import RevisionService
 from app.sessions.application.services import SessionService
 from app.sessions.domain.models import LearningSession
@@ -25,11 +33,21 @@ def get_service() -> SessionService:
         llm_cache=SqliteLLMCache(),
         mastery_repository=SqliteUserSkillStateRepository(),
     )
+    problem_session_service = ProblemSessionService(
+        SqliteLessonPlanRepository(),
+        SqliteProblemSessionRepository(),
+        ProblemSelectionService(SqliteProblemRepository()),
+        ProblemValidationService(
+            SqliteProblemRepository(), GeminiProvider(), CitronAdapter(), llm_cache=SqliteLLMCache()
+        ),
+        mastery_repository=SqliteUserSkillStateRepository(),
+    )
     return SessionService(
         SqliteSessionRepository(),
         GeminiProvider(),
         curriculum_service,
         RevisionService(SqliteUserSkillStateRepository()),
+        problem_session_service,
     )
 
 

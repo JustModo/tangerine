@@ -31,6 +31,9 @@ interface CodeWorkbenchProps {
   /** True when the session was already passing before this page load - otherwise
    * revisiting a solved problem would hide the solution it had already earned. */
   initiallySolved?: boolean;
+  /** The session's actual flagged state on load - otherwise the flag button always starts
+   * unlit even for a problem you already flagged last time you opened it. */
+  initiallyFlagged?: boolean;
 }
 
 export function CodeWorkbench({
@@ -42,6 +45,7 @@ export function CodeWorkbench({
   lessonNodeId,
   problemSessionId,
   initiallySolved = false,
+  initiallyFlagged = false,
 }: CodeWorkbenchProps) {
   const [code, setCode] = useState(initialCode);
   const [isRunning, setIsRunning] = useState(false);
@@ -185,6 +189,7 @@ export function CodeWorkbench({
             onHintRevealed={onHintRevealed}
             onHelperUsed={onHelperUsed}
             solved={initiallySolved || (summary !== null && summary.passed === summary.total)}
+            initiallyFlagged={initiallyFlagged}
           />
         </ResizablePanel>
         <ResizableHandle className="w-1 bg-white/5" />

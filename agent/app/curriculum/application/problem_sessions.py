@@ -137,6 +137,33 @@ class ProblemSessionService:
         await self._session_repository.save(session)
         return session
 
+    async def start_for_problem(self, user_id: str, problem_id: str) -> ProblemSession:
+        """Opens a specific already-generated problem (from the "all problems" list) rather
+        than selecting one — resumes an existing session for it if there is one."""
+        existing = await self._session_repository.find_for_problem(user_id, problem_id)
+        if existing is not None:
+            return existing
+
+        now = datetime.now(timezone.utc)
+        session = ProblemSession(
+            id=str(uuid.uuid4()),
+            problem_id=problem_id,
+            user_id=user_id,
+            status=ProblemSessionStatus.NOT_STARTED,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._session_repository.save(session)
+        return session
+
+    async def set_flagged_for_problem(
+        self, user_id: str, problem_id: str, flagged: bool
+    ) -> ProblemSession:
+        """Flags/unflags a problem from a list of problems rather than an open session — the
+        "all problems" browser has no session yet for one never opened before."""
+        session = await self.start_for_problem(user_id, problem_id)
+        return await self.set_flagged(session.id, flagged)
+
     async def set_flagged(self, session_id: str, flagged: bool) -> ProblemSession:
         session = await self._require(session_id)
         updated = session.model_copy(

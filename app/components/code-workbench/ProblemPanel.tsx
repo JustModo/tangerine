@@ -134,6 +134,7 @@ export function ProblemPanel({
   onHintRevealed,
   onHelperUsed,
   solved = false,
+  initiallyFlagged = false,
 }: {
   problem: ProblemDetail;
   lessonNodeId?: string;
@@ -142,6 +143,7 @@ export function ProblemPanel({
   onHintRevealed?: (count: number) => void;
   onHelperUsed?: () => void;
   solved?: boolean;
+  initiallyFlagged?: boolean;
 }) {
   const [tab, setTab] = useState<"statement" | "helper">("statement");
   // Notes sit under the statement rather than in a sibling tab: they are read WHILE
@@ -151,7 +153,7 @@ export function ProblemPanel({
   // Mount the helper only once opened (so a never-opened tab costs zero tokens), then keep
   // it mounted-but-hidden so toggling never refetches or loses a draft.
   const [helperMounted, setHelperMounted] = useState(false);
-  const [flagged, setFlagged] = useState(false);
+  const [flagged, setFlagged] = useState(initiallyFlagged);
   const tabs: ("statement" | "helper")[] = [
     "statement",
     ...(problemSessionId && getContext ? (["helper"] as const) : []),

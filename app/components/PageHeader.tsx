@@ -12,8 +12,10 @@ export function PageHeader({
   title?: React.ReactNode;
   subtitle?: React.ReactNode;
   actions?: React.ReactNode;
-  /** Explicit destination for the back button - e.g. chat/plan always go home, the code
-   * window always goes back to its plan. Falls back to browser history if omitted. */
+  /** Explicit destination for the back button, for pages that should always return to one
+   * fixed place (chat/plan go home) regardless of how they were reached. Falls back to
+   * real browser history otherwise, so a page reached from several places (like a problem
+   * session) returns to wherever you actually came from. */
   backTo?: string;
   showBack?: boolean;
 }) {

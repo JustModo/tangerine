@@ -72,6 +72,15 @@ class FlagBody(BaseModel):
     flagged: bool
 
 
+class StartForProblemBody(BaseModel):
+    problem_id: str
+
+
+class FlagForProblemBody(BaseModel):
+    problem_id: str
+    flagged: bool
+
+
 def get_code_helper_service() -> CodeHelperService:
     return CodeHelperService(
         SqliteProblemSessionRepository(), SqliteProblemRepository(), GeminiProvider()
@@ -121,6 +130,24 @@ async def start_practice(
         return await service.practice_problem(LOCAL_USER_ID, body.skill_id, body.language)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/start-for-problem")
+async def start_for_problem(
+    body: StartForProblemBody, service: ProblemSessionService = Depends(get_service)
+) -> ProblemSession:
+    """Opens a specific problem picked from the "all problems" list — resumes an existing
+    session for it if the learner already has one."""
+    return await service.start_for_problem(LOCAL_USER_ID, body.problem_id)
+
+
+@router.patch("/flag-for-problem")
+async def flag_for_problem(
+    body: FlagForProblemBody, service: ProblemSessionService = Depends(get_service)
+) -> ProblemSession:
+    """Flags/unflags a problem straight from a list of problems, where there may be no
+    open session for it yet — starts one if needed, same as start-for-problem."""
+    return await service.set_flagged_for_problem(LOCAL_USER_ID, body.problem_id, body.flagged)
 
 
 @router.get("/by-node/{lesson_node_id}")
