@@ -89,8 +89,9 @@ class SessionService:
         of event dicts a router can turn straight into SSE frames:
         {"type": "user_message", ...} once the user's own message is saved,
         {"type": "text_delta", "delta": ...} for each streamed token,
-        {"type": "tool_start", "label": ...} when a plan-generation tool call begins
-        (persisted as a real ChatRole.SYSTEM message, not just a UI-only event),
+        {"type": "tool_start", "label": ...} when a tool call begins. Tools that change
+        something also carry a message_id, because their label is persisted as a
+        ChatRole.SYSTEM message; a lookup's label is transient and carries none,
         {"type": "done", "message_id", "content"} once the final assistant reply lands."""
         existing = await self._repository.get(session_id)
         # A reply's `intent` carries what its tool returned — the ids, above all. Without it
@@ -565,8 +566,10 @@ class SessionService:
         existing_plan: bool,
         depth: int = 0,
     ) -> AsyncIterator[dict]:
-        """Read-only lookup — nothing is persisted and no tool_start note is shown, because
-        from the user's side this is the assistant answering, not doing."""
+        """Read-only lookup. The label is transient — unlike the tools that change
+        something, nothing is persisted, so it leaves no line in the transcript."""
+        yield {"type": "tool_start", "label": "Checking your progress..."}
+
         candidates = []
         if self._revision_service is not None and user_id:
             try:
@@ -622,9 +625,10 @@ class SessionService:
         user_id: str | None,
         depth: int = 0,
     ) -> AsyncIterator[dict]:
-        """Read-only lookup over the learner's own problems — same shape as
-        _handle_practice_record: nothing persisted, no tool_start note, because from their
-        side this is the assistant answering rather than doing."""
+        """Read-only lookup over the learner's own problems. Transient label, nothing
+        persisted — same shape as _handle_practice_record."""
+        yield {"type": "tool_start", "label": "Looking through your problems..."}
+
         scope = (args.get("scope") or "all").strip().lower()
         entries, stats = [], None
         if self._library_service is not None and user_id:
@@ -749,6 +753,11 @@ class SessionService:
     ) -> AsyncIterator[dict]:
         problem_id = (args.get("problem_id") or "").strip()
         flagged = bool(args.get("flagged"))
+        yield {
+            "type": "tool_start",
+            "label": "Flagging that problem..." if flagged else "Clearing that flag...",
+        }
+
         ok = False
         if self._problem_session_service is not None and user_id and problem_id:
             try:

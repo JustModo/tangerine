@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { MetaFunction } from "react-router";
 import { useNavigate, useParams } from "react-router";
-import { ListTree, Loader2, Trash2 } from "lucide-react";
+import { ListTree, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/Markdown";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -11,6 +11,7 @@ import { useStatus } from "~/lib/status";
 import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyState } from "@/components/Section";
+import { ChatActivity, THINKING } from "@/components/ChatActivity";
 
 interface ChatMessage {
   id: string;
@@ -43,7 +44,8 @@ export default function SessionChat() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [streamingText, setStreamingText] = useState("");
-  const [toolLabel, setToolLabel] = useState<string | null>(null);
+  const [activity, setActivity] = useState<string | null>(null);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -73,7 +75,7 @@ export default function SessionChat() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [session?.messages.length, streamingText, toolLabel]);
+  }, [session?.messages.length, streamingText, activity, pendingMessage]);
 
   // Autosize the composer: 1 line at rest, growing to at most 3 before it scrolls.
   useEffect(() => {
@@ -91,7 +93,9 @@ export default function SessionChat() {
     setDraft("");
     setSending(true);
     setStreamingText("");
-    setToolLabel(null);
+    // Shown immediately; loadSession() would otherwise round-trip before their own text appears.
+    setPendingMessage(content);
+    setActivity(THINKING);
     try {
       const response = await apiFetch(`/api/sessions/${id}/messages`, {
         method: "POST",
@@ -106,11 +110,12 @@ export default function SessionChat() {
       const pending: Promise<unknown>[] = [];
       await consumeSSE(response, (event) => {
         if (event.type === "user_message") {
-          pending.push(loadSession());
+          pending.push(loadSession().then(() => setPendingMessage(null)));
         } else if (event.type === "text_delta") {
+          setActivity(null);
           setStreamingText((prev) => prev + ((event.delta as string) || ""));
         } else if (event.type === "tool_start") {
-          setToolLabel((event.label as string) || "Working...");
+          setActivity((event.label as string) || "Working...");
         } else if (event.type === "done") {
           pending.push(loadSession(), loadPlans());
         }
@@ -121,7 +126,8 @@ export default function SessionChat() {
     } finally {
       setSending(false);
       setStreamingText("");
-      setToolLabel(null);
+      setActivity(null);
+      setPendingMessage(null);
     }
   }
 
@@ -197,12 +203,13 @@ export default function SessionChat() {
                 )}
               </div>
             ))}
-            {toolLabel && (
-              <div className="self-start flex items-center gap-2 text-xs italic text-zinc-500 px-1">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                {toolLabel}
+            {pendingMessage && (
+              <div className="self-end max-w-lg">
+                <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">user</p>
+                <div className="border border-white/10 px-4 py-3 text-sm">{pendingMessage}</div>
               </div>
             )}
+            {activity && <ChatActivity label={activity} />}
             {streamingText && (
               <div className="self-start max-w-lg">
                 <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">assistant</p>

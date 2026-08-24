@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Markdown } from "@/components/Markdown";
+import { ChatActivity, THINKING } from "@/components/ChatActivity";
 import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
 import type { HelperContext, ProblemChatMessage } from "~/lib/types";
 
@@ -89,9 +89,10 @@ export function CodeHelperPanel({
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
+      {/* overflow-x-hidden: setting overflow-y makes the other axis compute to auto. */}
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-4 pr-1">
         {messages.map((message) => (
-          <div key={message.id}>
+          <div key={message.id} className="min-w-0">
             <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">
               {message.role}
             </p>
@@ -113,9 +114,7 @@ export function CodeHelperPanel({
             {error}
           </p>
         )}
-        {sending && !streamingText && (
-          <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
-        )}
+        {sending && !streamingText && <ChatActivity label={THINKING} />}
         <div ref={bottomRef} />
       </div>
       <div className="flex-none pt-3 flex items-end gap-2 border-t border-white/10">

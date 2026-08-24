@@ -52,20 +52,33 @@ body {
   overflow-x: hidden;
 }
 
-/* Scrollbar styling */
+/* Thin, unobtrusive scrollbars. The thumb is inset with a transparent border so it reads as
+   a hairline rather than a full-width track. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a2a transparent;
+}
+
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #000000;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #222222;
+  background: #2a2a2a;
+  border: 1px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #333333;
+  background: #3d3d3d;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }

@@ -15,9 +15,17 @@ import { cn } from "~/lib/utils";
 const REMARK_PLUGINS = [remarkGfm, remarkMath, remarkBreaks];
 const REHYPE_PLUGINS = [rehypeKatex];
 
+// Wide content scrolls or wraps inside the message, never widening its column. `pre` already
+// has overflow-x from typography; katex-display and tables ship none.
+const CONTAIN_WIDE_CONTENT =
+  "min-w-0 max-w-full break-words " +
+  "prose-pre:max-w-full " +
+  "[&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden " +
+  "prose-table:block prose-table:overflow-x-auto prose-table:max-w-full";
+
 export function Markdown({ children, className }: { children: string; className?: string }) {
   return (
-    <div className={cn("prose dark:prose-invert prose-sm max-w-none", className)}>
+    <div className={cn("prose dark:prose-invert prose-sm max-w-none", CONTAIN_WIDE_CONTENT, className)}>
       <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS}>
         {children}
       </ReactMarkdown>

@@ -802,7 +802,11 @@ async def test_practice_record_tool_answers_from_the_real_record(db_path: str) -
     assert "graphs (id: s1, 0.10" in llm.last_chat_request.message
     assert events[-1]["type"] == "done"
     assert events[-1]["content"] == "Graphs is worth a look."
-    # Read-only: no "Generating a learning plan..." note gets persisted.
+    # The label shows progress during the turn...
+    assert [e["label"] for e in events if e["type"] == "tool_start"] == [
+        "Checking your progress..."
+    ]
+    # ...but a lookup changed nothing, so it leaves no line in the transcript.
     fetched = await service.get_session(session.id)
     assert fetched is not None
     assert [m.role for m in fetched.messages] == [ChatRole.USER, ChatRole.ASSISTANT]
