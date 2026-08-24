@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 from app.execution.domain.models import ExecutionStatus, TestResult
-from app.llm.schemas.problem import GeneratedExample, GeneratedProblem
+from app.llm.schemas.problem import GeneratedExample, GeneratedProblem, ProblemPatch
+from app.problems.application.repair import apply_patch
 from app.problems.application.validation import ProblemValidationService
 from app.shared.hashing import hash_output
 from app.problems.domain.models import ProblemStatus
@@ -48,10 +49,20 @@ def _generated_problem() -> GeneratedProblem:
     )
 
 
+def test_apply_patch_keeps_examples_as_model_instances() -> None:
+    generated = _generated_problem()
+    patch = ProblemPatch(examples=[GeneratedExample(input="1 2 3", output="7")])
+
+    patched = apply_patch(generated, patch, source_problem=None)
+
+    assert patched.examples[0].output == "7"
+    assert isinstance(patched.examples[0], GeneratedExample)
+
+
 async def test_generate_and_validate_marks_available_on_success(db_path: str) -> None:
     repo = SqliteProblemRepository(db_path)
     llm = FakeLLMProvider(structured_responses=[_generated_problem()])
-    # One result per graded input: the single example plus the three hidden test inputs.
+    # 4 results: 1 example + 3 hidden tests.
     executor = FakeCodeExecutor(
         [
             TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6\n"),
@@ -69,18 +80,17 @@ async def test_generate_and_validate_marks_available_on_success(db_path: str) ->
 
     version = await repo.get_latest_version(problem.id)
     assert version is not None
-    # Graded on the example AND the hidden inputs — otherwise every "hidden" test would be
-    # an input the learner can already read in the statement.
+    # Tests: examples + hidden inputs (learner can't hardcode if hidden aren't included).
     assert len(version.tests) == 4
     assert len(version.examples) == 1
     assert [t.input for t in version.tests] == ["1 2 3", "0", "5", "-1 -2"]
-    # ground truth hash comes from the executor's actual_output, not the LLM's claimed output
+    # Hashes from executor output, not LLM.
     assert version.tests[0].output_hash == hash_output("6\n")
     assert version.tests[3].output_hash == hash_output("-3\n")
     assert version.constraints == "1 <= len(nums) <= 10^5"
     assert version.hints == ["Consider a running total."]
     assert problem.tags == ["prefix-sum", "arrays"]
-    # user_code persisted must be the STUB shown to learners, never the reference solution
+    # Persisted user_code is the stub, not the reference.
     assert version.user_code == "def solve(nums): pass"
     assert version.pre_code == "nums = list(map(int, input().split()))"
     assert version.post_code == "print(solve(nums))"
@@ -88,8 +98,14 @@ async def test_generate_and_validate_marks_available_on_success(db_path: str) ->
 
 async def test_generate_and_validate_marks_invalid_when_reference_solution_errors(db_path: str) -> None:
     repo = SqliteProblemRepository(db_path)
-    # Two responses: a rejected problem is regenerated once before the service gives up.
-    llm = FakeLLMProvider(structured_responses=[_generated_problem(), _generated_problem()])
+    # Generate -> reject -> repair -> reject -> regenerate -> reject, then give up.
+    llm = FakeLLMProvider(
+        structured_responses=[
+            _generated_problem(),
+            ProblemPatch(reference_user_code="def solve(nums): return sum(nums)"),
+            _generated_problem(),
+        ]
+    )
     executor = FakeCodeExecutor(
         [TestResult(id="0", status=ExecutionStatus.ERROR, input="1 2 3", error="boom")]
     )
@@ -101,19 +117,22 @@ async def test_generate_and_validate_marks_invalid_when_reference_solution_error
     all_matching = await repo.list_by_skill(
         (await SqliteSkillRepository(db_path).ensure_skill("prefix-sum"))
     )
-    assert len(all_matching) == 2  # one row per attempt
+    assert len(all_matching) == 3  # one row per attempt: generate, patch, regenerate
     assert {p.status for p in all_matching} == {ProblemStatus.INVALID}
 
 
 async def test_generate_and_validate_marks_invalid_when_reference_solution_prints_nothing(
     db_path: str,
 ) -> None:
-    # A "successful" (PASSED-status) run that produces empty stdout is just as broken as
-    # an error — usually means the generated code is a bare class/function stub with no
-    # stdin/stdout driver. Letting this through would hash_output("") as the expected
-    # answer, so any equally-empty user submission would incorrectly pass too.
+    # Empty output is broken (any empty user submission would pass).
     repo = SqliteProblemRepository(db_path)
-    llm = FakeLLMProvider(structured_responses=[_generated_problem(), _generated_problem()])
+    llm = FakeLLMProvider(
+        structured_responses=[
+            _generated_problem(),
+            ProblemPatch(post_code="print(solve(nums))"),
+            _generated_problem(),
+        ]
+    )
     executor = FakeCodeExecutor(
         [TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="")]
     )
@@ -129,15 +148,19 @@ async def test_generate_and_validate_marks_invalid_when_reference_solution_print
 
 
 async def test_reference_disagreeing_with_a_stated_example_is_rejected(db_path: str) -> None:
-    # The reference solution DEFINES the expected answers, so if it disagrees with the
-    # worked example in the statement, one of the two is wrong and nothing downstream can
-    # tell which. Shipping it produces a problem where following the statement exactly
-    # fails every hidden test, with no way for the learner to find out why.
+    # Reference must match statement examples.
     repo = SqliteProblemRepository(db_path)
-    llm = FakeLLMProvider(structured_responses=[_generated_problem(), _generated_problem()])
+    llm = FakeLLMProvider(
+        structured_responses=[
+            _generated_problem(),
+            # Repair still disagrees with example.
+            ProblemPatch(reference_user_code="def solve(nums): return sum(nums) + 1"),
+            _generated_problem(),
+        ]
+    )
     executor = FakeCodeExecutor(
         [
-            # Statement says 1 2 3 -> 6. The reference prints 7.
+            # Reference says 7, statement says 6.
             TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="7\n"),
             TestResult(id="1", status=ExecutionStatus.PASSED, input="0", actual_output="0\n"),
             TestResult(id="2", status=ExecutionStatus.PASSED, input="5", actual_output="5\n"),
@@ -181,7 +204,7 @@ async def test_a_repeat_of_an_existing_problem_is_not_stored_twice(db_path: str)
     ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
     assert first is not None
 
-    # The generator hands back the same problem again — same title, so same conceptual id.
+    # Same title → same conceptual id → duplicate found.
     second = await ProblemValidationService(
         repo,
         FakeLLMProvider(structured_responses=[_generated_problem(), _generated_problem()]),
@@ -189,7 +212,7 @@ async def test_a_repeat_of_an_existing_problem_is_not_stored_twice(db_path: str)
         skill_repo,
     ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
 
-    # Falls back to the existing row rather than filling the bank with a near-identical one.
+    # Falls back to existing problem (don't duplicate).
     assert second is not None and second.id == first.id
     assert len(await repo.list_by_skill(await skill_repo.ensure_skill("prefix-sum"))) == 1
 
@@ -199,8 +222,7 @@ async def test_a_stress_input_that_fails_leaves_the_problem_usable(db_path: str)
     generated = _generated_problem()
     generated.stress_test = "1 " * 100_000
     llm = FakeLLMProvider(structured_responses=[generated])
-    # The fake replays the same list for the stress run too, and its first result is a
-    # PASSED with no execution_time_ms — untimeable, so the feature is dropped.
+    # Fake executor has no timing info, stress test gets dropped.
     executor = FakeCodeExecutor(
         [
             TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6\n"),
@@ -246,16 +268,12 @@ async def test_a_timed_stress_run_becomes_the_speed_baseline(db_path: str) -> No
 
 
 async def test_an_empty_test_input_is_dropped_rather_than_killing_the_problem(db_path: str) -> None:
-    # `input()` raises EOFError on empty stdin, so an empty hidden test makes the reference
-    # crash on its own test case. The generator is asked for an empty-collection edge case,
-    # so it produces these regularly — dropping the input costs one edge case, keeping it
-    # costs the whole problem.
+    # Empty inputs cause EOFError on reference solution.
     repo = SqliteProblemRepository(db_path)
     generated = _generated_problem()
     generated.hidden_tests = ["", "5", "-1 -2"]
     llm = FakeLLMProvider(structured_responses=[generated])
-    # Three inputs survive: the example plus the two non-empty hidden tests. A fourth result
-    # would mean the empty input was still being sent.
+    # 3 results expected (1 example + 2 non-empty hidden).
     executor = FakeCodeExecutor(
         [
             TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6\n"),
@@ -274,8 +292,7 @@ async def test_an_empty_test_input_is_dropped_rather_than_killing_the_problem(db
 
 
 async def test_a_problem_with_no_usable_hidden_test_is_rejected(db_path: str) -> None:
-    # Every graded input would then be one the learner can read in the statement, so
-    # hardcoding the answers passes and the grade means nothing.
+    # No hidden tests means learner can hardcode statement answers.
     repo = SqliteProblemRepository(db_path)
 
     def blank_hidden_tests():
@@ -283,10 +300,120 @@ async def test_a_problem_with_no_usable_hidden_test_is_rejected(db_path: str) ->
         generated.hidden_tests = ["", "   "]
         return generated
 
-    llm = FakeLLMProvider(structured_responses=[blank_hidden_tests(), blank_hidden_tests()])
+    llm = FakeLLMProvider(
+        structured_responses=[
+            blank_hidden_tests(),
+            ProblemPatch(hidden_tests=["", "  "]),
+            blank_hidden_tests(),
+        ]
+    )
     executor = FakeCodeExecutor(
         [TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6\n")]
     )
     service = ProblemValidationService(repo, llm, executor, SqliteSkillRepository(db_path))
 
     assert await service.generate_and_validate("prefix-sum", Language.PYTHON, "easy") is None
+
+
+def _passing_run() -> list[TestResult]:
+    return [
+        TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6\n"),
+        TestResult(id="1", status=ExecutionStatus.PASSED, input="0", actual_output="0\n"),
+        TestResult(id="2", status=ExecutionStatus.PASSED, input="5", actual_output="5\n"),
+        TestResult(id="3", status=ExecutionStatus.PASSED, input="-1 -2", actual_output="-3\n"),
+    ]
+
+
+def _crashing_run() -> list[TestResult]:
+    return [
+        TestResult(
+            id="0", status=ExecutionStatus.ERROR, input="1 2 3",
+            error="TypeError: solve() takes 1 positional argument but 2 were given",
+        )
+    ]
+
+
+async def test_a_repair_rescues_a_problem_the_first_run_rejected(db_path: str) -> None:
+    # Repair loop: failure back to model, targeted fix, save (vs blind regenerate).
+    repo = SqliteProblemRepository(db_path)
+    llm = FakeLLMProvider(
+        structured_responses=[
+            _generated_problem(),
+            ProblemPatch(reference_user_code="def solve(nums): return sum(nums)  # repaired"),
+        ]
+    )
+    executor = FakeCodeExecutor(_crashing_run(), _passing_run())
+    service = ProblemValidationService(repo, llm, executor, SqliteSkillRepository(db_path))
+    stages: list[str] = []
+
+    problem = await service.generate_and_validate(
+        "prefix-sum", Language.PYTHON, "easy", on_stage=stages.append
+    )
+
+    assert problem is not None and problem.status == ProblemStatus.AVAILABLE
+    assert stages == ["generating", "validating", "patching", "revalidating"]
+    version = await repo.get_latest_version(problem.id)
+    assert version is not None and "# repaired" in version.reference_solution
+    # Patch only replaces named fields, rest carry over.
+    assert problem.title == "Static Range Sum"
+    assert [t.input for t in version.tests] == ["1 2 3", "0", "5", "-1 -2"]
+    assert version.user_code == "def solve(nums): pass"
+
+
+async def test_a_repair_may_not_rewrite_a_pasted_question(db_path: str) -> None:
+    # Can fix harness, not the question itself.
+    repo = SqliteProblemRepository(db_path)
+    llm = FakeLLMProvider(
+        structured_responses=[
+            _generated_problem(),
+            ProblemPatch(
+                statement_md="A completely different question.",
+                reference_user_code="def solve(nums): return sum(nums)",
+            ),
+        ]
+    )
+    executor = FakeCodeExecutor(_crashing_run(), _passing_run())
+    service = ProblemValidationService(repo, llm, executor, SqliteSkillRepository(db_path))
+
+    problem = await service.generate_and_validate(
+        "prefix-sum", Language.PYTHON, "easy", source_problem="Sum the array. Please."
+    )
+
+    assert problem is not None and problem.status == ProblemStatus.AVAILABLE
+    version = await repo.get_latest_version(problem.id)
+    assert version is not None
+    assert version.statement_md == "Given an array, answer sum queries."
+
+
+async def test_a_problem_that_validates_first_time_is_never_patched(db_path: str) -> None:
+    repo = SqliteProblemRepository(db_path)
+    llm = FakeLLMProvider(structured_responses=[_generated_problem()])
+    service = ProblemValidationService(
+        repo, llm, FakeCodeExecutor(_passing_run()), SqliteSkillRepository(db_path)
+    )
+    stages: list[str] = []
+
+    problem = await service.generate_and_validate(
+        "prefix-sum", Language.PYTHON, "easy", on_stage=stages.append
+    )
+
+    assert problem is not None
+    assert stages == ["generating", "validating"]
+
+
+async def test_an_unusable_repair_falls_through_to_a_fresh_generation(db_path: str) -> None:
+    # Empty patch skips revalidation, goes straight to regenerate.
+    repo = SqliteProblemRepository(db_path)
+    llm = FakeLLMProvider(
+        structured_responses=[_generated_problem(), ProblemPatch(), _generated_problem()]
+    )
+    executor = FakeCodeExecutor(_crashing_run(), _passing_run())
+    service = ProblemValidationService(repo, llm, executor, SqliteSkillRepository(db_path))
+    stages: list[str] = []
+
+    problem = await service.generate_and_validate(
+        "prefix-sum", Language.PYTHON, "easy", on_stage=stages.append
+    )
+
+    assert stages == ["generating", "validating", "patching", "regenerating", "validating"]
+    assert problem is not None and problem.status == ProblemStatus.AVAILABLE

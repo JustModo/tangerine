@@ -1,13 +1,23 @@
+import logging
 import uuid
 from datetime import datetime, timezone
+from typing import Callable
 
 from app.execution.domain.executor import CodeExecutor
 from app.execution.domain.models import ExecutionRequest, ExecutionStatus, parse_runtime_ms
 from app.execution.domain.models import TestCase as ExecutionTestCase
 from app.llm.domain.provider import LLMProvider
-from app.llm.graphs.problem import generate_problem
+from app.llm.graphs.problem import generate_problem, patch_problem
 from app.llm.infrastructure.cache import SqliteLLMCache, cache_key
 from app.llm.schemas.problem import GeneratedProblem
+from app.problems.application.repair import (
+    ValidationFailure,
+    apply_patch,
+    mismatch_failure,
+    no_tests_failure,
+    normalise_output,
+    runtime_failure,
+)
 from app.problems.domain.models import Problem, ProblemExample, ProblemStatus, ProblemTest, ProblemVersion
 from app.problems.domain.repository import ProblemRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
@@ -15,22 +25,13 @@ from app.shared.code_assembly import assemble_program
 from app.shared.hashing import hash_output
 from app.shared.types import Language
 
-
-# Generation is the expensive step, so this is deliberately small: it covers a bad batch
-# or a repeat, not a persistently broken skill.
-MAX_ATTEMPTS = 2
+logger = logging.getLogger(__name__)
 
 
 def _conceptual_id(title: str) -> str:
     """Identity of the QUESTION rather than of the row. Two generations for one skill
     routinely land on the same classic problem with the same title."""
     return cache_key("conceptual", " ".join(title.lower().split()))
-
-
-def _normalise_output(value: str | None) -> str:
-    """Sandbox stdout vs. a statement's example output: trailing whitespace and line
-    endings differ constantly and mean nothing."""
-    return "\n".join(line.rstrip() for line in (value or "").strip().splitlines())
 
 
 class ProblemValidationService:
@@ -59,46 +60,98 @@ class ProblemValidationService:
         language: Language,
         difficulty: str,
         source_problem: str | None = None,
+        on_stage: Callable[[str], None] | None = None,
     ) -> Problem | None:
-        """When source_problem is given, the learner pasted that question in and the LLM
-        adapts it rather than inventing one — the sandbox validation below is identical
-        either way, so a pasted problem still has to actually run before anyone sees it."""
+        """Generate, prove it out against the real sandbox, and — when it fails — repair it
+        with the failure in hand before falling back to starting over.
+
+        The budget is deliberately the shape of this method rather than a counter: one
+        generation, one targeted repair, one fresh generation. A repair is far cheaper than
+        a regeneration and fixes the common failures (a signature mismatch, a parse that
+        eats the wrong tokens, an example output the reference disagrees with), so it goes
+        first; starting over is the escape hatch for when the whole approach is wrong.
+
+        When source_problem is given, the learner pasted that question in and the LLM adapts
+        it rather than inventing one. Neither the repair nor the fresh generation may change
+        what is being asked — the regeneration re-adapts the SAME source, and the repair is
+        barred from touching the statement."""
+        stage = on_stage or (lambda _: None)
+
         avoid_titles: list[str] = []
         if not source_problem:
             skill_id = await self._skill_repository.ensure_skill(skill)
             avoid_titles = await self._repository.list_titles(skill_id, language)
 
-        duplicate_of: Problem | None = None
-        for attempt in range(MAX_ATTEMPTS):
-            generated = await generate_problem(
-                self._llm_provider,
-                skill,
-                language.value,
-                difficulty,
-                # Only the first attempt may be served from cache: a retry exists precisely
-                # because the cached answer was rejected, and replaying it would loop.
-                cache=self._llm_cache if attempt == 0 else None,
-                source_problem=source_problem,
-                avoid_titles=avoid_titles,
+        stage("generating")
+        generated = await generate_problem(
+            self._llm_provider,
+            skill,
+            language.value,
+            difficulty,
+            cache=self._llm_cache,
+            source_problem=source_problem,
+            avoid_titles=avoid_titles,
+        )
+
+        duplicate_of = await self._find_duplicate(generated, source_problem, language)
+        if duplicate_of is None:
+            stage("validating")
+            problem, failure = await self._validate(
+                generated, _conceptual_id(generated.title), skill, language, difficulty
             )
-
-            # The generator reached for a problem the bank already has. Retry for a
-            # different one rather than storing a near-identical row.
-            conceptual_id = _conceptual_id(generated.title)
-            if not source_problem:
-                existing = await self._repository.find_by_conceptual_id(conceptual_id, language)
-                if existing is not None:
-                    duplicate_of = duplicate_of or existing
-                    avoid_titles = avoid_titles + [generated.title]
-                    continue
-
-            problem = await self._validate(generated, conceptual_id, skill, language, difficulty)
             if problem is not None:
                 return problem
 
-        # Nothing new survived validation. Serving a problem the learner may have seen
-        # before beats failing outright with nothing at all.
+            # Repair attempt with failure context (old blind retry didn't have this).
+            stage("patching")
+            patch = await patch_problem(
+                self._llm_provider, generated, failure.kind, failure.detail, language.value
+            )
+            patched = apply_patch(generated, patch, source_problem)
+            if patched is not generated:
+                stage("revalidating")
+                problem, _ = await self._validate(
+                    patched, _conceptual_id(patched.title), skill, language, difficulty
+                )
+                if problem is not None:
+                    return problem
+
+        # Regenerate without cache (replaying rejected cached answer would loop).
+        stage("regenerating")
+        generated = await generate_problem(
+            self._llm_provider,
+            skill,
+            language.value,
+            difficulty,
+            cache=None,
+            source_problem=source_problem,
+            avoid_titles=avoid_titles + [generated.title],
+        )
+        duplicate_of = duplicate_of or await self._find_duplicate(
+            generated, source_problem, language
+        )
+        if duplicate_of is None:
+            stage("validating")
+            problem, _ = await self._validate(
+                generated, _conceptual_id(generated.title), skill, language, difficulty
+            )
+            if problem is not None:
+                return problem
+
+        # Fallback to duplicate (something > nothing).
         return duplicate_of
+
+    async def _find_duplicate(
+        self, generated: GeneratedProblem, source_problem: str | None, language: Language
+    ) -> Problem | None:
+        """The generator reached for a problem the bank already has. Worth starting over
+        for a different one rather than storing a near-identical row — and never worth
+        spending the repair budget on, since nothing about it is broken."""
+        if source_problem:
+            return None
+        return await self._repository.find_by_conceptual_id(
+            _conceptual_id(generated.title), language
+        )
 
     async def _validate(
         self,
@@ -107,7 +160,9 @@ class ProblemValidationService:
         skill: str,
         language: Language,
         difficulty: str,
-    ) -> Problem | None:
+    ) -> tuple[Problem, None] | tuple[None, ValidationFailure]:
+        """Returns the approved problem, or None paired with why it was rejected. The
+        failure is the input to the repair attempt, so every rejection has to carry one."""
         skill_ids = [
             await self._skill_repository.ensure_skill(name) for name in (generated.skills or [skill])
         ]
@@ -124,31 +179,22 @@ class ProblemValidationService:
         )
         await self._repository.save(problem)
 
-        # An empty stdin is unreadable by every harness the generator writes: `input()`
-        # raises EOFError, and Scanner/cin/scanf are no better. The generator is asked for
-        # an empty-collection edge case, so it produces one regularly — and the reference
-        # then crashes on its own test, failing the whole problem. Dropping the input costs
-        # one edge case; keeping it costs the entire problem.
+        # Drop empty inputs (causes EOFError on reference solution).
         examples = [ex for ex in generated.examples if ex.input.strip()]
         hidden_tests = [value for value in generated.hidden_tests if value.strip()]
-        # No surviving hidden test means every graded input is one the learner can read in
-        # the statement, so hardcoding the answers passes. Regenerating costs a call;
-        # shipping it costs the meaning of every grade and every mastery score after it.
+        # Need both examples and hidden tests (without hidden, learner can hardcode answers).
         if not examples or not hidden_tests:
-            return await self._mark_invalid(problem)
+            return await self._mark_invalid(problem, no_tests_failure(examples, hidden_tests))
 
         reference_program = assemble_program(
             generated.pre_code, generated.reference_user_code, generated.post_code
         )
-        # Grade against the examples AND the extra hidden inputs. Without the extras, every
-        # "hidden" test would be an input the learner can already see in the statement, so
-        # hardcoding the example answers would pass a submission.
+        # Grade examples + hidden tests (both visible and graded inputs).
         graded_inputs = [example.input for example in examples] + hidden_tests
         request = ExecutionRequest(
             language=language,
             code=reference_program,
-            # output_hash is irrelevant here — we only read back actual_output below,
-            # never the PASS/FAIL verdict, since there's nothing trustworthy to compare against yet.
+            # output_hash not used here, only actual_output is read.
             test_cases=[
                 ExecutionTestCase(id=str(index), input=value, output_hash="")
                 for index, value in enumerate(graded_inputs)
@@ -156,25 +202,22 @@ class ProblemValidationService:
         )
         results = [result async for result in self._executor.execute(request)]
 
-        # A reference solution that "succeeds" but prints nothing is just as broken as one
-        # that errors — no legitimate DSA answer is an empty string, and an empty-output
-        # test silently hashes to hash_output(""), which would let ANY equally-empty
-        # submission pass. Catch it here rather than let it reach a real user.
+        # Catch empty outputs (broken reference solution or all-passing submission).
         broken = len(results) != len(graded_inputs) or any(
             r.status in (ExecutionStatus.ERROR, ExecutionStatus.TIMEOUT) or not (r.actual_output or "").strip()
             for r in results
         )
         if broken:
-            return await self._mark_invalid(problem)
+            return await self._mark_invalid(
+                problem, runtime_failure(results, len(graded_inputs))
+            )
 
-        # THE correctness check. Everything below trusts the reference solution to DEFINE
-        # the right answer, so if it disagrees with the worked examples the statement shows,
-        # one of the two is wrong and there is no way to tell which. Shipping it anyway
-        # produces a problem where following the statement exactly fails every hidden test,
-        # with nothing in the UI able to explain why — the worst failure the app can have.
-        for example, result in zip(examples, results):
-            if _normalise_output(result.actual_output) != _normalise_output(example.output):
-                return await self._mark_invalid(problem)
+        # THE correctness check: reference must match statement examples.
+        if any(
+            normalise_output(result.actual_output) != normalise_output(example.output)
+            for example, result in zip(examples, results)
+        ):
+            return await self._mark_invalid(problem, mismatch_failure(examples, results))
 
         stress_input, stress_runtime_ms = await self._measure_stress(
             language, reference_program, generated.stress_test
@@ -195,8 +238,7 @@ class ProblemValidationService:
                 ProblemExample(id=str(uuid.uuid4()), input=ex.input, output=ex.output, explanation=ex.explanation)
                 for ex in examples
             ],
-            # Expected outputs always come from actually running the reference solution,
-            # never from the LLM's claimed output — and only ever as a hash.
+            # Expected outputs from running reference solution, never from LLM.
             tests=[
                 ProblemTest(
                     id=str(uuid.uuid4()),
@@ -214,7 +256,7 @@ class ProblemValidationService:
 
         approved = problem.model_copy(update={"status": ProblemStatus.AVAILABLE})
         await self._repository.save(approved)
-        return approved
+        return approved, None
 
     async def _measure_stress(
         self, language: Language, reference_program: str, stress_test: str | None
@@ -238,7 +280,10 @@ class ProblemValidationService:
         runtime_ms = parse_runtime_ms(results[0].execution_time_ms)
         return (stress_test, runtime_ms) if runtime_ms is not None else (None, None)
 
-    async def _mark_invalid(self, problem: Problem) -> None:
+    async def _mark_invalid(
+        self, problem: Problem, failure: ValidationFailure
+    ) -> tuple[None, ValidationFailure]:
         invalid = problem.model_copy(update={"status": ProblemStatus.INVALID})
         await self._repository.save(invalid)
-        return None
+        logger.info("Problem %r rejected (%s): %s", problem.title, failure.kind, failure.detail)
+        return None, failure

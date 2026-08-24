@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.curriculum.application.problem_sessions import ProblemSessionService
 from app.curriculum.application.services import CurriculumService
 from app.curriculum.domain.models import LessonPlan
-from app.curriculum.domain.problem_session import ProblemSession
 from app.curriculum.infrastructure.sqlite_problem_session_repository import SqliteProblemSessionRepository
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
 from app.execution.infrastructure.citron_adapter import CitronAdapter
@@ -15,6 +15,9 @@ from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRep
 from app.problems.application.services import ProblemSelectionService
 from app.problems.application.validation import ProblemValidationService
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
+from app.shared.errors import NotFoundError
+from app.shared.progress import stage_stream
+from app.shared.sse import sse_stream
 from app.shared.types import Language
 from app.users.domain.models import LOCAL_USER_ID
 
@@ -91,8 +94,26 @@ async def get_plan(
     return plan
 
 
+async def _next_problem_events(service: ProblemSessionService, plan_id: str):
+    """Streams what preparing this problem is really doing, then the session it produced."""
+    try:
+        async for event in stage_stream(
+            lambda report: service.next_problem(plan_id, LOCAL_USER_ID, on_stage=report),
+            lambda session: {"type": "session", **session.model_dump(mode="json")},
+        ):
+            yield event
+    except NotFoundError as exc:
+        # Send error as event frame (200 status already sent).
+        yield {"type": "error", "message": str(exc)}
+
+
 @router.post("/{plan_id}/problems/next")
 async def next_problem(
     plan_id: str, service: ProblemSessionService = Depends(get_problem_session_service)
-) -> ProblemSession:
-    return await service.next_problem(plan_id, LOCAL_USER_ID)
+) -> StreamingResponse:
+    stream = sse_stream(
+        _next_problem_events(service, plan_id),
+        context=f"next problem plan={plan_id}",
+        error_message="Couldn't prepare a problem for this step. Try again in a moment.",
+    )
+    return StreamingResponse(stream, media_type="text/event-stream")

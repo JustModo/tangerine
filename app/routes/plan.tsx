@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
 import { LessonNotesPanel } from "@/components/LessonNotesPanel";
 import { useStatus } from "~/lib/status";
-import { ApiError, apiJson } from "~/lib/api";
+import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
 import { cn } from "~/lib/utils";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
@@ -26,6 +26,20 @@ interface LessonPlan {
   level: string;
   nodes: LessonNode[];
 }
+
+/**
+ * Real backend stages, not a timer - a bank hit is instant, while a miss can walk through
+ * generation, sandbox validation, a repair attempt and a revalidation. The agent reports
+ * which one it is actually in (agent/app/curriculum/api/router.py).
+ */
+const STAGE_LABELS: Record<string, string> = {
+  selecting: "Selecting problem...",
+  generating: "Generating problem...",
+  validating: "Validating problem...",
+  patching: "Patching problem...",
+  revalidating: "Revalidating...",
+  regenerating: "Regenerating problem...",
+};
 
 export const meta: MetaFunction = () => [
   { title: "Learning Plan · Tangerine" },
@@ -57,22 +71,22 @@ export default function PlanScreen() {
 
   async function startNext() {
     setBusy(true);
-    // Staged, not real backend progress - the bank-hit path is instant, but a miss
-    // triggers generation + sandbox validation, which can take a few seconds.
-    setBusyMessage("Selecting problem...");
-    const generatingTimer = setTimeout(() => setBusyMessage("Generating problem..."), 1200);
-    const validatingTimer = setTimeout(() => setBusyMessage("Validating problem..."), 3500);
+    setBusyMessage(STAGE_LABELS.selecting);
     try {
-      const problemSession = await apiJson<{ id: string }>(
-        `/api/learning-plans/${id}/problems/next`,
-        { method: "POST" },
-      );
-      navigate(`/problem-sessions/${problemSession.id}`);
+      const response = await apiFetch(`/api/learning-plans/${id}/problems/next`, { method: "POST" });
+      let sessionId: string | null = null;
+      await consumeSSE(response, (event) => {
+        if (event.type === "stage" && typeof event.stage === "string") {
+          setBusyMessage(STAGE_LABELS[event.stage] ?? STAGE_LABELS.selecting);
+        } else if (event.type === "session" && typeof event.id === "string") {
+          sessionId = event.id;
+        }
+      });
+      if (!sessionId) throw new ApiError("The server didn't return a problem.");
+      navigate(`/problem-sessions/${sessionId}`);
     } catch (err) {
       showError(err instanceof ApiError ? err.message : "Failed to select a problem");
     } finally {
-      clearTimeout(generatingTimer);
-      clearTimeout(validatingTimer);
       setBusy(false);
       setBusyMessage(null);
     }

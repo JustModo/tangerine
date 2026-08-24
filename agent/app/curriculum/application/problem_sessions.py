@@ -1,6 +1,7 @@
 import logging
 import uuid
 from datetime import datetime, timezone
+from typing import Callable
 
 from app.curriculum.domain.models import LessonNodeStatus
 from app.curriculum.domain.problem_session import ProblemSession, ProblemSessionStatus
@@ -41,7 +42,15 @@ class ProblemSessionService:
         self._skill_repository = skill_repository or SqliteSkillRepository()
         self._mastery_repository = mastery_repository
 
-    async def next_problem(self, plan_id: str, user_id: str) -> ProblemSession:
+    async def next_problem(
+        self, plan_id: str, user_id: str, on_stage: Callable[[str], None] | None = None
+    ) -> ProblemSession:
+        """on_stage, when given, reports what this call is actually doing right now
+        ("generating", "patching", ...) so the UI can say so honestly instead of guessing
+        on a timer. A bank hit reports nothing past "selecting" — it is instant."""
+        stage = on_stage or (lambda _: None)
+        stage("selecting")
+
         plan = await self._plan_repository.get(plan_id)
         if plan is None:
             raise NotFoundError(f"Lesson plan {plan_id} not found")
@@ -56,14 +65,14 @@ class ProblemSessionService:
 
         skill_name = node.skill_name or await self._skill_repository.get_name(node.skill_id) or node.skill_id
 
-        # A node carrying a pasted problem must serve THAT question — never a bank hit for
-        # a merely similar skill — so selection is skipped entirely for it.
+        # Pasted problems don't use bank selection.
         if node.source_problem_md:
             problem = await self._problem_validation.generate_and_validate(
                 skill_name,
                 plan.language,
                 node.difficulty or "medium",
                 source_problem=node.source_problem_md,
+                on_stage=on_stage,
             )
             if problem is None:
                 raise NotFoundError(
@@ -76,14 +85,11 @@ class ProblemSessionService:
         if self._mastery_repository is not None:
             state = await self._mastery_repository.get(user_id, node.skill_id)
             mastery_score = state.mastery_score if state else None
-        # An explicit per-node difficulty (set by the curriculum, or by the user asking the
-        # chat to make a step harder/easier) wins over the mastery/position guess. Computed
-        # BEFORE the bank lookup, not just for generation — a lookup that ignores it will
-        # happily hand back an easy problem for a step the learner asked to be hard.
+        # Node difficulty overrides mastery estimate; computed before bank lookup.
         difficulty = node.difficulty or suggest_difficulty(mastery_score, node.sequence_index)
 
         problem = await self._select_or_generate(
-            node.skill_id, skill_name, plan.language, difficulty, user_id
+            node.skill_id, skill_name, plan.language, difficulty, user_id, on_stage
         )
         if problem is None:
             raise NotFoundError(f"Could not generate a valid problem for skill {skill_name}")
@@ -91,7 +97,13 @@ class ProblemSessionService:
         return await self._start_session(plan, node, problem, user_id)
 
     async def _select_or_generate(
-        self, skill_id: str, skill_name: str, language, difficulty: str, user_id: str
+        self,
+        skill_id: str,
+        skill_name: str,
+        language,
+        difficulty: str,
+        user_id: str,
+        on_stage: Callable[[str], None] | None = None,
     ):
         """Bank first, generation on a miss — excluding everything this learner has already
         been served, so practising a skill twice is never the same question twice."""
@@ -105,7 +117,7 @@ class ProblemSessionService:
         if problem is not None:
             return problem
         return await self._problem_validation.generate_and_validate(
-            skill_name, language, difficulty
+            skill_name, language, difficulty, on_stage=on_stage
         )
 
     async def practice_problem(self, user_id: str, skill_id: str, language) -> ProblemSession:
@@ -200,10 +212,7 @@ class ProblemSessionService:
 
     async def save_code(self, session_id: str, source_code: str) -> ProblemSession:
         session = await self._require(session_id)
-        # Called on every debounced autosave tick as well as on Run/Submit — only ever
-        # advance a fresh session into IN_PROGRESS; never regress a SUBMITTED/COMPLETED
-        # session back on a later autosave (unlike the old one-time file-pick flow, this
-        # fires repeatedly for the lifetime of the page).
+        # Only advance NOT_STARTED → IN_PROGRESS, never regress.
         status = (
             ProblemSessionStatus.IN_PROGRESS
             if session.status == ProblemSessionStatus.NOT_STARTED
@@ -227,8 +236,7 @@ class ProblemSessionService:
         )
         await self._session_repository.save(updated)
 
-        # A practice session has no node to advance — it exists precisely to be outside
-        # the plan.
+        # Only plan sessions have nodes to advance (practice sessions have no node).
         if passed and session.lesson_node_id is not None:
             node = await self._plan_repository.get_node(session.lesson_node_id)
             if node is not None:

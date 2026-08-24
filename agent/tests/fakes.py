@@ -11,12 +11,9 @@ class FakeLLMProvider:
     def __init__(self, structured_responses=None, text_responses=None, chat_streams=None) -> None:
         self._structured_responses = list(structured_responses or [])
         self._text_responses = list(text_responses or [])
-        # Each item is itself a list[ChatChunk] — one queued item per stream_chat() call,
-        # mirroring how the real control flow calls it once for the initial reply and
-        # again for the closing reply after a tool call.
+        # Each item is a list[ChatChunk] (one queued call to stream_chat()).
         self._chat_streams = list(chat_streams or [])
-        # Last ChatStreamRequest received — lets tests assert on what actually went to the
-        # model (e.g. that problem secrets never appear in the prompt).
+        # Captured for test assertions on prompt content.
         self.last_chat_request: ChatStreamRequest | None = None
 
     async def generate_structured(
@@ -45,12 +42,17 @@ class FakeLLMProvider:
 
 class FakeCodeExecutor:
     """Test double for CodeExecutor — yields a fixed sequence of TestResults regardless
-    of the request, so callers can be tested without a live Node sandbox."""
+    of the request, so callers can be tested without a live Node sandbox.
 
-    def __init__(self, results: list[TestResult]) -> None:
-        self._results = results
+    Extra positional lists are handed to successive execute() calls, and the last one
+    repeats for good: a problem that fails validation, gets repaired and is validated again
+    has to see a different sandbox result the second time round."""
+
+    def __init__(self, results: list[TestResult], *later_runs: list[TestResult]) -> None:
+        self._runs = [results, *later_runs]
 
     async def execute(self, request: ExecutionRequest):
-        for result in self._results:
+        results = self._runs.pop(0) if len(self._runs) > 1 else self._runs[0]
+        for result in results:
             yield result
 

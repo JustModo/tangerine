@@ -138,8 +138,7 @@ def problem_user_prompt(
 ) -> str:
     prompt = f"Skill: {skill}\nLanguage: {language}\nDifficulty: {difficulty}"
     if avoid_titles:
-        # Without this the model reaches for the same canonical problem every time, and a
-        # learner practising a skill twice gets the same question back.
+        # Without this, learner gets the same problem on repeat attempts.
         listed = "\n".join(f"- {title}" for title in avoid_titles)
         prompt += (
             "\n\nThe learner has ALREADY been given these problems for this skill. Write a "
@@ -147,6 +146,75 @@ def problem_user_prompt(
             f"of them:\n{listed}"
         )
     return prompt
+
+
+_PATCH_RULES = (
+    "REPAIR RULES:\n"
+    "1. Return ONLY the fields you actually changed. Leave everything else null — it is "
+    "kept as-is. A repair that restates unchanged code is wasted.\n"
+    "2. Do NOT change the question. The problem being asked stays exactly the same: same "
+    "task, same input format, same example INPUTS. You are fixing the code and the stated "
+    "answers around the question, never the question.\n"
+    "3. Never weaken a test, drop a case, or make post_code print something easier just to "
+    "get past validation. Fix the actual defect.\n"
+    "4. The same CONSISTENCY RULES and PER-LANGUAGE SHAPE from your instructions still "
+    "apply to anything you return — a fragment must still concatenate into one valid "
+    "program."
+)
+
+
+def patch_problem_user_prompt(
+    kind: str,
+    detail: str,
+    language: str,
+    pre_code: str,
+    reference_user_code: str,
+    post_code: str,
+    examples: list,
+    hidden_tests: list[str],
+    statement_md: str | None = None,
+    user_code: str | None = None,
+) -> str:
+    """A repair prompt for a problem that already failed the sandbox. Deliberately carries
+    the minimum that can explain the failure: the harness, the tests, and what actually
+    happened. Everything the failure can't be about (title, hints, tags, constraints,
+    skills) is left out — this call exists to be cheap enough to always be worth making."""
+    diagnosis = {
+        "runtime": "Running your reference solution against these inputs FAILED — it "
+        "crashed, timed out, or printed nothing. Almost always the harness and the "
+        "reference disagree (a signature mismatch, a parse that consumes the wrong number "
+        "of tokens, a missing import) rather than the algorithm being wrong.",
+        "mismatch": "Your reference solution RAN, but its output disagrees with the "
+        "answer your own statement claims for that example. Decide which one is wrong and "
+        "fix that one: either the reference computes the wrong thing, or the example's "
+        "stated output is wrong.",
+        "no_tests": "The problem has no usable grading inputs — the examples or the "
+        "hidden tests came back blank. Every input is fed to the program as stdin exactly "
+        "as written, so a blank one makes the reference crash on its own test case. Write "
+        "real inputs in the same stdin format your harness parses.",
+    }[kind]
+
+    sections = [
+        f"Language: {language}",
+        f"THIS PROBLEM FAILED VALIDATION.\n{diagnosis}",
+        f"WHAT HAPPENED:\n{detail}",
+    ]
+    if statement_md is not None:
+        sections.append(f"statement_md:\n{statement_md}")
+    sections.append(f"pre_code:\n{pre_code}")
+    if user_code is not None:
+        sections.append(f"user_code:\n{user_code}")
+    sections.append(f"reference_user_code:\n{reference_user_code}")
+    sections.append(f"post_code:\n{post_code}")
+    sections.append(
+        "examples:\n"
+        + "\n".join(f"- input={ex.input!r} output={ex.output!r}" for ex in examples)
+    )
+    sections.append(
+        "hidden_tests (inputs only):\n" + "\n".join(f"- {value!r}" for value in hidden_tests)
+    )
+    sections.append(_PATCH_RULES)
+    return "\n\n".join(sections)
 
 
 def adapt_problem_user_prompt(source_problem: str, language: str) -> str:

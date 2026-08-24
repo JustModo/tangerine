@@ -1,3 +1,4 @@
+import logging
 from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -9,9 +10,12 @@ from app.llm.infrastructure.gemini.mapping import SchemaValidationError
 from app.llm.prompts.problem import (
     PROBLEM_SYSTEM_PROMPT,
     adapt_problem_user_prompt,
+    patch_problem_user_prompt,
     problem_user_prompt,
 )
-from app.llm.schemas.problem import GeneratedProblem
+from app.llm.schemas.problem import GeneratedProblem, ProblemPatch
+
+logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
 
@@ -20,9 +24,9 @@ class ProblemGraphState(TypedDict):
     skill: str
     language: str
     difficulty: str
-    # When set, the problem is adapted from this exact pasted statement instead of invented.
+    # Adapt from this pasted statement instead of inventing.
     source_problem: str | None
-    # Titles already in the bank for this skill — the model is told not to repeat them.
+    # Titles already in the bank (don't repeat).
     avoid_titles: list[str]
     result: GeneratedProblem | None
     error: str | None
@@ -71,12 +75,7 @@ async def generate_problem(
     source_problem: str | None = None,
     avoid_titles: list[str] | None = None,
 ) -> GeneratedProblem:
-    # A pasted problem is one-of-a-kind — never cached under the generic skill key, which
-    # would otherwise poison the bank with someone else's specific question.
-    #
-    # avoid_titles is part of the key, not just the prompt: without it every regeneration
-    # for a skill is a cache hit on the first problem ever made for it, so the bank could
-    # never hold more than one problem per (skill, language, difficulty).
+    # Pasted problems not cached; avoid_titles part of key (not just prompt).
     key = (
         cache_key("problem", skill, language, difficulty, *sorted(avoid_titles or []))
         if cache is not None and not source_problem
@@ -109,3 +108,42 @@ async def generate_problem(
         await cache.set(key, final_state["result"].model_dump_json())
 
     return final_state["result"]
+
+
+async def patch_problem(
+    provider: LLMProvider,
+    generated: GeneratedProblem,
+    kind: str,
+    detail: str,
+    language: str,
+) -> ProblemPatch | None:
+    """One repair attempt for a problem the sandbox just rejected, given what actually
+    happened when it ran.
+
+    No graph, no retry, no cache: a patch is a single cheap call that either helps or
+    doesn't, and its caller already has a fresh regeneration lined up behind it. Caching
+    would be actively wrong — the key would be the same broken problem every time."""
+    needs_statement = kind == "mismatch"
+    request = StructuredGenerationRequest(
+        # Reuse system prompt to avoid drift between generation and repair.
+        system_prompt=PROBLEM_SYSTEM_PROMPT,
+        user_prompt=patch_problem_user_prompt(
+            kind=kind,
+            detail=detail,
+            language=language,
+            pre_code=generated.pre_code,
+            reference_user_code=generated.reference_user_code,
+            post_code=generated.post_code,
+            examples=generated.examples,
+            hidden_tests=generated.hidden_tests,
+            statement_md=generated.statement_md if needs_statement else None,
+            # Stub only relevant for no_tests repairs (format must match).
+            user_code=generated.user_code if kind == "no_tests" else None,
+        ),
+    )
+    try:
+        return await provider.generate_structured(request, ProblemPatch)
+    except SchemaValidationError:
+        # Parse failure means regenerate (repair isn't salvageable).
+        logger.warning("Problem patch failed to parse (kind=%s)", kind)
+        return None
