@@ -26,6 +26,8 @@ class LessonNode(BaseModel):
     # Set only on the final node of a plan built around a problem the learner pasted in —
     # that node serves this exact question instead of a generated one.
     source_problem_md: str | None = None
+    # Binds the step to one existing bank problem — reopened as-is, no LLM, no sandbox.
+    problem_id: str | None = None
     created_at: datetime
 
 

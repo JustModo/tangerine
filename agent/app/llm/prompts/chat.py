@@ -117,6 +117,7 @@ EDIT_PLAN_TOOL = ToolDeclaration(
                     "change_language",
                     "change_step_difficulty",
                     "add_step",
+                    "add_problem",
                     "remove_step",
                     "reorder_step",
                     "rework",
@@ -127,8 +128,13 @@ EDIT_PLAN_TOOL = ToolDeclaration(
                     "— requires language.\n"
                     "change_step_difficulty: make one existing step easier/harder "
                     "('make step 3 harder') — requires step and difficulty.\n"
-                    "add_step: insert a new step ('add one on hash maps') — requires "
-                    "skill, optionally difficulty and position.\n"
+                    "add_step: insert a new step on a TOPIC, whose problem is generated "
+                    "fresh ('add one on hash maps') — requires skill, optionally difficulty "
+                    "and position.\n"
+                    "add_problem: put a problem they ALREADY have onto the plan, so they "
+                    "can work it there ('I want to solve that one', 'add the two sum one') "
+                    "— requires problem_id from a find_problems result. Nothing is "
+                    "generated; the step opens that exact question.\n"
                     "remove_step: drop one existing step ('drop the recursion step') — "
                     "requires step.\n"
                     "reorder_step: move one existing step to a different position "
@@ -160,6 +166,13 @@ EDIT_PLAN_TOOL = ToolDeclaration(
             "skill": {
                 "type": "string",
                 "description": "add_step only: the exact topic/skill of the new step, faithful to what the user asked for.",
+            },
+            "problem_id": {
+                "type": "string",
+                "description": (
+                    "add_problem only: the exact id from a find_problems result. Never "
+                    "invent one — call find_problems first if you do not have it."
+                ),
             },
             "position": {
                 "type": "integer",
@@ -198,10 +211,10 @@ COACHING_PROMPT = (
     "is not something to bring up unprompted.\n"
     "Then recommend concretely: two or three specific topics, a few words on why each, and ask "
     "if they want a plan for one. Not a syllabus.\n"
-    "If instead they want something to practice RIGHT NOW rather than a full plan ('give me "
-    "something to practice', 'let's do the graphs one right now'), call "
-    "suggest_practice_problem with that skill's id (each entry below shows its id in "
-    "parentheses) instead of generate_learning_plan.\n"
+    "If they want something to work on RIGHT NOW ('give me something to practice', 'let's do "
+    "the graphs one'), that still means a plan — build a short one on that topic with "
+    "generate_learning_plan, or add a step to the plan they already have. Everything in this "
+    "chat ends up on a plan; that is where they solve it.\n"
     "A skill the record calls weak is one they practised and struggled with — the strongest "
     "signal there is. A skill missing from the record has never been tried, which is a gap, not "
     "a strength: never call an absent skill mastered. If the record is empty, say plainly that "
@@ -212,37 +225,143 @@ COACHING_PROMPT = (
     "record and level rather than reciting the list.\n"
     "When they accept a recommendation ('yes', 'that one', 'do the graphs one'), that topic is "
     "the topic — go build it. ACT OR ASK still applies, and you still never assume the language.\n"
+    "\n"
+    "PROBLEMS THEY HAVE ALREADY SEEN. The moment they point at past work — 'revise', 'redo', "
+    "'again', 'that one', 'the one I flagged', 'have I done X', 'what have I solved', 'is there "
+    "a X problem' — call find_problems FIRST and answer from what it returns.\n"
+    "NEVER state what they have or have not got until find_problems has told you IN THIS "
+    "CONVERSATION. Saying 'you have no flagged questions' or 'you haven't solved anything in "
+    "Python' when they have is the worst failure here — you cannot know either way without "
+    "looking, so look. If they name a language, pass it as the language argument.\n"
+    "\n"
+    "THIS CHAT BUILDS PLANS. It does not open problems. When they want to work on a problem "
+    "they already have, put it on their plan and tell them it's there to start:\n"
+    "- One existing problem, plan already exists: edit_learning_plan with operation "
+    "'add_problem' and its id.\n"
+    "- Several existing problems, or no plan yet: create_practice_plan with their ids.\n"
+    "- REPLACING the plan — 'remove everything and just do that one', 'clear my plan and "
+    "add these', 'start over with X': create_practice_plan with exactly the ids they want. "
+    "It builds a fresh plan containing only those, which becomes the active one. There is "
+    "no operation that empties a plan in place, so do not try to remove steps one by one.\n"
+    "- Something genuinely NEW on a topic: generate_learning_plan, or add_step on an existing "
+    "plan — those generate a fresh problem they have not seen.\n"
+    "\n"
+    "WHEN THEY SAY YES, ACT. If you offered to add something and they agree ('yes', 'go "
+    "ahead', 'do it'), call the tool on that turn using the ids from your tool context. Do "
+    "NOT call find_problems again to re-derive what you were already told, and do not repeat "
+    "the offer — re-asking a question they just answered is the fastest way to look broken.\n"
+    "A request can need two tools ('yes, remove everything and add that one' is a lookup "
+    "and then a rebuild). After a tool result comes back, if part of what they asked for is "
+    "still undone, call the tool that finishes it rather than describing what you would do.\n"
+    "Only ever name a problem find_problems actually returned, and never read an id out to "
+    "them — ids are for tool calls, titles are for people. If it comes back empty, say so "
+    "plainly and offer to make them a new one; never invent a title to fill the gap.\n"
+    "If more than a handful come back and they asked for a plan, say how many you found and "
+    "ask which before building it.\n"
 )
 
-SUGGEST_PRACTICE_TOOL = ToolDeclaration(
-    name="suggest_practice_problem",
+FIND_PROBLEMS_TOOL = ToolDeclaration(
+    name="find_problems",
     description=(
-        "Hand the learner a single practice problem for one skill right now, outside any "
-        "plan — for when they want something to work on immediately rather than a full "
-        "learning plan. Call get_practice_record first if you don't already know their "
-        "skill_ids from this conversation."
+        "Search the problems this learner actually has — solved, failed, flagged, or "
+        "anything in the bank. Call this WHENEVER they refer to a problem they have seen "
+        "before ('that array one', 'the question I flagged', 'what have I solved', 'do I "
+        "have a two sum problem'), and ALWAYS before offering to revise or redo anything. "
+        "It returns titles and ids, never statements. This is the only way to know which "
+        "problems exist — never invent one."
     ),
     parameters_schema={
         "type": "object",
         "properties": {
-            "skill_id": {
+            "query": {
                 "type": "string",
                 "description": (
-                    "The exact skill id (from a prior get_practice_record result or the "
-                    "user's plan) to practice — not the display name."
+                    "What the learner called it, in their words — 'two sum', 'the coin "
+                    "one', 'binary search'. Matched against titles, statements and tags, "
+                    "so a rough or partial description works. Omit to list by scope alone."
+                ),
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["flagged", "solved", "practised", "attempted", "all"],
+                "description": (
+                    "Which problems to look in. 'flagged' = marked to come back to. "
+                    "'solved' = completed. 'practised' = solved or submitted-and-failed, "
+                    "the right scope for revision. 'attempted' = started but not finished. "
+                    "'all' = the whole bank including ones they have never seen. Default "
+                    "to 'all' for 'is there a X problem', and to the specific scope "
+                    "whenever they name one."
+                ),
+            },
+            "skill": {
+                "type": "string",
+                "description": (
+                    "Restrict to one topic by NAME as the user says it ('graphs', 'dynamic "
+                    "programming'). Not an id — this is matched loosely against skill names."
                 ),
             },
             "language": {
                 "type": "string",
-                "enum": [language.value for language in Language],
+                "enum": SUPPORTED_LANGUAGES,
                 "description": (
-                    "Programming language for the problem. Set this ONLY to a language the "
-                    "user actually stated for this request. Omit it otherwise — a configured "
-                    "default or a clarifying question handles the rest."
+                    "Restrict to one programming language, when and only when they name one "
+                    "('the python ones I solved'). Omit otherwise — do NOT fill this in from "
+                    "their default language, or you will hide problems they do have."
                 ),
             },
         },
-        "required": ["skill_id"],
+    },
+)
+
+CREATE_PRACTICE_PLAN_TOOL = ToolDeclaration(
+    name="create_practice_plan",
+    description=(
+        "Build a plan whose steps are specific problems the learner already has — for "
+        "'make me a plan to practise my flagged questions' or 'a plan to redo everything I "
+        "got wrong'. Every step reopens that exact problem, nothing is regenerated. Call "
+        "find_problems first to get the ids. For a plan on a TOPIC rather than on specific "
+        "problems, use generate_learning_plan instead."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "problem_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Ids from a find_problems result, in the order they should be "
+                    "practised. Never invent one."
+                ),
+            },
+            "topic": {
+                "type": "string",
+                "description": "Short name for the plan, e.g. 'Flagged questions'.",
+            },
+        },
+        "required": ["problem_ids"],
+    },
+)
+
+SET_PROBLEM_FLAG_TOOL = ToolDeclaration(
+    name="set_problem_flag",
+    description=(
+        "Flag a problem to come back to, or clear that flag — for 'flag that one', "
+        "'remind me about this', 'unflag the two sum one'. Get the id from find_problems "
+        "first."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "problem_id": {
+                "type": "string",
+                "description": "The exact id from a find_problems result.",
+            },
+            "flagged": {
+                "type": "boolean",
+                "description": "true to flag it, false to clear the flag.",
+            },
+        },
+        "required": ["problem_id", "flagged"],
     },
 )
 
@@ -299,6 +418,60 @@ def mastery_context(candidates: list[RevisionCandidate], limit: int = 8) -> str:
     lines.append(
         "Skills absent from this list have never been practised at all."
     )
+    return "\n".join(lines)
+
+
+def library_context(entries: list, scope: str, stats=None) -> str:
+    """Renders the find_problems tool result for the model.
+
+    One line per problem and never a statement — the model needs to know WHICH problems
+    exist and where the learner stands on each, and a list of full statements would cost
+    more context than the answer is worth. It fetches the detail for the one it picks.
+    """
+    header = f"PROBLEMS FOUND (scope: {scope}) — these are real rows from their bank:"
+    if not entries:
+        return (
+            f"NO PROBLEMS FOUND for scope '{scope}'. Say so plainly. Do NOT invent a title "
+            "or an id, and do not describe a problem they have not actually got."
+        )
+
+    lines = [header]
+    for entry in entries:
+        marks = [entry.status.replace("_", " ").lower() if entry.status else "never opened"]
+        if entry.flagged:
+            marks.append("FLAGGED")
+        lines.append(
+            f"- {entry.title} (id: {entry.problem_id}) — {entry.difficulty}, "
+            f"{entry.language}{f', {entry.skill}' if entry.skill else ''} [{', '.join(marks)}]"
+        )
+    if stats is not None:
+        lines.append(
+            f"Overall: {stats.solved_total} solved all time, {stats.solved_this_week} this "
+            f"week, best streak {stats.best_streak}."
+        )
+    lines.append(
+        "To put one on their plan, call edit_learning_plan with operation 'add_problem' and "
+        "its id exactly as given; to build a new plan out of several, call "
+        "create_practice_plan with their ids. Never invent an id, and never claim a problem "
+        "exists that is not on this list."
+    )
+    return "\n".join(lines)
+
+
+def library_memo(entries: list) -> str:
+    """The same result, stripped to what a LATER turn needs to act.
+
+    Carried on the reply so a follow-up "yes" still has the ids — the answering prose is
+    told to keep ids out of sight, which is exactly why they have to be kept somewhere else.
+    """
+    if not entries:
+        return ""
+    lines = ["Problems last shown to this user (ids for your use only):"]
+    lines += [
+        f"{entry.problem_id} | {entry.title} | {entry.language}"
+        f"{' | FLAGGED' if entry.flagged else ''}"
+        for entry in entries
+    ]
     return "\n".join(lines)
 
 

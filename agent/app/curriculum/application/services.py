@@ -12,7 +12,7 @@ from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.schemas.lesson_notes import GeneratedLessonNotes
 from app.mastery.domain.repository import UserSkillStateRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
-from app.shared.errors import NotFoundError
+from app.shared.errors import ConflictError, NotFoundError
 from app.shared.types import Language
 
 
@@ -43,6 +43,7 @@ class CurriculumService:
         llm_cache: SqliteLLMCache | None = None,
         mastery_repository: UserSkillStateRepository | None = None,
         problem_session_repository: ProblemSessionRepository | None = None,
+        problem_repository=None,
     ) -> None:
         self._repository = repository
         self._llm_provider = llm_provider
@@ -50,6 +51,8 @@ class CurriculumService:
         self._llm_cache = llm_cache
         self._mastery_repository = mastery_repository
         self._problem_session_repository = problem_session_repository
+        # Only needed to build a plan out of problems that already exist.
+        self._problem_repository = problem_repository
 
     async def create_draft(
         self,
@@ -142,6 +145,58 @@ class CurriculumService:
 
         if nodes:
             await self._repository.save_nodes(nodes)
+
+        return await self._repository.get(plan.id) or plan
+
+    async def create_practice_plan(
+        self, session_id: str, problem_ids: list[str], topic: str = "Revision"
+    ) -> LessonPlan:
+        """A plan whose steps ARE these exact problems — for revising work already done.
+
+        No LLM call anywhere: the steps are given, and each node's skill, difficulty and
+        language come off the problem itself. That is also why every step is instant to
+        open — next_problem's problem_id branch skips selection and generation entirely."""
+        if self._problem_repository is None:
+            raise NotFoundError("Practice plans are not available without a problem bank.")
+
+        problems = [
+            problem
+            for problem_id in problem_ids
+            if (problem := await self._problem_repository.get(problem_id)) is not None
+        ]
+        if not problems:
+            raise NotFoundError("None of those problems are in the bank any more.")
+
+        plan = LessonPlan(
+            id=str(uuid.uuid4()),
+            session_id=session_id,
+            topic=topic,
+            # The problems already exist in one language; a plan-level override would be a
+            # lie, since none of them will be regenerated.
+            language=problems[0].language,
+            level="revision",
+            version=1,
+            created_at=datetime.now(timezone.utc),
+        )
+        await self._repository.save(plan)
+
+        now = datetime.now(timezone.utc)
+        nodes = [
+            LessonNode(
+                id=str(uuid.uuid4()),
+                lesson_plan_id=plan.id,
+                # Straight off the problem — ensure_skill takes a NAME and would create a
+                # junk row, and the problem already carries resolved ids.
+                skill_id=problem.skill_ids[0] if problem.skill_ids else await self._skill_repository.ensure_skill(topic),
+                sequence_index=index,
+                status=LessonNodeStatus.LOCKED,
+                difficulty=problem.difficulty,
+                problem_id=problem.id,
+                created_at=now,
+            )
+            for index, problem in enumerate(problems)
+        ]
+        await self._repository.save_nodes(self._ensure_startable(nodes))
 
         return await self._repository.get(plan.id) or plan
 
@@ -258,6 +313,44 @@ class CurriculumService:
         insert_at = len(nodes) if position is None else max(0, min(position - 1, len(nodes)))
         nodes.insert(insert_at, new_node)
         await self._repository.replace_nodes(plan.id, self._ensure_startable(nodes))
+        return await self._repository.get(plan_id) or plan
+
+    async def add_problem_step(self, plan_id: str, problem_id: str) -> LessonPlan:
+        """Appends a step that serves one problem the learner ALREADY has — how an existing
+        question gets somewhere they can work it. Skill and difficulty come off the problem,
+        so nothing is generated and nothing is asked of the LLM."""
+        if self._problem_repository is None:
+            raise NotFoundError("Adding an existing problem needs a problem bank.")
+        plan = await self._require_plan(plan_id)
+        problem = await self._problem_repository.get(problem_id)
+        if problem is None:
+            raise NotFoundError("That problem is no longer in the bank.")
+        if any(node.problem_id == problem_id for node in plan.nodes):
+            raise ConflictError(f"'{problem.title}' is already a step on this plan.")
+
+        new_node = LessonNode(
+            id=str(uuid.uuid4()),
+            lesson_plan_id=plan.id,
+            skill_id=(
+                problem.skill_ids[0]
+                if problem.skill_ids
+                # ensure_skill takes a NAME, so the title is the only sane fallback for a
+                # problem stored without skills.
+                else await self._skill_repository.ensure_skill(problem.title)
+            ),
+            sequence_index=0,  # reindexed below
+            # AVAILABLE, not LOCKED: they asked for THIS problem by name, so gating it
+            # behind whatever else is unfinished would hand them a padlock instead of the
+            # thing they just asked for. It is a problem they already have, so there is no
+            # prerequisite to earn.
+            status=LessonNodeStatus.AVAILABLE,
+            difficulty=problem.difficulty,
+            problem_id=problem.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        await self._repository.replace_nodes(
+            plan.id, self._ensure_startable([*plan.nodes, new_node])
+        )
         return await self._repository.get(plan_id) or plan
 
     async def remove_step(self, plan_id: str, step: str) -> LessonPlan:

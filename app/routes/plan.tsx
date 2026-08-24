@@ -67,11 +67,14 @@ export default function PlanScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  async function startNext() {
+  // nodeId is the step whose Play was pressed. Without it the server serves the first
+  // unfinished step instead, so pressing Play on one row could open a different one.
+  async function startNext(nodeId?: string) {
     setBusy(true);
     setBusyMessage(STAGE_LABELS.selecting);
     try {
-      const response = await apiFetch(`/api/learning-plans/${id}/problems/next`, { method: "POST" });
+      const url = `/api/learning-plans/${id}/problems/next${nodeId ? `?node_id=${nodeId}` : ""}`;
+      const response = await apiFetch(url, { method: "POST" });
       let sessionId: string | null = null;
       await consumeSSE(response, (event) => {
         if (event.type === "stage" && typeof event.stage === "string") {
@@ -161,7 +164,7 @@ export default function PlanScreen() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={startNext}
+                      onClick={() => startNext(node.id)}
                       disabled={busy}
                       aria-label="Start"
                       className="relative z-10 border border-white/10 bg-black flex-none"

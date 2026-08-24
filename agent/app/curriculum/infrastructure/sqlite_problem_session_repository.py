@@ -17,7 +17,13 @@ class SqliteProblemSessionRepository:
                 "(id, lesson_node_id, lesson_plan_id, problem_id, user_id, source_code, "
                 "status, flagged, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                # Every column except the identity ones (id, problem_id, user_id,
+                # created_at) is mutable. lesson_node_id/lesson_plan_id in particular:
+                # attaching a node-less session to a plan step IS an update, and leaving
+                # them out meant the write silently did nothing while reporting success.
                 "ON CONFLICT(id) DO UPDATE SET "
+                "lesson_node_id=excluded.lesson_node_id, "
+                "lesson_plan_id=excluded.lesson_plan_id, "
                 "source_code=excluded.source_code, status=excluded.status, "
                 "flagged=excluded.flagged, updated_at=excluded.updated_at",
                 (

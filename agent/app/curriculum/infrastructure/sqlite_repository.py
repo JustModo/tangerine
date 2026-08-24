@@ -7,12 +7,13 @@ from app.shared.database import connect
 
 _UPSERT_NODE_SQL = (
     "INSERT INTO lesson_nodes "
-    "(id, lesson_plan_id, skill_id, sequence_index, status, difficulty, source_problem_md, created_at) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+    "(id, lesson_plan_id, skill_id, sequence_index, status, difficulty, source_problem_md, "
+    "problem_id, created_at) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
     "ON CONFLICT(id) DO UPDATE SET "
     "skill_id=excluded.skill_id, sequence_index=excluded.sequence_index, "
     "status=excluded.status, difficulty=excluded.difficulty, "
-    "source_problem_md=excluded.source_problem_md"
+    "source_problem_md=excluded.source_problem_md, problem_id=excluded.problem_id"
 )
 
 
@@ -25,6 +26,7 @@ def _node_params(node: LessonNode) -> tuple:
         node.status.value,
         node.difficulty,
         node.source_problem_md,
+        node.problem_id,
         node.created_at.isoformat(),
     )
 
@@ -118,6 +120,7 @@ class SqliteLessonPlanRepository:
                 status=row["status"],
                 difficulty=row["difficulty"],
                 source_problem_md=row["source_problem_md"],
+                problem_id=row["problem_id"],
                 created_at=row["created_at"],
             )
 
@@ -181,6 +184,7 @@ class SqliteLessonPlanRepository:
                     status=n["status"],
                     difficulty=n["difficulty"],
                     source_problem_md=n["source_problem_md"],
+                    problem_id=n["problem_id"],
                     created_at=n["created_at"],
                 )
                 for n in node_rows

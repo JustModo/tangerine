@@ -13,9 +13,11 @@ from app.execution.infrastructure.citron_adapter import CitronAdapter
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
+from app.problems.application.library import ProblemLibraryService
 from app.problems.application.services import ProblemSelectionService
 from app.problems.application.validation import ProblemValidationService
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
+from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.revision.application.services import RevisionService
 from app.sessions.application.services import SessionService
 from app.sessions.domain.models import LearningSession
@@ -33,6 +35,13 @@ def get_service() -> SessionService:
         llm_cache=SqliteLLMCache(),
         mastery_repository=SqliteUserSkillStateRepository(),
         problem_session_repository=SqliteProblemSessionRepository(),
+        problem_repository=SqliteProblemRepository(),
+    )
+    library_service = ProblemLibraryService(
+        SqliteProblemRepository(),
+        SqliteProblemSessionRepository(),
+        SqliteSkillRepository(),
+        mastery_repository=SqliteUserSkillStateRepository(),
     )
     problem_session_service = ProblemSessionService(
         SqliteLessonPlanRepository(),
@@ -49,6 +58,7 @@ def get_service() -> SessionService:
         curriculum_service,
         RevisionService(SqliteUserSkillStateRepository()),
         problem_session_service,
+        library_service,
     )
 
 

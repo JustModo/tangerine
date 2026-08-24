@@ -21,6 +21,9 @@ class ChatMessage(BaseModel):
     session_id: str
     role: ChatRole
     content: str
+    # Hidden context the model carries forward but the user never sees — chiefly the ids a
+    # lookup tool returned, so a follow-up "yes" can act on them instead of re-deriving
+    # them. Never rendered by the UI.
     intent: str | None = None
     created_at: datetime
 

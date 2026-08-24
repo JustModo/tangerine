@@ -94,11 +94,15 @@ async def get_plan(
     return plan
 
 
-async def _next_problem_events(service: ProblemSessionService, plan_id: str):
+async def _next_problem_events(
+    service: ProblemSessionService, plan_id: str, node_id: str | None
+):
     """Streams what preparing this problem is really doing, then the session it produced."""
     try:
         async for event in stage_stream(
-            lambda report: service.next_problem(plan_id, LOCAL_USER_ID, on_stage=report),
+            lambda report: service.next_problem(
+                plan_id, LOCAL_USER_ID, on_stage=report, node_id=node_id
+            ),
             lambda session: {"type": "session", **session.model_dump(mode="json")},
         ):
             yield event
@@ -109,10 +113,13 @@ async def _next_problem_events(service: ProblemSessionService, plan_id: str):
 
 @router.post("/{plan_id}/problems/next")
 async def next_problem(
-    plan_id: str, service: ProblemSessionService = Depends(get_problem_session_service)
+    plan_id: str,
+    # Which step was pressed. Omitted means "continue" — the first unfinished one.
+    node_id: str | None = None,
+    service: ProblemSessionService = Depends(get_problem_session_service),
 ) -> StreamingResponse:
     stream = sse_stream(
-        _next_problem_events(service, plan_id),
+        _next_problem_events(service, plan_id, node_id),
         context=f"next problem plan={plan_id}",
         error_message="Couldn't prepare a problem for this step. Try again in a moment.",
     )

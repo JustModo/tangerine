@@ -7,12 +7,16 @@ from app.curriculum.application.services import CurriculumService
 from app.llm.domain.provider import LLMProvider
 from app.llm.domain.requests import ChatStreamRequest, ChatTurn
 from app.llm.prompts.chat import (
+    CREATE_PRACTICE_PLAN_TOOL,
     EDIT_PLAN_TOOL,
+    FIND_PROBLEMS_TOOL,
     GENERATE_PLAN_TOOL,
     PRACTICE_RECORD_TOOL,
-    SUGGEST_PRACTICE_TOOL,
+    SET_PROBLEM_FLAG_TOOL,
     SUPPORTED_LANGUAGES,
     chat_system_prompt,
+    library_context,
+    library_memo,
     mastery_context,
 )
 from app.revision.application.services import RevisionService
@@ -30,6 +34,11 @@ logger = logging.getLogger(__name__)
 # what the model actually needs — this is a chat about what to learn next, not a document.
 MAX_HISTORY_TURNS = 20
 
+# Tool calls one user message may trigger. Two covers the real compound asks — look
+# something up then act on it, clear the plan then add to it — while still guaranteeing the
+# turn ends in prose rather than looping tools at the model's discretion.
+MAX_TOOL_CHAIN = 2
+
 
 class SessionService:
     """Session/chat persistence. Chat is not the memory system — but a
@@ -44,12 +53,15 @@ class SessionService:
         curriculum_service: CurriculumService | None = None,
         revision_service: RevisionService | None = None,
         problem_session_service=None,
+        library_service=None,
     ) -> None:
         self._repository = repository
         self._llm_provider = llm_provider
         self._curriculum_service = curriculum_service
         self._revision_service = revision_service
         self._problem_session_service = problem_session_service
+        # Lets the agent see the problems this learner already has, instead of only skills.
+        self._library_service = library_service
 
     async def create_session(self, user_id: str) -> LearningSession:
         now = datetime.now(timezone.utc)
@@ -81,8 +93,19 @@ class SessionService:
         (persisted as a real ChatRole.SYSTEM message, not just a UI-only event),
         {"type": "done", "message_id", "content"} once the final assistant reply lands."""
         existing = await self._repository.get(session_id)
+        # A reply's `intent` carries what its tool returned — the ids, above all. Without it
+        # the model reaches a follow-up "yes" holding titles and nothing to act on, so it
+        # re-searches or guesses; that single gap is what made "yes" loop.
         history = [
-            ChatTurn(role="user" if m.role == ChatRole.USER else "assistant", content=m.content)
+            ChatTurn(
+                role="user" if m.role == ChatRole.USER else "assistant",
+                content=(
+                    f"{m.content}\n\n[tool context — yours to act on, never repeat to the "
+                    f"user]\n{m.intent}"
+                    if m.intent
+                    else m.content
+                ),
+            )
             for m in (existing.messages if existing else [])
             if m.role in (ChatRole.USER, ChatRole.ASSISTANT)
         ][-MAX_HISTORY_TURNS:]
@@ -121,52 +144,27 @@ class SessionService:
         message: str,
         existing_plan: bool,
         user_id: str | None,
+        depth: int = 0,
     ) -> AsyncIterator[dict]:
-        # edit_learning_plan is only offered once a plan exists — there's nothing to edit
-        # otherwise, and omitting it keeps the model from reaching for it prematurely.
-        tools = (
-            [GENERATE_PLAN_TOOL]
-            + ([EDIT_PLAN_TOOL] if existing_plan else [])
-            # Only offered when there's a record to look up. Fetching it on every turn would
-            # be a wasted query on the many turns that never mention progress.
-            + ([PRACTICE_RECORD_TOOL] if self._revision_service is not None and user_id else [])
-            + ([SUGGEST_PRACTICE_TOOL] if self._problem_session_service is not None and user_id else [])
-        )
         request = ChatStreamRequest(
             system_prompt=chat_system_prompt(existing_plan, (await get_preferences())["default_language"]),
             history=history,
             message=message,
-            tools=tools,
+            tools=self._tools_for(existing_plan, user_id),
         )
         text_parts: list[str] = []
         async for chunk in self._llm_provider.stream_chat(request):
             if chunk.text_delta:
                 text_parts.append(chunk.text_delta)
                 yield {"type": "text_delta", "delta": chunk.text_delta}
-            if chunk.tool_call is not None and chunk.tool_call.name == "generate_learning_plan":
-                async for event in self._handle_generate_plan(
-                    session_id, chunk.tool_call.args, history, message, existing_plan, user_id
-                ):
-                    yield event
-                return
-            if chunk.tool_call is not None and chunk.tool_call.name == "edit_learning_plan":
-                async for event in self._handle_edit_plan(
-                    session_id, chunk.tool_call.args, history, message
-                ):
-                    yield event
-                return
-            if chunk.tool_call is not None and chunk.tool_call.name == "get_practice_record":
-                async for event in self._handle_practice_record(
-                    session_id, user_id, history, message, existing_plan
-                ):
-                    yield event
-                return
-            if chunk.tool_call is not None and chunk.tool_call.name == "suggest_practice_problem":
-                async for event in self._handle_suggest_practice(
-                    session_id, chunk.tool_call.args, history, message, existing_plan, user_id
-                ):
-                    yield event
-                return
+            if chunk.tool_call is not None:
+                handler = self._handler_for(
+                    chunk.tool_call, session_id, history, message, existing_plan, user_id, depth
+                )
+                if handler is not None:
+                    async for event in handler:
+                        yield event
+                    return
             if chunk.done:
                 break
 
@@ -179,11 +177,74 @@ class SessionService:
         reply = await self._persist_assistant_reply(session_id, reply_text)
         yield {"type": "done", "message_id": reply.id, "content": reply_text}
 
+    def _tools_for(self, existing_plan: bool, user_id: str | None) -> list:
+        # edit_learning_plan is only offered once a plan exists — there's nothing to edit
+        # otherwise, and omitting it keeps the model from reaching for it prematurely.
+        return (
+            [GENERATE_PLAN_TOOL]
+            + ([EDIT_PLAN_TOOL] if existing_plan else [])
+            # Only offered when there's a record to look up. Fetching it on every turn would
+            # be a wasted query on the many turns that never mention progress.
+            + ([PRACTICE_RECORD_TOOL] if self._revision_service is not None and user_id else [])
+            # The problem bank. Without these the model can only ever make something new —
+            # it cannot see or name a problem the learner already has.
+            + (
+                [FIND_PROBLEMS_TOOL, SET_PROBLEM_FLAG_TOOL]
+                if self._library_service is not None
+                and self._problem_session_service is not None
+                and user_id
+                else []
+            )
+            + (
+                [CREATE_PRACTICE_PLAN_TOOL]
+                if self._library_service is not None and self._curriculum_service is not None and user_id
+                else []
+            )
+        )
+
+    def _handler_for(
+        self,
+        tool_call,
+        session_id: str,
+        history: list[ChatTurn],
+        message: str,
+        existing_plan: bool,
+        user_id: str | None,
+        depth: int,
+    ) -> AsyncIterator[dict] | None:
+        """Routes one tool call to its handler, or None when the name matches nothing.
+
+        Shared by the first call of a turn and by any chained call after it, so a follow-up
+        tool call behaves exactly like an opening one — that symmetry is the point."""
+        args = tool_call.args
+        if tool_call.name == "generate_learning_plan":
+            return self._handle_generate_plan(
+                session_id, args, history, message, existing_plan, user_id, depth
+            )
+        if tool_call.name == "edit_learning_plan":
+            return self._handle_edit_plan(session_id, args, history, message, depth)
+        if tool_call.name == "get_practice_record":
+            return self._handle_practice_record(
+                session_id, user_id, history, message, existing_plan, depth
+            )
+        if tool_call.name == "find_problems":
+            return self._handle_find_problems(
+                session_id, args, history, message, existing_plan, user_id, depth
+            )
+        if tool_call.name == "create_practice_plan":
+            return self._handle_create_practice_plan(
+                session_id, args, history, message, existing_plan, depth
+            )
+        if tool_call.name == "set_problem_flag":
+            return self._handle_set_problem_flag(
+                session_id, args, history, message, existing_plan, user_id, depth
+            )
+        return None
+
     async def _resolve_language(self, requested_language: str) -> Language | None:
         """Explicit user language always wins. Absent that, the configured default fills in
         — unless it's "ask" (or unset), which behaves exactly as if nothing were configured
-        and a clarifying question is needed. Shared by generate_learning_plan and
-        suggest_practice_problem so the two tools can never disagree on this."""
+        and a clarifying question is needed."""
         if requested_language:
             try:
                 return Language(requested_language)
@@ -200,6 +261,7 @@ class SessionService:
         user_message: str,
         existing_plan: bool,
         user_id: str | None,
+        depth: int = 0,
     ) -> AsyncIterator[dict]:
         # Enforced here, not just in the prompt: a plan in a language the learner never
         # chose — or one the sandbox cannot run — is worse than no plan, and
@@ -229,6 +291,7 @@ class SessionService:
             async for event in self._stream_tool_followup(
                 session_id, history, user_message, existing_plan,
                 "generate_learning_plan", summary, fallback, None,
+                depth=depth,
             ):
                 yield event
             return
@@ -294,90 +357,7 @@ class SessionService:
             result_summary,
             fallback,
             plan.id if plan is not None else None,
-        ):
-            yield event
-
-    async def _handle_suggest_practice(
-        self,
-        session_id: str,
-        args: dict,
-        history: list[ChatTurn],
-        user_message: str,
-        existing_plan: bool,
-        user_id: str | None,
-    ) -> AsyncIterator[dict]:
-        """Hands back one practice problem for a skill, right now, outside any plan — the
-        chat-driven replacement for the old one-click "Due today" button, which always
-        defaulted to Python regardless of what the learner actually wanted."""
-        skill_id = args.get("skill_id") or ""
-        requested_language = (args.get("language") or "").strip().lower()
-        language = await self._resolve_language(requested_language)
-        if language is None:
-            supported = ", ".join(SUPPORTED_LANGUAGES)
-            if requested_language:
-                summary = (
-                    f"NOT RUN — '{requested_language}' is not a supported language. No "
-                    f"problem was started. Tell the user it isn't supported yet, that the "
-                    f"supported languages are {supported}, and ask them to pick one."
-                )
-                fallback = (
-                    f"'{requested_language}' isn't supported yet — I can do {supported}. "
-                    "Which would you like?"
-                )
-            else:
-                summary = (
-                    "NOT RUN — the user has not said which programming language they want "
-                    f"and none is configured as a default. No problem was started. Ask them "
-                    f"which of {supported} they want, in one short question."
-                )
-                fallback = f"Which language would you like to practise in? I support {supported}."
-            async for event in self._stream_tool_followup(
-                session_id, history, user_message, existing_plan,
-                "suggest_practice_problem", summary, fallback, None,
-            ):
-                yield event
-            return
-
-        label = "Finding a problem..."
-        system_note = ChatMessage(
-            id=str(uuid.uuid4()),
-            session_id=session_id,
-            role=ChatRole.SYSTEM,
-            content=label,
-            created_at=datetime.now(timezone.utc),
-        )
-        await self._repository.add_message(system_note)
-        yield {"type": "tool_start", "label": label, "message_id": system_note.id}
-
-        problem_session = None
-        if self._problem_session_service is not None and user_id:
-            try:
-                problem_session = await self._problem_session_service.practice_problem(
-                    user_id, skill_id, language
-                )
-            except Exception:
-                logger.warning("Practice suggestion failed for session %s", session_id, exc_info=True)
-
-        if problem_session is not None:
-            result_summary = "Found a practice problem and started a session for it."
-            fallback = "Found you something to practice — open it from your Progress page."
-        else:
-            result_summary = (
-                "Practice suggestion failed — tell the user something went wrong and they "
-                "can try again."
-            )
-            fallback = "Something went wrong finding a problem — want me to try again?"
-
-        async for event in self._stream_tool_followup(
-            session_id,
-            history,
-            user_message,
-            existing_plan,
-            "suggest_practice_problem",
-            result_summary,
-            fallback,
-            None,
-            problem_session_id=problem_session.id if problem_session is not None else None,
+            depth=depth,
         ):
             yield event
 
@@ -392,6 +372,7 @@ class SessionService:
         args: dict,
         history: list[ChatTurn],
         user_message: str,
+        depth: int = 0,
     ) -> AsyncIterator[dict]:
         """Single entry point for every kind of plan edit — the operation named in `args`
         picks a deterministic, targeted CurriculumService method (no LLM call, no other
@@ -415,6 +396,7 @@ class SessionService:
                 "something went wrong and they can try again.",
                 "I couldn't find a plan to edit — want to try again?",
                 None,
+                depth=depth,
             ):
                 yield event
             return
@@ -432,6 +414,7 @@ class SessionService:
                     f"are {supported} and ask them to pick one.",
                     f"I can do {supported} — which would you like?",
                     None,
+                    depth=depth,
                 ):
                     yield event
                 return
@@ -450,6 +433,7 @@ class SessionService:
                     "NOT RUN — missing which step or what difficulty to set. Ask the user "
                     "which step and how much harder/easier.",
                     "Which step, and how much harder or easier?", None,
+                    depth=depth,
                 ):
                     yield event
                 return
@@ -464,6 +448,7 @@ class SessionService:
                     "NOT RUN — no skill/topic given for the new step. Ask the user what it "
                     "should cover.",
                     "What should the new step cover?", None,
+                    depth=depth,
                 ):
                     yield event
                 return
@@ -472,6 +457,25 @@ class SessionService:
             label = f"Adding a step on {skill}..."
             action = lambda: self._curriculum_service.add_step(plan_id, skill, difficulty, position)
             done_text = lambda plan: f"Added the new step. {self._plan_step_summary(plan)}"
+        elif operation == "add_problem":
+            problem_id = str(args.get("problem_id") or "").strip()
+            if not problem_id:
+                async for event in self._stream_tool_followup(
+                    session_id, history, user_message, True, "edit_learning_plan",
+                    "NOT RUN — no problem id given. Call find_problems to get one, then try "
+                    "again. Do not invent an id.",
+                    "Which problem did you want me to add?", None,
+                    depth=depth,
+                ):
+                    yield event
+                return
+            label = "Adding that problem to your plan..."
+            action = lambda: self._curriculum_service.add_problem_step(plan_id, problem_id)
+            done_text = lambda plan: (
+                "Added it to their plan as a new step — it opens that exact problem, nothing "
+                f"regenerated. Tell them it's on their plan and ready to start. "
+                f"{self._plan_step_summary(plan)}"
+            )
         elif operation == "remove_step":
             step = str(args.get("step") or "").strip()
             if not step:
@@ -479,6 +483,7 @@ class SessionService:
                     session_id, history, user_message, True, "edit_learning_plan",
                     "NOT RUN — no step named to remove. Ask the user which one.",
                     "Which step should I remove?", None,
+                    depth=depth,
                 ):
                     yield event
                 return
@@ -493,6 +498,7 @@ class SessionService:
                     session_id, history, user_message, True, "edit_learning_plan",
                     "NOT RUN — missing which step or where to move it. Ask the user for both.",
                     "Which step, and where should it move to?", None,
+                    depth=depth,
                 ):
                     yield event
                 return
@@ -546,6 +552,7 @@ class SessionService:
             result_summary,
             fallback,
             plan.id if plan is not None else None,
+            depth=depth,
         ):
             yield event
 
@@ -556,6 +563,7 @@ class SessionService:
         history: list[ChatTurn],
         user_message: str,
         existing_plan: bool,
+        depth: int = 0,
     ) -> AsyncIterator[dict]:
         """Read-only lookup — nothing is persisted and no tool_start note is shown, because
         from the user's side this is the assistant answering, not doing."""
@@ -566,13 +574,27 @@ class SessionService:
             except Exception:
                 logger.warning("Failed to load the practice record for %s", user_id, exc_info=True)
 
+        # How much work they've actually done. Same question the model calls this tool for,
+        # so it rides along rather than costing a second round trip.
+        record = mastery_context(candidates)
+        if self._library_service is not None and user_id:
+            try:
+                stats = await self._library_service.stats(user_id)
+                record += (
+                    f"\n- Totals: {stats.solved_total} problems solved all time, "
+                    f"{stats.solved_this_week} in the last 7 days, best streak "
+                    f"{stats.best_streak}."
+                )
+            except Exception:
+                logger.warning("Failed to load totals for %s", user_id, exc_info=True)
+
         async for event in self._stream_tool_followup(
             session_id,
             history,
             user_message,
             existing_plan,
             "get_practice_record",
-            mastery_context(candidates),
+            record,
             (
                 "Here's where you're at — want me to build a plan around one of these?"
                 if candidates
@@ -586,6 +608,169 @@ class SessionService:
                 "names exactly as given and do not invent any. Do not read the scores out as "
                 "numbers."
             ),
+            depth=depth,
+        ):
+            yield event
+
+    async def _handle_find_problems(
+        self,
+        session_id: str,
+        args: dict,
+        history: list[ChatTurn],
+        user_message: str,
+        existing_plan: bool,
+        user_id: str | None,
+        depth: int = 0,
+    ) -> AsyncIterator[dict]:
+        """Read-only lookup over the learner's own problems — same shape as
+        _handle_practice_record: nothing persisted, no tool_start note, because from their
+        side this is the assistant answering rather than doing."""
+        scope = (args.get("scope") or "all").strip().lower()
+        entries, stats = [], None
+        if self._library_service is not None and user_id:
+            try:
+                entries = await self._library_service.find(
+                    user_id,
+                    query=(args.get("query") or "").strip() or None,
+                    scope=scope,
+                    skill=(args.get("skill") or "").strip() or None,
+                    language=(args.get("language") or "").strip().lower() or None,
+                )
+                stats = await self._library_service.stats(user_id)
+            except Exception:
+                logger.warning("Problem lookup failed for %s", user_id, exc_info=True)
+
+        async for event in self._stream_tool_followup(
+            session_id,
+            history,
+            user_message,
+            existing_plan,
+            "find_problems",
+            library_context(entries, scope, stats),
+            (
+                "Here's what I found — want me to put one on your plan?"
+                if entries
+                else "I couldn't find anything matching that. Want me to make you a new one?"
+            ),
+            None,
+            instruction=(
+                "Answer their question from this list. Name problems by TITLE and never "
+                "read an id out loud. Do not mention any problem that is not on the list, "
+                "and do not invent one. If they want to work on one, offer to add it to "
+                "their plan — this chat builds plans, it does not open problems."
+            ),
+            # THE fix for a follow-up "yes": the prose above is told to keep ids quiet, so
+            # without this the next turn has titles and nothing to act on.
+            memo=library_memo(entries),
+            depth=depth,
+        ):
+            yield event
+
+    async def _handle_create_practice_plan(
+        self,
+        session_id: str,
+        args: dict,
+        history: list[ChatTurn],
+        user_message: str,
+        existing_plan: bool,
+        depth: int = 0,
+    ) -> AsyncIterator[dict]:
+        """A plan whose steps are problems the learner already has. Costs no LLM call and
+        no sandbox run — every step reopens its bound problem directly."""
+        problem_ids = [str(value) for value in (args.get("problem_ids") or []) if value]
+        topic = (args.get("topic") or "Revision").strip() or "Revision"
+
+        if not problem_ids:
+            async for event in self._stream_tool_followup(
+                session_id, history, user_message, existing_plan,
+                "create_practice_plan",
+                "NOT RUN — no problems were given, so no plan was built. Ask which "
+                "problems they want in it.",
+                "Which problems should I put in it?",
+                None,
+                depth=depth,
+            ):
+                yield event
+            return
+
+        label = f"Building a plan from {len(problem_ids)} problem(s)..."
+        system_note = ChatMessage(
+            id=str(uuid.uuid4()),
+            session_id=session_id,
+            role=ChatRole.SYSTEM,
+            content=label,
+            created_at=datetime.now(timezone.utc),
+        )
+        await self._repository.add_message(system_note)
+        yield {"type": "tool_start", "label": label, "message_id": system_note.id}
+
+        plan = None
+        try:
+            plan = await self._curriculum_service.create_practice_plan(
+                session_id, problem_ids, topic
+            )
+        except NotFoundError as exc:
+            summary = f"NOT RUN — {exc} Tell the user and offer to find the problems again."
+            fallback = "I couldn't build that plan — want me to look up those problems again?"
+        except Exception:
+            logger.warning("Practice plan failed for session %s", session_id, exc_info=True)
+            summary = "Plan build failed — tell the user something went wrong."
+            fallback = "Something went wrong building that plan — want me to try again?"
+
+        if plan is not None:
+            summary = (
+                f"Built a {len(plan.nodes)}-step plan out of problems they already have. "
+                "Each step reopens that exact problem. " + self._plan_step_summary(plan)
+            )
+            fallback = f"Built you a {len(plan.nodes)}-step plan from those problems."
+
+        async for event in self._stream_tool_followup(
+            session_id,
+            history,
+            user_message,
+            existing_plan,
+            "create_practice_plan",
+            summary,
+            fallback,
+            plan.id if plan is not None else None,
+            depth=depth,
+        ):
+            yield event
+
+    async def _handle_set_problem_flag(
+        self,
+        session_id: str,
+        args: dict,
+        history: list[ChatTurn],
+        user_message: str,
+        existing_plan: bool,
+        user_id: str | None,
+        depth: int = 0,
+    ) -> AsyncIterator[dict]:
+        problem_id = (args.get("problem_id") or "").strip()
+        flagged = bool(args.get("flagged"))
+        ok = False
+        if self._problem_session_service is not None and user_id and problem_id:
+            try:
+                await self._problem_session_service.set_flagged_for_problem(
+                    user_id, problem_id, flagged
+                )
+                ok = True
+            except Exception:
+                logger.warning("Could not flag problem %s", problem_id, exc_info=True)
+
+        verb = "Flagged" if flagged else "Unflagged"
+        summary = (
+            f"{verb} that problem."
+            if ok
+            else "NOT RUN — the flag could not be changed. Tell the user plainly."
+        )
+        async for event in self._stream_tool_followup(
+            session_id, history, user_message, existing_plan,
+            "set_problem_flag", summary,
+            f"{verb} it for you." if ok else "I couldn't change that flag — want me to try again?",
+            None,
+            depth=depth,
         ):
             yield event
 
@@ -602,19 +787,51 @@ class SessionService:
         instruction: str = (
             "Reply to the user in one or two plain sentences telling them what changed."
         ),
-        problem_session_id: str | None = None,
+        memo: str | None = None,
+        depth: int = 0,
     ) -> AsyncIterator[dict]:
         """Feeds a tool's result back to the model for a natural closing line, streamed like
-        any other reply, then persists it. Shared by every tool."""
+        any other reply, then persists it. Shared by every tool.
+
+        memo rides along on the persisted reply so the NEXT turn still has what this tool
+        returned — the ids especially, which the closing prose is told to keep quiet about.
+
+        One request often needs two tools ("remove everything and add that one"; a lookup
+        followed by acting on what it found). Below MAX_TOOL_CHAIN the model may therefore
+        call another tool here rather than only speak — without that it emits a tool call
+        the guard has to blank, and the user gets a canned fallback instead of the thing
+        they asked for."""
+        may_chain = depth + 1 < MAX_TOOL_CHAIN
+        chained_context = f"{user_message}\n\n[{tool_name} tool result]\n{result_summary}"
+        chain_user_id, chain_plan = None, existing_plan
+        if may_chain:
+            session = await self._repository.get(session_id)
+            chain_user_id = session.user_id if session is not None else None
+            # A tool may have just created the plan the next one needs to edit.
+            if not chain_plan and self._curriculum_service is not None:
+                try:
+                    chain_plan = bool(
+                        await self._curriculum_service.list_for_session(session_id)
+                    )
+                except Exception:
+                    logger.warning("Plan re-check failed for %s", session_id, exc_info=True)
+
         follow_up_request = ChatStreamRequest(
             system_prompt=chat_system_prompt(existing_plan, (await get_preferences())["default_language"]),
             history=history + [ChatTurn(role="user", content=user_message)],
             message=(
                 f"[{tool_name} tool result] {result_summary}\n\n"
-                f"The tool has ALREADY run and this is its result. {instruction} Do not call "
-                "any tool, and never output JSON, a function call, or code — only prose."
+                f"The tool has ALREADY run and this is its result. {instruction} "
+                + (
+                    "If the user asked for something this result has not finished — another "
+                    "step of the same request — call the tool that finishes it now. "
+                    "Otherwise reply in prose and call nothing."
+                    if may_chain
+                    else "Do not call any tool, and never output JSON, a function call, or "
+                    "code — only prose."
+                )
             ),
-            tools=[],
+            tools=self._tools_for(chain_plan, chain_user_id) if may_chain else [],
         )
         # The model sometimes answers a tool result by echoing another tool call as raw
         # JSON. Nothing is streamed until the text is known not to be one, so a blob can
@@ -631,27 +848,42 @@ class SessionService:
                 if not looks_like_tool_call and len(full) > streamed:
                     yield {"type": "text_delta", "delta": full[streamed:]}
                     streamed = len(full)
+            if chunk.tool_call is not None and may_chain:
+                chained = self._handler_for(
+                    chunk.tool_call, session_id, history, chained_context,
+                    chain_plan, chain_user_id, depth + 1,
+                )
+                if chained is not None:
+                    # ponytail: this call's memo is dropped — the chained handler persists
+                    # the only reply, and threading a memo through every handler to save it
+                    # isn't worth it. A chain has already DONE the thing, so there is no
+                    # pending offer whose ids the next turn needs.
+                    async for event in chained:
+                        yield event
+                    return
             if chunk.done:
                 break
 
         reply_text = "" if looks_like_tool_call else "".join(text_parts).strip()
         if not reply_text:
             reply_text = fallback_text
-        reply = await self._persist_assistant_reply(session_id, reply_text)
+        reply = await self._persist_assistant_reply(session_id, reply_text, memo)
         yield {
             "type": "done",
             "message_id": reply.id,
             "content": reply_text,
             "plan_id": plan_id,
-            "problem_session_id": problem_session_id,
         }
 
-    async def _persist_assistant_reply(self, session_id: str, content: str) -> ChatMessage:
+    async def _persist_assistant_reply(
+        self, session_id: str, content: str, memo: str | None = None
+    ) -> ChatMessage:
         reply = ChatMessage(
             id=str(uuid.uuid4()),
             session_id=session_id,
             role=ChatRole.ASSISTANT,
             content=content,
+            intent=memo,
             created_at=datetime.now(timezone.utc),
         )
         await self._repository.add_message(reply)

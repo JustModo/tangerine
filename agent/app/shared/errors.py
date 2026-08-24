@@ -16,6 +16,12 @@ class NotFoundError(AgentError):
     """Raised when a requested entity does not exist."""
 
 
+class ConflictError(AgentError):
+    """Raised when a request is valid but clashes with the current state — adding a step
+    that is already on the plan, say. Distinct from NotFoundError so "you already have
+    this" doesn't reach the client dressed as "this doesn't exist"."""
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Every error leaves this app as {"error": "<human-readable sentence>"}.
 
@@ -26,6 +32,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(NotFoundError)
     async def _not_found(_request: Request, exc: NotFoundError) -> JSONResponse:
         return JSONResponse(status_code=404, content={"error": str(exc)})
+
+    @app.exception_handler(ConflictError)
+    async def _conflict(_request: Request, exc: ConflictError) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"error": str(exc)})
 
     @app.exception_handler(AgentError)
     async def _agent_error(_request: Request, exc: AgentError) -> JSONResponse:

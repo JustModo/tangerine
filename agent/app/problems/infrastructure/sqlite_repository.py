@@ -1,4 +1,3 @@
-import difflib
 import json
 
 import aiosqlite
@@ -13,6 +12,7 @@ from app.problems.domain.models import (
 )
 from app.shared.config import get_settings
 from app.shared.database import connect
+from app.shared.fuzzy import match_score
 from app.shared.types import Language
 
 
@@ -91,20 +91,10 @@ class SqliteProblemRepository:
             needle = query.lower().strip()
 
             def score(row: aiosqlite.Row) -> float:
-                # Longest common contiguous substring, normalised by query length — tolerant
-                # of a typo'd or partial query without penalising a short query against a
-                # long description the way SequenceMatcher.ratio() would.
                 haystack = " ".join(
                     [row["title"], row["description"] or "", row["language"], row["tags_json"] or ""]
-                ).lower()
-                # autojunk=False: the default heuristic marks characters "popular" (and
-                # ignores them) once the haystack passes ~200 chars, which a real problem
-                # statement always does — left on, it can silently zero out an otherwise
-                # exact substring match (verified: "hash" against a >200-char haystack
-                # containing "hash-table" returns a length-0 match with it left on).
-                matcher = difflib.SequenceMatcher(None, needle, haystack, autojunk=False)
-                match = matcher.find_longest_match(0, len(needle), 0, len(haystack))
-                return match.size / max(len(needle), 1)
+                )
+                return match_score(needle, haystack)
 
             ranked = sorted(((row, score(row)) for row in rows), key=lambda pair: pair[1], reverse=True)
             threshold = 0.5
@@ -162,7 +152,25 @@ class SqliteProblemRepository:
             return [row[0] for row in await cursor.fetchall()]
 
     async def save(self, problem: Problem) -> None:
+        """Upserts. The ON CONFLICT list below is the whitelist of MUTABLE fields —
+        conceptual_id, created_at and language are set once and never rewritten."""
         async with connect(self._database_path) as db:
+            # language is immutable because the stored versions' code, tests and expected
+            # output hashes are all in that language; changing it would leave the row
+            # describing something the code isn't. Checked rather than silently dropped by
+            # the ON CONFLICT list — a save that quietly doesn't save is far worse than one
+            # that says no.
+            cursor = await db.execute(
+                "SELECT language FROM problems WHERE id = ?", (problem.id,)
+            )
+            row = await cursor.fetchone()
+            if row is not None and row[0] != problem.language.value:
+                raise ValueError(
+                    f"Problem {problem.id} is stored as {row[0]}; a problem's language "
+                    f"cannot be changed to {problem.language.value}. Generate a new problem "
+                    "for the other language instead."
+                )
+
             await db.execute(
                 "INSERT INTO problems (id, conceptual_id, title, language, difficulty, status, tags_json, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "

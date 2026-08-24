@@ -21,6 +21,13 @@ class SqliteSkillRepository:
             await db.commit()
             return skill_id
 
+    async def list_all(self) -> list[tuple[str, str]]:
+        """Every (id, name), for resolving a skill the user named in prose — the chat agent
+        knows "graphs", not a UUID."""
+        async with connect(self._database_path) as db:
+            cursor = await db.execute("SELECT id, name FROM skills")
+            return [(row[0], row[1]) for row in await cursor.fetchall()]
+
     async def get_name(self, skill_id: str) -> str | None:
         async with connect(self._database_path) as db:
             cursor = await db.execute("SELECT name FROM skills WHERE id = ?", (skill_id,))

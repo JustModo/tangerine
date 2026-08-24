@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { MetaFunction } from "react-router";
 import { useNavigate, useParams } from "react-router";
-import { ListTree, Loader2, Play, Trash2 } from "lucide-react";
+import { ListTree, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/Markdown";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -43,7 +43,6 @@ export default function SessionChat() {
   const [sending, setSending] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [toolLabel, setToolLabel] = useState<string | null>(null);
-  const [practiceSessionId, setPracticeSessionId] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -113,9 +112,6 @@ export default function SessionChat() {
           setToolLabel((event.label as string) || "Working...");
         } else if (event.type === "done") {
           pending.push(loadSession(), loadPlans());
-          if (event.problem_session_id) {
-            setPracticeSessionId(event.problem_session_id as string);
-          }
         }
       });
       await Promise.all(pending);
@@ -160,16 +156,6 @@ export default function SessionChat() {
                 onClick={() => navigate(`/plans/${activePlan.id}`)}
               >
                 <ListTree className="w-4 h-4 mr-2" /> VIEW PLAN
-              </Button>
-            )}
-            {practiceSessionId && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-zinc-400 hover:text-white"
-                onClick={() => navigate(`/problem-sessions/${practiceSessionId}`)}
-              >
-                <Play className="w-4 h-4 mr-2" /> START PRACTICING
               </Button>
             )}
             <Button
