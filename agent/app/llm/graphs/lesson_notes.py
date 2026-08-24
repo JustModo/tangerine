@@ -55,16 +55,19 @@ async def generate_lesson_notes(
     language: str,
     level: str,
     cache: SqliteLLMCache | None = None,
+    refresh: bool = False,
 ) -> GeneratedLessonNotes:
-    # The same (skill, language, level) always warrants the same cheat sheet, so this is
-    # cached once and shared across every plan, session, and user — the whole reason notes
-    # stay token-cheap. The version segment is the only invalidation lever the cache has.
+    # The same (skill, language, level) always warrants the same lesson, so this is cached
+    # once and shared across every plan, session, and user — the whole reason lessons stay
+    # token-cheap. The version segment is the only invalidation lever the cache has.
     key = (
         cache_key("lesson_notes", LESSON_NOTES_VERSION, skill, language, level)
         if cache is not None
         else None
     )
-    if cache is not None and key is not None:
+    # refresh skips the READ, not the write: a regenerate replaces the cached entry rather
+    # than bypassing it forever.
+    if cache is not None and key is not None and not refresh:
         cached = await cache.get(key)
         if cached is not None:
             return GeneratedLessonNotes.model_validate_json(cached)

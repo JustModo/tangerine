@@ -731,6 +731,40 @@ async def test_lesson_notes_use_the_plans_language_and_level_and_cache(db_path: 
     assert first == second
 
 
+async def test_lesson_notes_refresh_bypasses_the_cache_read_but_still_writes(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    sessions = SessionService(SqliteSessionRepository(db_path))
+    session = await sessions.create_session(user.id)
+    generated = GeneratedCurriculum(
+        nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)],
+    )
+    original = GeneratedLessonNotes(
+        steps=[LessonNoteStep(title="First lesson", body_md="Keep a running total.")]
+    )
+    rewritten = GeneratedLessonNotes(
+        steps=[LessonNoteStep(title="Second lesson", body_md="Precompute the prefixes.")]
+    )
+    # Exactly two lesson responses queued: a third generation would raise AssertionError,
+    # so the final call below proves the refresh result was written back to the cache.
+    llm = FakeLLMProvider(structured_responses=[generated, original, rewritten])
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path),
+        llm,
+        skill_repository=SqliteSkillRepository(db_path),
+        llm_cache=SqliteLLMCache(db_path),
+    )
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+    node_id = plan.nodes[0].id
+
+    assert (await curriculum.get_node_notes(node_id)).steps[0].title == "First lesson"
+    # refresh skips the cached entry and generates again...
+    assert (
+        await curriculum.get_node_notes(node_id, refresh=True)
+    ).steps[0].title == "Second lesson"
+    # ...and replaced it, so the next plain read serves the regenerated lesson.
+    assert (await curriculum.get_node_notes(node_id)).steps[0].title == "Second lesson"
+
+
 class _RaisingRevisionService:
     async def get_revision_queue(self, user_id: str):
         raise RuntimeError("mastery lookup exploded")

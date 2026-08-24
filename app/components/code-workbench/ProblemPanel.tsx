@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BookOpen, Flag, Lightbulb, Unlock } from "lucide-react";
+import { Flag, Lightbulb, Unlock } from "lucide-react";
 import { Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,8 @@ import type { HelperContext, ProblemDetail } from "~/lib/types";
 // recorded: notes and the helper chat are free here, so a clock that fed into any score
 // would be measuring something it cannot see.
 const TARGET_MINUTES: Record<string, number> = { easy: 15, medium: 25, hard: 40 };
+
+type Tab = "statement" | "lesson" | "helper";
 
 function Timer({ difficulty }: { difficulty: string }) {
   const [elapsed, setElapsed] = useState(0);
@@ -145,17 +147,15 @@ export function ProblemPanel({
   solved?: boolean;
   initiallyFlagged?: boolean;
 }) {
-  const [tab, setTab] = useState<"statement" | "helper">("statement");
-  // Notes sit under the statement rather than in a sibling tab: they are read WHILE
-  // thinking about the problem, and a tab hides the very thing they are about.
-  const [notesOpen, setNotesOpen] = useState(false);
-  const [notesMounted, setNotesMounted] = useState(false);
-  // Mount the helper only once opened (so a never-opened tab costs zero tokens), then keep
-  // it mounted-but-hidden so toggling never refetches or loses a draft.
+  const [tab, setTab] = useState<Tab>("statement");
+  // Mount the lesson and helper only once opened (so a never-opened tab costs zero tokens),
+  // then keep them mounted-but-hidden so toggling never refetches or loses a draft.
+  const [lessonMounted, setLessonMounted] = useState(false);
   const [helperMounted, setHelperMounted] = useState(false);
   const [flagged, setFlagged] = useState(initiallyFlagged);
-  const tabs: ("statement" | "helper")[] = [
+  const tabs: Tab[] = [
     "statement",
+    ...(lessonNodeId ? (["lesson"] as const) : []),
     ...(problemSessionId && getContext ? (["helper"] as const) : []),
   ];
 
@@ -219,6 +219,7 @@ export function ProblemPanel({
                 type="button"
                 onClick={() => {
                   setTab(value);
+                  if (value === "lesson") setLessonMounted(true);
                   if (value === "helper") setHelperMounted(true);
                 }}
                 className={cn(
@@ -292,29 +293,14 @@ export function ProblemPanel({
 
         <HintList hints={problem.hints} onRevealed={onHintRevealed} />
 
-        {lessonNodeId && (
-          <div className="border-t border-white/10 pt-5">
-            <button
-              type="button"
-              onClick={() => {
-                setNotesMounted(true);
-                setNotesOpen((open) => !open);
-              }}
-              className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500 hover:text-white transition-colors"
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              {notesOpen ? "Hide lesson notes" : "Lesson notes"}
-            </button>
-            {notesMounted && (
-              <div className={notesOpen ? "mt-4" : "hidden"}>
-                <LessonNotesPanel lessonNodeId={lessonNodeId} />
-              </div>
-            )}
-          </div>
-        )}
-
         {solved && problemSessionId && <SolutionSection problemSessionId={problemSessionId} />}
         </div>
+
+        {lessonMounted && lessonNodeId && (
+          <div className={tab === "lesson" ? "" : "hidden"}>
+            <LessonNotesPanel lessonNodeId={lessonNodeId} />
+          </div>
+        )}
           </div>
         </ScrollArea>
       </div>

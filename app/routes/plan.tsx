@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import type { MetaFunction } from "react-router";
 import { useNavigate, useParams } from "react-router";
-import { BookOpen, CheckCircle2, Lock, MessageSquare, Play, RefreshCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, Lock, MessageSquare, Play, RefreshCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
-import { LessonNotesPanel } from "@/components/LessonNotesPanel";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
 import { cn } from "~/lib/utils";
@@ -51,7 +50,6 @@ export default function PlanScreen() {
   const [plan, setPlan] = useState<LessonPlan | null>(null);
   const [busy, setBusy] = useState(false);
   const [revisitingNodeId, setRevisitingNodeId] = useState<string | null>(null);
-  const [notesNodeId, setNotesNodeId] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const navigate = useNavigate();
   const { showError, setBusyMessage } = useStatus();
@@ -204,21 +202,6 @@ export default function PlanScreen() {
                           {node.difficulty}
                         </span>
                       )}
-                      {/* Hidden on locked rows: reading ahead contradicts the lock and would
-                          generate notes for a node the learner may never reach. */}
-                      {!isLocked && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label="Lesson notes"
-                          className="text-zinc-500 hover:text-white"
-                          onClick={() =>
-                            setNotesNodeId((current) => (current === node.id ? null : node.id))
-                          }
-                        >
-                          <BookOpen className="w-4 h-4" />
-                        </Button>
-                      )}
                       <span
                         className={cn(
                           "text-[10px] font-black uppercase tracking-widest",
@@ -233,11 +216,6 @@ export default function PlanScreen() {
                     </div>
                   </div>
                   </div>
-                  {notesNodeId === node.id && (
-                    <div className="pl-14 pb-6">
-                      <LessonNotesPanel lessonNodeId={node.id} />
-                    </div>
-                  )}
                 </div>
               );
             })}

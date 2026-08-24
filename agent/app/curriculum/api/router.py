@@ -78,10 +78,10 @@ async def list_plans(
 
 @router.get("/nodes/{node_id}/notes")
 async def get_node_notes(
-    node_id: str, service: CurriculumService = Depends(get_service)
+    node_id: str, refresh: bool = False, service: CurriculumService = Depends(get_service)
 ) -> GeneratedLessonNotes:
     # NotFoundError -> 404 is handled by the app-wide exception handler (app/shared/errors.py)
-    return await service.get_node_notes(node_id)
+    return await service.get_node_notes(node_id, refresh=refresh)
 
 
 @router.get("/{plan_id}")

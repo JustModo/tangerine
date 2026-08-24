@@ -356,10 +356,12 @@ class CurriculumService:
         await self._invalidate_unsubmitted(redifficultied_ids)
         return await self._repository.get(plan.id) or plan
 
-    async def get_node_notes(self, node_id: str) -> GeneratedLessonNotes:
-        """Teaching cheat sheet for a node's skill, generated on first read and cached
-        forever after. Locked nodes are refused so notes can't be generated (and paid for)
-        ahead of the curriculum."""
+    async def get_node_notes(
+        self, node_id: str, refresh: bool = False
+    ) -> GeneratedLessonNotes:
+        """Lesson for a node's skill, generated on request and cached after. Locked nodes
+        are refused so lessons can't be generated (and paid for) ahead of the curriculum.
+        refresh forces a fresh generation over the cached one."""
         node = await self._repository.get_node(node_id)
         if node is None:
             raise NotFoundError(f"Lesson node {node_id} not found")
@@ -372,7 +374,7 @@ class CurriculumService:
         if plan is None:
             raise NotFoundError(f"Lesson plan {node.lesson_plan_id} not found")
 
-        # ponytail: notes live in llm_cache keyed by (skill, language, level) — they're
+        # ponytail: lessons live in llm_cache keyed by (skill, language, level) — they're
         # derivable, shared across every plan, and cheap to regenerate, so they need no
         # table of their own. Give them one only if they ever become user-editable or
         # per-user personalized, at which point they stop being derivable.
@@ -384,6 +386,7 @@ class CurriculumService:
             plan.language.value,
             plan.level,
             cache=self._llm_cache,
+            refresh=refresh,
         )
 
     async def list_for_session(self, session_id: str) -> list[LessonPlan]:
