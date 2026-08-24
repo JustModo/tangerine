@@ -1,6 +1,7 @@
 from typing import Protocol
 
 from app.problems.domain.models import Problem, ProblemCriteria, ProblemVersion
+from app.shared.types import Language
 
 
 class ProblemRepository(Protocol):
@@ -10,7 +11,15 @@ class ProblemRepository(Protocol):
 
     async def save(self, problem: Problem) -> None: ...
 
-    async def list_by_skill(self, skill_id: str) -> list[Problem]: ...
+    async def list_all(
+        self, page: int, page_size: int, query: str | None = None, language: str | None = None
+    ) -> tuple[list[Problem], int]: ...
+
+    async def find_by_conceptual_id(
+        self, conceptual_id: str, language: Language
+    ) -> Problem | None: ...
+
+    async def list_titles(self, skill_id: str, language: Language) -> list[str]: ...
 
     async def save_version(self, version: ProblemVersion) -> None: ...
 

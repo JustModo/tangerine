@@ -24,9 +24,8 @@ def _difficulty_label(rating: int) -> str:
     return _DIFFICULTY_BY_RATING.get(rating, "medium")
 
 
-# Above this, a learner has repeatedly solved problems on the skill unaided. Making them
-# grind through it again to reach the step they actually wanted is the fastest way to lose
-# someone who is not a beginner.
+# Above this the learner has repeatedly solved problems on the skill unaided, so the plan
+# marks it DONE rather than making them repeat it.
 KNOWN_SKILL_THRESHOLD = 0.8
 
 
@@ -51,7 +50,6 @@ class CurriculumService:
         self._llm_cache = llm_cache
         self._mastery_repository = mastery_repository
         self._problem_session_repository = problem_session_repository
-        # Only needed to build a plan out of problems that already exist.
         self._problem_repository = problem_repository
 
     async def create_draft(
@@ -85,7 +83,7 @@ class CurriculumService:
 
         # A pasted problem occupies the final step, so the LLM only has to produce the
         # prerequisites — one fewer than the learner asked for in total. "Just this one
-        # problem" therefore means ZERO prerequisites, and we skip curriculum generation
+        # problem" therefore means zero prerequisites, and we skip curriculum generation
         # altogether rather than padding the plan with a step they explicitly didn't want.
         prerequisite_count = (
             step_count - 1 if step_count is not None and target_problem else step_count
@@ -136,15 +134,8 @@ class CurriculumService:
                 )
             )
 
-        # Whatever was skipped, the plan must still be startable: unlock the first step the
-        # learner actually has to do. Same rule edit_plan applies after a revision.
-        for index, node in enumerate(nodes):
-            if node.status != LessonNodeStatus.DONE:
-                nodes[index] = node.model_copy(update={"status": LessonNodeStatus.AVAILABLE})
-                break
-
         if nodes:
-            await self._repository.save_nodes(nodes)
+            await self._repository.save_nodes(self._ensure_startable(nodes))
 
         return await self._repository.get(plan.id) or plan
 
@@ -339,10 +330,8 @@ class CurriculumService:
                 else await self._skill_repository.ensure_skill(problem.title)
             ),
             sequence_index=0,  # reindexed below
-            # AVAILABLE, not LOCKED: they asked for THIS problem by name, so gating it
-            # behind whatever else is unfinished would hand them a padlock instead of the
-            # thing they just asked for. It is a problem they already have, so there is no
-            # prerequisite to earn.
+            # AVAILABLE, not LOCKED: the learner named this problem, and it is one they
+            # already have, so there is no prerequisite to gate it behind.
             status=LessonNodeStatus.AVAILABLE,
             difficulty=problem.difficulty,
             problem_id=problem.id,

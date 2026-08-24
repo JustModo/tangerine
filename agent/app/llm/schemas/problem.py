@@ -44,9 +44,9 @@ class ProblemPatch(BaseModel):
     """A repair for a problem that failed sandbox validation. Only the fields that were
     actually wrong — anything left null keeps its original value.
 
-    Deliberately narrow: the whole point is that a repair costs a fraction of the output
-    tokens a regeneration does, and that everything not named here (title, difficulty,
-    skills, constraints, hints, tags, stress_test) is untouched by definition."""
+    Narrow by design: a repair costs a fraction of a regeneration's output tokens, and
+    anything not named here (title, difficulty, skills, constraints, hints, tags,
+    stress_test) is untouched."""
 
     pre_code: str | None = Field(default=None, description="Only if the harness before the function was wrong.")
     user_code: str | None = Field(default=None, description="Only if the learner's stub no longer matches the reference signature.")

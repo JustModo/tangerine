@@ -3,12 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.curriculum.api.deps import get_problem_session_service
 from app.curriculum.application.code_helper import CodeHelperService
 from app.curriculum.application.problem_sessions import ProblemSessionService
 from app.curriculum.domain.problem_chat import ProblemChatMessage
 from app.curriculum.domain.problem_session import ProblemSession, ProblemSessionStatus
 from app.curriculum.infrastructure.sqlite_problem_session_repository import SqliteProblemSessionRepository
-from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
 from app.evaluation.application.services import EvaluationService
 from app.evaluation.domain.models import AttemptMetrics, Evaluation
 from app.evaluation.infrastructure.sqlite_repository import SqliteEvaluationRepository
@@ -16,40 +16,19 @@ from app.execution.application.services import ExecutionService
 from app.execution.domain.models import ExecutionRequest
 from app.execution.domain.models import TestCase as ExecutionTestCase
 from app.execution.infrastructure.citron_adapter import CitronAdapter
-from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.mastery.application.services import MasteryService
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
-from app.problems.application.services import ProblemSelectionService
-from app.problems.application.validation import ProblemValidationService
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.code_assembly import assemble_program
-from app.shared.errors import NotFoundError
 from app.shared.hashing import hash_output
-from app.shared.types import Language
 from app.users.domain.models import LOCAL_USER_ID
 from app.shared.sse import sse_stream
 
 router = APIRouter(prefix="/problem-sessions", tags=["problem-sessions"])
 
 
-def _build_validation_service() -> ProblemValidationService:
-    return ProblemValidationService(
-        SqliteProblemRepository(),
-        GeminiProvider(),
-        CitronAdapter(),
-        llm_cache=SqliteLLMCache(),
-    )
-
-
-def get_service() -> ProblemSessionService:
-    return ProblemSessionService(
-        SqliteLessonPlanRepository(),
-        SqliteProblemSessionRepository(),
-        ProblemSelectionService(SqliteProblemRepository()),
-        _build_validation_service(),
-        mastery_repository=SqliteUserSkillStateRepository(),
-    )
+get_service = get_problem_session_service
 
 
 class SourceCodeBody(BaseModel):
@@ -61,11 +40,6 @@ class SubmitBody(BaseModel):
     # What the attempt cost. Only the client knows any of this — the editor clock, the run
     # count and which hints were revealed all live in the browser.
     metrics: AttemptMetrics = AttemptMetrics()
-
-
-class PracticeBody(BaseModel):
-    skill_id: str
-    language: Language
 
 
 class FlagBody(BaseModel):
@@ -121,17 +95,6 @@ async def post_chat(
     return StreamingResponse(stream, media_type="text/event-stream")
 
 
-@router.post("/practice")
-async def start_practice(
-    body: PracticeBody, service: ProblemSessionService = Depends(get_service)
-) -> ProblemSession:
-    """A problem for one skill outside any plan — what the revision queue starts."""
-    try:
-        return await service.practice_problem(LOCAL_USER_ID, body.skill_id, body.language)
-    except NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
 @router.post("/start-for-problem")
 async def start_for_problem(
     body: StartForProblemBody, service: ProblemSessionService = Depends(get_service)
@@ -176,10 +139,7 @@ async def get_session(
 async def set_flagged(
     session_id: str, body: FlagBody, service: ProblemSessionService = Depends(get_service)
 ) -> ProblemSession:
-    try:
-        return await service.set_flagged(session_id, body.flagged)
-    except NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return await service.set_flagged(session_id, body.flagged)
 
 
 @router.get("/{session_id}/solution")
@@ -269,12 +229,9 @@ async def submit(
         CitronAdapter(),
         MasteryService(SqliteUserSkillStateRepository()),
     )
-    try:
-        evaluation = await eval_service.evaluate(
-            session.problem_id, LOCAL_USER_ID, problem.language, body.source_code, body.metrics
-        )
-    except NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    evaluation = await eval_service.evaluate(
+        session.problem_id, LOCAL_USER_ID, problem.language, body.source_code, body.metrics
+    )
 
     await service.record_submission(session_id, passed=evaluation.passed_tests == evaluation.total_tests)
     return evaluation

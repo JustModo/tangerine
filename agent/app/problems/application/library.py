@@ -1,14 +1,12 @@
-"""What THIS learner's problem bank looks like: which problems they've solved, failed,
-flagged, or never seen, and how to find one they're describing in prose.
+"""One learner's view of the problem bank: what they have solved, failed, flagged or never
+seen, and how to find a problem they are describing in prose.
 
-Separate from ProblemSelectionService on purpose. That service answers "give me a suitable
-problem the learner has NOT seen" — selection, forward-looking, deliberately blind to
-history. This one answers "which problem are they talking about", and history is the whole
-point of it.
+Distinct from ProblemSelectionService, which answers "give me a suitable problem they have
+NOT seen" and is blind to history. This one is about history.
 
-Everything here is read-only and deliberately thin: an entry carries a title and a status,
-never a statement. The chat agent is the main caller and a list of full statements would
-cost more context than the answer is worth.
+Read-only, and thin by design: an entry carries a title and a status, never a statement.
+The chat agent is the main caller, and a list of statements would cost more context than
+the answer is worth.
 """
 
 from dataclasses import dataclass
@@ -39,7 +37,6 @@ class LibraryEntry:
     difficulty: str
     language: str
     skill: str | None
-    # The learner's session status, or None if they have never opened it.
     status: str | None
     flagged: bool
 
@@ -61,8 +58,8 @@ def _matches_scope(session: ProblemSession | None, scope: Scope) -> bool:
     if scope == "solved":
         return session.status == ProblemSessionStatus.COMPLETED
     if scope == "practised":
-        # Solved AND failed. A problem they submitted and got wrong is the best revision
-        # candidate there is — excluding it would hide exactly what they need to redo.
+        # Solved and failed both count: a problem they submitted and got wrong is the
+        # best revision candidate there is.
         return session.status in (
             ProblemSessionStatus.COMPLETED,
             ProblemSessionStatus.SUBMITTED,

@@ -24,7 +24,6 @@ class SqliteProblemRepository:
 
     async def get(self, problem_id: str) -> Problem | None:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM problems WHERE id = ?", (problem_id,))
             row = await cursor.fetchone()
             return await self._hydrate(db, row) if row else None
@@ -55,7 +54,6 @@ class SqliteProblemRepository:
         query += " WHERE " + " AND ".join(conditions) + " ORDER BY RANDOM() LIMIT 1"
 
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(query, params)
             row = await cursor.fetchone()
             return await self._hydrate(db, row) if row else None
@@ -73,7 +71,6 @@ class SqliteProblemRepository:
         thousands.
         """
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             base = (
                 "SELECT p.*, "
                 "(SELECT statement_md FROM problem_versions pv WHERE pv.problem_id = p.id "
@@ -111,27 +108,13 @@ class SqliteProblemRepository:
         page_rows = rows[start : start + page_size]
 
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             items = [await self._hydrate(db, row) for row in page_rows]
         return items, total
-
-    async def list_by_skill(self, skill_id: str) -> list[Problem]:
-        async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                "SELECT DISTINCT p.* FROM problems p "
-                "JOIN problem_skills ps ON ps.problem_id = p.id "
-                "WHERE ps.skill_id = ?",
-                (skill_id,),
-            )
-            rows = await cursor.fetchall()
-            return [await self._hydrate(db, row) for row in rows]
 
     async def find_by_conceptual_id(self, conceptual_id: str, language: Language) -> Problem | None:
         """Duplicate check: two generations for the same skill routinely land on the same
         classic problem, and without this the bank fills with near-identical rows."""
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM problems WHERE conceptual_id = ? AND language = ? AND status = ? LIMIT 1",
                 (conceptual_id, language.value, ProblemStatus.AVAILABLE.value),
@@ -152,14 +135,12 @@ class SqliteProblemRepository:
             return [row[0] for row in await cursor.fetchall()]
 
     async def save(self, problem: Problem) -> None:
-        """Upserts. The ON CONFLICT list below is the whitelist of MUTABLE fields —
-        conceptual_id, created_at and language are set once and never rewritten."""
+        """Upserts. The ON CONFLICT list is the whitelist of mutable fields: conceptual_id,
+        created_at and language are set once and never rewritten."""
         async with connect(self._database_path) as db:
-            # language is immutable because the stored versions' code, tests and expected
-            # output hashes are all in that language; changing it would leave the row
-            # describing something the code isn't. Checked rather than silently dropped by
-            # the ON CONFLICT list — a save that quietly doesn't save is far worse than one
-            # that says no.
+            # language is immutable: the stored versions' code, tests and output hashes are
+            # all in that language. Raised rather than dropped from the ON CONFLICT list, so
+            # the caller learns the write did nothing.
             cursor = await db.execute(
                 "SELECT language FROM problems WHERE id = ?", (problem.id,)
             )
@@ -235,7 +216,6 @@ class SqliteProblemRepository:
 
     async def get_latest_version(self, problem_id: str) -> ProblemVersion | None:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM problem_versions WHERE problem_id = ? ORDER BY version DESC LIMIT 1",
                 (problem_id,),

@@ -4,6 +4,7 @@ import { Markdown } from "@/components/Markdown";
 import { Button } from "@/components/ui/button";
 import { apiJson } from "~/lib/api";
 import type { LessonNotes } from "~/lib/types";
+import { SectionLabel } from "@/components/Section";
 
 /**
  * Teaching lesson for one lesson node's skill, revealed a step at a time. Generation is an
@@ -38,9 +39,9 @@ export function LessonNotesPanel({ lessonNodeId }: { lessonNodeId: string }) {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+        <SectionLabel>
           Lesson
-        </h3>
+        </SectionLabel>
         <Button
           variant="secondary"
           size="sm"
@@ -82,9 +83,9 @@ export function LessonNotesPanel({ lessonNodeId }: { lessonNodeId: string }) {
         <div className="space-y-5">
           {notes.steps.slice(0, revealed).map((step, index) => (
             <div key={index} className="space-y-1.5">
-              <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+              <SectionLabel>
                 {step.title}
-              </h4>
+              </SectionLabel>
               <Markdown>{step.body_md}</Markdown>
             </div>
           ))}

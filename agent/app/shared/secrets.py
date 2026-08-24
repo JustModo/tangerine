@@ -10,7 +10,7 @@ from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.shared.config import get_settings
-from app.shared.database import connect
+from app.shared.settings_store import delete_setting, read_setting, write_setting
 
 GEMINI_API_KEY = "gemini_api_key"
 
@@ -31,13 +31,11 @@ def _fernet() -> Fernet:
 
 
 async def read_secret(key: str) -> str | None:
-    async with connect() as db:
-        cursor = await db.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
-        row = await cursor.fetchone()
-    if row is None:
+    stored = await read_setting(key)
+    if stored is None:
         return None
     try:
-        return _fernet().decrypt(row[0].encode()).decode()
+        return _fernet().decrypt(stored.encode()).decode()
     except InvalidToken:
         # secret.key was replaced or lost — treat the stored value as gone rather than
         # crashing every request; the user can re-enter it through the setup screen.
@@ -45,20 +43,11 @@ async def read_secret(key: str) -> str | None:
 
 
 async def write_secret(key: str, value: str) -> None:
-    encrypted = _fernet().encrypt(value.encode()).decode()
-    async with connect() as db:
-        await db.execute(
-            "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now')) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-            (key, encrypted),
-        )
-        await db.commit()
+    await write_setting(key, _fernet().encrypt(value.encode()).decode())
 
 
 async def delete_secret(key: str) -> None:
-    async with connect() as db:
-        await db.execute("DELETE FROM app_settings WHERE key = ?", (key,))
-        await db.commit()
+    await delete_setting(key)
 
 
 async def get_gemini_api_key() -> str | None:

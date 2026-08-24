@@ -8,6 +8,7 @@ import { useStatus } from "~/lib/status";
 import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
 import { cn } from "~/lib/utils";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { EmptyState } from "@/components/Section";
 
 interface LessonNode {
   id: string;
@@ -223,7 +224,7 @@ export default function PlanScreen() {
               );
             })}
             {plan.nodes.length === 0 && (
-              <p className="text-zinc-500 text-xs uppercase py-8 text-center">No nodes yet.</p>
+              <EmptyState>No nodes yet.</EmptyState>
             )}
           </div>
         </div>

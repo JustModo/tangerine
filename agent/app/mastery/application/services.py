@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from app.mastery.domain.models import UserSkillState
 from app.mastery.domain.repository import UserSkillStateRepository
 
-# Simple deterministic scoring.
 _PASS_DELTA = 0.15
 _FAIL_DELTA = -0.1
 # A pass is never worth nothing, however much help it took — they still shipped a working
@@ -52,6 +51,3 @@ class MasteryService:
         )
         await self._repository.save(state)
         return state
-
-    async def list_for_user(self, user_id: str) -> list[UserSkillState]:
-        return await self._repository.list_for_user(user_id)

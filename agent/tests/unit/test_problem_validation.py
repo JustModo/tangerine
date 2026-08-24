@@ -31,6 +31,19 @@ def db_path(tmp_path: Path) -> str:
     return path
 
 
+def _rows_for_skill(db_path: str, skill_id: str) -> list[tuple[str, str]]:
+    """(id, status) for every problem on a skill, INVALID ones included. Read straight from
+    SQL because no production query returns rejected rows — that is the point of them."""
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT p.id, p.status FROM problems p "
+        "JOIN problem_skills ps ON ps.problem_id = p.id WHERE ps.skill_id = ?",
+        (skill_id,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
 def _generated_problem() -> GeneratedProblem:
     return GeneratedProblem(
         title="Static Range Sum",
@@ -114,11 +127,9 @@ async def test_generate_and_validate_marks_invalid_when_reference_solution_error
     problem = await service.generate_and_validate("prefix-sum", Language.PYTHON, "easy")
 
     assert problem is None
-    all_matching = await repo.list_by_skill(
-        (await SqliteSkillRepository(db_path).ensure_skill("prefix-sum"))
-    )
-    assert len(all_matching) == 3  # one row per attempt: generate, patch, regenerate
-    assert {p.status for p in all_matching} == {ProblemStatus.INVALID}
+    rows = _rows_for_skill(db_path, await SqliteSkillRepository(db_path).ensure_skill("prefix-sum"))
+    assert len(rows) == 3  # one row per attempt: generate, patch, regenerate
+    assert {status for _, status in rows} == {ProblemStatus.INVALID.value}
 
 
 async def test_generate_and_validate_marks_invalid_when_reference_solution_prints_nothing(
@@ -141,10 +152,8 @@ async def test_generate_and_validate_marks_invalid_when_reference_solution_print
     problem = await service.generate_and_validate("prefix-sum", Language.PYTHON, "easy")
 
     assert problem is None
-    all_matching = await repo.list_by_skill(
-        (await SqliteSkillRepository(db_path).ensure_skill("prefix-sum"))
-    )
-    assert all_matching[0].status == ProblemStatus.INVALID
+    rows = _rows_for_skill(db_path, await SqliteSkillRepository(db_path).ensure_skill("prefix-sum"))
+    assert rows[0][1] == ProblemStatus.INVALID.value
 
 
 async def test_reference_disagreeing_with_a_stated_example_is_rejected(db_path: str) -> None:
@@ -214,7 +223,7 @@ async def test_a_repeat_of_an_existing_problem_is_not_stored_twice(db_path: str)
 
     # Falls back to existing problem (don't duplicate).
     assert second is not None and second.id == first.id
-    assert len(await repo.list_by_skill(await skill_repo.ensure_skill("prefix-sum"))) == 1
+    assert len(_rows_for_skill(db_path, await skill_repo.ensure_skill("prefix-sum"))) == 1
 
 
 async def test_a_stress_input_that_fails_leaves_the_problem_usable(db_path: str) -> None:

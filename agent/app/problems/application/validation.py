@@ -189,7 +189,6 @@ class ProblemValidationService:
         reference_program = assemble_program(
             generated.pre_code, generated.reference_user_code, generated.post_code
         )
-        # Grade examples + hidden tests (both visible and graded inputs).
         graded_inputs = [example.input for example in examples] + hidden_tests
         request = ExecutionRequest(
             language=language,
@@ -212,7 +211,7 @@ class ProblemValidationService:
                 problem, runtime_failure(results, len(graded_inputs))
             )
 
-        # THE correctness check: reference must match statement examples.
+        # The correctness check: the reference must match the statement's examples.
         if any(
             normalise_output(result.actual_output) != normalise_output(example.output)
             for example, result in zip(examples, results)

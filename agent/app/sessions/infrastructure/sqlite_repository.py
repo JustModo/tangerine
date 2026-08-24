@@ -26,7 +26,6 @@ class SqliteSessionRepository:
 
     async def get(self, session_id: str) -> LearningSession | None:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM learning_sessions WHERE id = ?", (session_id,)
             )
@@ -37,7 +36,6 @@ class SqliteSessionRepository:
 
     async def list_for_user(self, user_id: str) -> list[LearningSession]:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM learning_sessions WHERE user_id = ? ORDER BY updated_at DESC",
                 (user_id,),

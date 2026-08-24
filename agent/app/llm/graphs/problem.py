@@ -24,9 +24,7 @@ class ProblemGraphState(TypedDict):
     skill: str
     language: str
     difficulty: str
-    # Adapt from this pasted statement instead of inventing.
     source_problem: str | None
-    # Titles already in the bank (don't repeat).
     avoid_titles: list[str]
     result: GeneratedProblem | None
     error: str | None

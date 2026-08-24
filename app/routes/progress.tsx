@@ -8,6 +8,7 @@ import { useStatus } from "~/lib/status";
 import { ApiError, apiJson } from "~/lib/api";
 import { cn } from "~/lib/utils";
 import type { Progress, ProblemSummary, ProblemsPage } from "~/lib/types";
+import { EmptyState, SectionLabel } from "@/components/Section";
 
 const SKILLS_PAGE_SIZE = 10;
 // Mirrors the backend's Language enum (agent/app/shared/types.py) — no endpoint exposes
@@ -17,7 +18,7 @@ const LANGUAGES = ["python", "cpp", "c", "java"];
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="border border-white/10 px-5 py-4">
-      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">{label}</p>
+      <SectionLabel as="p">{label}</SectionLabel>
       <p className="text-2xl font-black tracking-tighter mt-1">{value}</p>
     </div>
   );
@@ -26,7 +27,7 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
-      <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">{title}</h2>
+      <SectionLabel as="h2">{title}</SectionLabel>
       {children}
     </div>
   );
@@ -191,9 +192,7 @@ export default function ProgressScreen() {
       <div className="flex-1 min-h-0 overflow-y-auto w-full">
         <div className="max-w-3xl mx-auto flex flex-col gap-10 py-10 px-10">
           {!hasRecord && (
-            <p className="text-zinc-500 text-xs uppercase tracking-widest py-8 text-center">
-              Nothing here yet. Solve a problem and this fills in.
-            </p>
+            <EmptyState>Nothing here yet. Solve a problem and this fills in.</EmptyState>
           )}
 
           {hasRecord && (
@@ -296,9 +295,7 @@ export default function ProgressScreen() {
             </div>
 
             {problems && problems.items.length === 0 && (
-              <p className="text-zinc-500 text-xs uppercase tracking-widest py-6 text-center">
-                {query.trim() ? "No matches." : "Nothing generated yet."}
-              </p>
+              <EmptyState>{query.trim() ? "No matches." : "Nothing generated yet."}</EmptyState>
             )}
 
             {problems && problems.items.length > 0 && (

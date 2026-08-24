@@ -16,7 +16,7 @@ class ExecutionStatus(StrEnum):
 class TestCase(BaseModel):
     id: str
     input: str
-    output_hash: str  # sha256 of expected output — never plaintext, matches the web app's convention
+    output_hash: str  # sha256 of the expected output, never plaintext
 
 
 class ExecutionRequest(BaseModel):

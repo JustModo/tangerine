@@ -71,7 +71,7 @@ export function TestCasePanel({
       <div className="p-6 space-y-5">
         {summary && (
           <div className="space-y-2">
-            <div className="flex items-center justify-between border border-white/10 bg-white/5 rounded-md px-4 py-2 text-sm">
+            <div className="flex items-center justify-between border border-white/10 bg-white/5 px-4 py-2 text-sm">
               <span className="font-bold uppercase tracking-widest text-[10px] text-zinc-500">Score</span>
               <span className="font-black">
                 {summary.passed} / {summary.total}
@@ -80,7 +80,7 @@ export function TestCasePanel({
             {complexityVerdict && (
               <div
                 className={cn(
-                  "flex items-center justify-between gap-3 border rounded-md px-4 py-2",
+                  "flex items-center justify-between gap-3 border px-4 py-2",
                   VERDICTS[complexityVerdict].tone,
                 )}
               >
@@ -105,7 +105,7 @@ export function TestCasePanel({
                 type="button"
                 onClick={() => setSelectedId(result.id)}
                 className={cn(
-                  "flex items-center gap-1.5 px-2 py-1.5 rounded-md border text-[10px] font-bold uppercase tracking-wide transition-colors",
+                  "flex items-center gap-1.5 px-2 py-1.5 border text-[10px] font-bold uppercase tracking-wide transition-colors",
                   passed
                     ? "border-green-500/30 text-green-500"
                     : "border-red-500/30 text-red-500",
@@ -123,31 +123,31 @@ export function TestCasePanel({
         {selected && (
           <div className="space-y-3">
             {hidden && (
-              <div className="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-bold uppercase tracking-widest px-3 py-2 rounded-md">
+              <div className="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-bold uppercase tracking-widest px-3 py-2">
                 Hidden test case
               </div>
             )}
             <div>
               <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Input</span>
-              <pre className="mt-1 font-mono text-[13px] bg-zinc-900 border border-white/10 rounded-md p-3 whitespace-pre-wrap">
+              <pre className="mt-1 font-mono text-[13px] bg-zinc-900 border border-white/10 p-3 whitespace-pre-wrap">
                 {selected.input}
               </pre>
             </div>
             <div>
               <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Expected</span>
               {hidden ? (
-                <pre className="mt-1 font-mono text-[13px] bg-zinc-900 border border-white/10 rounded-md p-3 text-zinc-600 italic">
+                <pre className="mt-1 font-mono text-[13px] bg-zinc-900 border border-white/10 p-3 text-zinc-600 italic">
                   hidden
                 </pre>
               ) : (
-                <pre className="mt-1 font-mono text-[13px] bg-zinc-900 border border-white/10 rounded-md p-3 whitespace-pre-wrap">
+                <pre className="mt-1 font-mono text-[13px] bg-zinc-900 border border-white/10 p-3 whitespace-pre-wrap">
                   {expectedById?.[selected.id] ?? <span className="italic text-zinc-600">-</span>}
                 </pre>
               )}
             </div>
             <div>
               <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Your Output</span>
-              <pre className="mt-1 font-mono text-[13px] bg-zinc-900 border border-white/10 rounded-md p-3 whitespace-pre-wrap">
+              <pre className="mt-1 font-mono text-[13px] bg-zinc-900 border border-white/10 p-3 whitespace-pre-wrap">
                 {selected.actual_output || <span className="italic text-zinc-600">No output</span>}
               </pre>
             </div>
@@ -156,7 +156,7 @@ export function TestCasePanel({
                 <span className="text-red-500 font-bold uppercase tracking-widest text-[9px]">
                   Error Logs
                 </span>
-                <pre className="mt-1 font-mono text-[13px] bg-red-950/20 border border-red-500/30 text-red-400 rounded-md p-3 whitespace-pre-wrap">
+                <pre className="mt-1 font-mono text-[13px] bg-red-950/20 border border-red-500/30 text-red-400 p-3 whitespace-pre-wrap">
                   {selected.status_description || selected.status}
                   {selected.error ? `\n${selected.error}` : ""}
                   {selected.stdout_truncated ? "\n(stdout truncated)" : ""}

@@ -7,6 +7,7 @@ settings panel needs to change.
 """
 
 from app.shared.database import connect
+from app.shared.settings_store import write_setting
 from app.shared.types import Language
 
 PREFERENCES: dict[str, dict[str, object]] = {
@@ -34,11 +35,5 @@ async def set_preference(key: str, value: str) -> str:
         raise ValueError(f"Unknown preference: {key}")
     if value not in definition["options"]:
         raise ValueError(f"'{value}' is not a valid value for {key}")
-    async with connect() as db:
-        await db.execute(
-            "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now')) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-            (key, value),
-        )
-        await db.commit()
+    await write_setting(key, value)
     return value

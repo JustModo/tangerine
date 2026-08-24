@@ -130,7 +130,7 @@ class SessionService:
             except Exception:
                 logger.warning("Failed to check for an existing plan for session %s", session_id, exc_info=True)
 
-        # Deliberately NOT caught here: app/shared/sse.py logs it and emits a terminal
+        # Not caught here: app/shared/sse.py logs it and emits a terminal
         # error frame. Swallowing it used to close the stream cleanly with no reply, which
         # the client could not distinguish from the assistant choosing to say nothing.
         user_id = existing.user_id if existing is not None else None
@@ -659,7 +659,7 @@ class SessionService:
                 "and do not invent one. If they want to work on one, offer to add it to "
                 "their plan — this chat builds plans, it does not open problems."
             ),
-            # THE fix for a follow-up "yes": the prose above is told to keep ids quiet, so
+            # Needed for a follow-up "yes": the prose above keeps ids quiet, so
             # without this the next turn has titles and nothing to act on.
             memo=library_memo(entries),
             depth=depth,

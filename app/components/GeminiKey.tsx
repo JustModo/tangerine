@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiFetch, apiJson } from "~/lib/api";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { SectionLabel } from "@/components/Section";
 
 export interface GeminiKeyStatus {
   configured: boolean;
@@ -106,9 +107,9 @@ export function GeminiKeySettings() {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+          <SectionLabel as="p">
             Gemini API key
-          </p>
+          </SectionLabel>
           <p className="text-xs text-zinc-400 mt-1">
             {!status?.configured
               ? "Not configured."

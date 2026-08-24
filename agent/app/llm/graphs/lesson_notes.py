@@ -57,9 +57,8 @@ async def generate_lesson_notes(
     cache: SqliteLLMCache | None = None,
     refresh: bool = False,
 ) -> GeneratedLessonNotes:
-    # The same (skill, language, level) always warrants the same lesson, so this is cached
-    # once and shared across every plan, session, and user — the whole reason lessons stay
-    # token-cheap. The version segment is the only invalidation lever the cache has.
+    # One lesson per (skill, language, level), shared across every plan and user. The
+    # version segment is the cache's only invalidation lever.
     key = (
         cache_key("lesson_notes", LESSON_NOTES_VERSION, skill, language, level)
         if cache is not None

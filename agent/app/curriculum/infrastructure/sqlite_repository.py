@@ -37,8 +37,6 @@ class SqliteLessonPlanRepository:
 
     async def save(self, plan: LessonPlan) -> None:
         async with connect(self._database_path) as db:
-            # lesson_plans.status still exists in the schema with a DEFAULT — it's simply no
-            # longer read or written, so no migration was needed to drop the concept.
             await db.execute(
                 "INSERT INTO lesson_plans (id, session_id, topic, language, level, version, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?) "
@@ -95,14 +93,12 @@ class SqliteLessonPlanRepository:
 
     async def get(self, plan_id: str) -> LessonPlan | None:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM lesson_plans WHERE id = ?", (plan_id,))
             row = await cursor.fetchone()
             return await self._hydrate(db, row) if row else None
 
     async def get_node(self, node_id: str) -> LessonNode | None:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT n.*, s.name AS skill_name FROM lesson_nodes n "
                 "JOIN skills s ON s.id = n.skill_id WHERE n.id = ?",
@@ -147,7 +143,6 @@ class SqliteLessonPlanRepository:
 
     async def list_for_session(self, session_id: str) -> list[LessonPlan]:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 # Newest first — the most recently generated plan is the session's active
                 # one now that there's no ACCEPTED status to mark it (version is always 1,

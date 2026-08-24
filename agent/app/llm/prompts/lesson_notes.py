@@ -1,6 +1,6 @@
 # Bump LESSON_NOTES_VERSION whenever LESSON_NOTES_SYSTEM_PROMPT changes — SqliteLLMCache
 # keys on caller-supplied semantics, not prompt content, so previously cached notes are
-# NOT invalidated by editing the prompt alone.
+# not invalidated by editing the prompt alone.
 LESSON_NOTES_VERSION = "v2"
 
 LESSON_NOTES_SYSTEM_PROMPT = (

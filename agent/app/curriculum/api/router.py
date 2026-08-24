@@ -1,24 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
+from app.curriculum.api.deps import get_problem_session_service
 from app.curriculum.application.problem_sessions import ProblemSessionService
 from app.curriculum.application.services import CurriculumService
 from app.curriculum.domain.models import LessonPlan
 from app.curriculum.infrastructure.sqlite_problem_session_repository import SqliteProblemSessionRepository
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
-from app.execution.infrastructure.citron_adapter import CitronAdapter
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.llm.schemas.lesson_notes import GeneratedLessonNotes
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
-from app.problems.application.services import ProblemSelectionService
-from app.problems.application.validation import ProblemValidationService
-from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.errors import NotFoundError
 from app.shared.progress import stage_stream
 from app.shared.sse import sse_stream
-from app.shared.types import Language
 from app.users.domain.models import LOCAL_USER_ID
 
 router = APIRouter(prefix="/learning-plans", tags=["curriculum"])
@@ -34,39 +29,6 @@ def get_service() -> CurriculumService:
     )
 
 
-def _build_validation_service() -> ProblemValidationService:
-    return ProblemValidationService(
-        SqliteProblemRepository(),
-        GeminiProvider(),
-        CitronAdapter(),
-        llm_cache=SqliteLLMCache(),
-    )
-
-
-def get_problem_session_service() -> ProblemSessionService:
-    return ProblemSessionService(
-        SqliteLessonPlanRepository(),
-        SqliteProblemSessionRepository(),
-        ProblemSelectionService(SqliteProblemRepository()),
-        _build_validation_service(),
-        mastery_repository=SqliteUserSkillStateRepository(),
-    )
-
-
-class CreatePlanBody(BaseModel):
-    session_id: str
-    topic: str
-    language: Language
-    level: str
-
-
-@router.post("")
-async def create_plan(
-    body: CreatePlanBody, service: CurriculumService = Depends(get_service)
-) -> LessonPlan:
-    return await service.create_draft(
-        body.session_id, body.topic, body.language, body.level, user_id=LOCAL_USER_ID
-    )
 
 
 @router.get("")

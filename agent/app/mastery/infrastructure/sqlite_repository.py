@@ -1,5 +1,3 @@
-import aiosqlite
-
 from app.mastery.domain.models import UserSkillState
 from app.shared.config import get_settings
 from app.shared.database import connect
@@ -11,7 +9,6 @@ class SqliteUserSkillStateRepository:
 
     async def get(self, user_id: str, skill_id: str) -> UserSkillState | None:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM user_skill_state WHERE user_id = ? AND skill_id = ?",
                 (user_id, skill_id),
@@ -46,7 +43,6 @@ class SqliteUserSkillStateRepository:
 
     async def list_for_user(self, user_id: str) -> list[UserSkillState]:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM user_skill_state WHERE user_id = ?", (user_id,)
             )

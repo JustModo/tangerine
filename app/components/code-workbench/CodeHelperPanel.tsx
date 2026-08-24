@@ -109,7 +109,7 @@ export function CodeHelperPanel({
           </div>
         )}
         {error && (
-          <p className="text-xs text-red-400 border border-red-500/30 rounded-md px-3 py-2">
+          <p className="text-xs text-red-400 border border-red-500/30 px-3 py-2">
             {error}
           </p>
         )}

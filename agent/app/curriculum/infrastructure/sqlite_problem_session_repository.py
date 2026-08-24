@@ -19,7 +19,7 @@ class SqliteProblemSessionRepository:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 # Every column except the identity ones (id, problem_id, user_id,
                 # created_at) is mutable. lesson_node_id/lesson_plan_id in particular:
-                # attaching a node-less session to a plan step IS an update, and leaving
+                # attaching a node-less session to a plan step is an update, and leaving
                 # them out meant the write silently did nothing while reporting success.
                 "ON CONFLICT(id) DO UPDATE SET "
                 "lesson_node_id=excluded.lesson_node_id, "
@@ -43,14 +43,12 @@ class SqliteProblemSessionRepository:
 
     async def get(self, session_id: str) -> ProblemSession | None:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM problem_sessions WHERE id = ?", (session_id,))
             row = await cursor.fetchone()
             return self._hydrate(row) if row else None
 
     async def get_by_node(self, lesson_node_id: str) -> ProblemSession | None:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM problem_sessions WHERE lesson_node_id = ? ORDER BY created_at DESC LIMIT 1",
                 (lesson_node_id,),
@@ -62,7 +60,6 @@ class SqliteProblemSessionRepository:
         """An existing session for this exact problem, so opening it from the "all
         problems" list resumes rather than orphaning progress with a duplicate row."""
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM problem_sessions WHERE user_id = ? AND problem_id = ? "
                 "ORDER BY created_at DESC LIMIT 1",
@@ -104,7 +101,6 @@ class SqliteProblemSessionRepository:
 
     async def list_for_user(self, user_id: str) -> list[ProblemSession]:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM problem_sessions WHERE user_id = ? ORDER BY updated_at DESC",
                 (user_id,),
@@ -128,7 +124,6 @@ class SqliteProblemSessionRepository:
 
     async def list_chat_messages(self, problem_session_id: str) -> list[ProblemChatMessage]:
         async with connect(self._database_path) as db:
-            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM problem_chat_messages WHERE problem_session_id = ? "
                 "ORDER BY created_at ASC",

@@ -1,7 +1,7 @@
 // ponytail: importing the top-level `monaco-editor` package registers all ~60 bundled
-// languages (not just the 5 this app uses), producing a large editor chunk. Upgrade path
-// if that ever matters: import `monaco-editor/esm/vs/editor/editor.api` plus only the
-// needed `basic-languages/{python,cpp,java}/*.contribution` entries instead.
+// languages, not the 4 this app runs, producing a large editor chunk. Upgrade path if that
+// matters: import `monaco-editor/esm/vs/editor/editor.api` plus only the needed
+// `basic-languages/{python,cpp,c,java}/*.contribution` entries instead.
 import * as monaco from "monaco-editor";
 import { loader } from "@monaco-editor/react";
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";

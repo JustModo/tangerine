@@ -12,32 +12,12 @@
   --radius-lg: 0px;
   --radius-xl: 0px;
 
+  /* Only the tokens the app actually resolves. The UI otherwise works in literal
+     zinc/white-alpha classes, so a full shadcn palette here was unreferenced. */
   --color-background: #000000;
   --color-foreground: #ffffff;
-
-  --color-card: #000000;
-  --color-card-foreground: #ffffff;
-
-  --color-popover: #000000;
-  --color-popover-foreground: #ffffff;
-
-  --color-primary: #ffffff;
-  --color-primary-foreground: #000000;
-
-  --color-secondary: #111111;
-  --color-secondary-foreground: #ffffff;
-
   --color-muted: #111111;
-  --color-muted-foreground: #888888;
-
-  --color-accent: #222222;
-  --color-accent-foreground: #ffffff;
-
-  --color-destructive: #ff0000;
-  --color-destructive-foreground: #ffffff;
-
   --color-border: #222222;
-  --color-input: #111111;
   --color-ring: #ffffff;
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { apiJson } from "~/lib/api";
+import { ApiError, apiJson } from "~/lib/api";
+import { useStatus } from "~/lib/status";
 
 interface SettingEntry {
   value: string;
@@ -27,12 +28,16 @@ function optionLabel(value: string): string {
 export function AppSettings() {
   const [settings, setSettings] = useState<SettingsShape | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  const { showError } = useStatus();
 
   async function load() {
     try {
       setSettings(await apiJson<SettingsShape>("/api/settings"));
-    } catch {
+    } catch (err) {
+      // Without this the panel just vanishes, which is indistinguishable from having no
+      // settings at all.
       setSettings(null);
+      showError(err instanceof ApiError ? err.message : "Couldn't load settings");
     }
   }
 
@@ -50,8 +55,9 @@ export function AppSettings() {
           body: JSON.stringify({ [key]: value }),
         }),
       );
-    } catch {
-      // Leave the previous value on screen; the next load() will resync.
+    } catch (err) {
+      // Previous value stays on screen; the next load() resyncs it.
+      showError(err instanceof ApiError ? err.message : "Couldn't save that setting");
     } finally {
       setSaving(null);
     }

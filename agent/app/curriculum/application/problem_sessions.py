@@ -78,9 +78,8 @@ class ProblemSessionService:
         if existing is not None:
             return existing
 
-        # A step bound to a problem serves THAT problem — no selection, no generation, no
-        # sandbox. This is the whole point of a revision plan, so it comes before every
-        # other branch.
+        # A bound step serves that problem directly: no selection, no generation, no
+        # sandbox. Checked before every other branch.
         if node.problem_id:
             problem = await self._problem_selection.get(node.problem_id)
             if problem is None:
@@ -92,7 +91,6 @@ class ProblemSessionService:
 
         skill_name = node.skill_name or await self._skill_repository.get_name(node.skill_id) or node.skill_id
 
-        # Pasted problems don't use bank selection.
         if node.source_problem_md:
             problem = await self._problem_validation.generate_and_validate(
                 skill_name,
@@ -147,35 +145,6 @@ class ProblemSessionService:
             skill_name, language, difficulty, on_stage=on_stage
         )
 
-    async def practice_problem(self, user_id: str, skill_id: str, language) -> ProblemSession:
-        """A problem for one skill, outside any plan — what the revision queue's Practice
-        button starts. Difficulty follows current mastery rather than a curriculum
-        position, since there is no position."""
-        skill_name = await self._skill_repository.get_name(skill_id) or skill_id
-
-        mastery_score = None
-        if self._mastery_repository is not None:
-            state = await self._mastery_repository.get(user_id, skill_id)
-            mastery_score = state.mastery_score if state else None
-
-        problem = await self._select_or_generate(
-            skill_id, skill_name, language, suggest_difficulty(mastery_score, 0), user_id
-        )
-        if problem is None:
-            raise NotFoundError(f"Could not generate a valid problem for skill {skill_name}")
-
-        now = datetime.now(timezone.utc)
-        session = ProblemSession(
-            id=str(uuid.uuid4()),
-            problem_id=problem.id,
-            user_id=user_id,
-            status=ProblemSessionStatus.NOT_STARTED,
-            created_at=now,
-            updated_at=now,
-        )
-        await self._session_repository.save(session)
-        return session
-
     async def start_for_problem(self, user_id: str, problem_id: str) -> ProblemSession:
         """Opens a specific already-generated problem (from the "all problems" list) rather
         than selecting one — resumes an existing session for it if there is one."""
@@ -211,15 +180,12 @@ class ProblemSessionService:
         await self._session_repository.save(updated)
         return updated
 
-    async def list_for_user(self, user_id: str) -> list[ProblemSession]:
-        return await self._session_repository.list_for_user(user_id)
-
     async def _start_session(self, plan, node, problem, user_id: str) -> ProblemSession:
         now = datetime.now(timezone.utc)
 
         # A revision plan serves problems the learner already has a session for — flagging
         # one from the browser creates a node-less session. Adopting it keeps the flag and
-        # their old code on ONE row; a second row would split the flag from the progress
+        # their old code on one row; a second row would split the flag from the progress
         # and list the problem twice on the progress screen.
         existing = await self._session_repository.find_for_problem(user_id, problem.id)
         # Only ever adopt a session belonging to no node — re-pointing one that does would
@@ -227,9 +193,8 @@ class ProblemSessionService:
         # ponytail: when it IS owned, we insert a duplicate and the flag stays on the old
         # row. Make the flag problem-scoped rather than session-scoped if that shows up.
         if existing is not None and existing.lesson_node_id is None:
-            # Revising something they already SOLVED means solving it again — handing back
-            # their own finished answer is the one thing that makes the step pointless. An
-            # unfinished attempt is different: that code is work in progress, so it stays.
+            # Revising a solved problem means solving it again, so the old answer is
+            # cleared. An unfinished attempt keeps its code: that is work in progress.
             already_solved = existing.status == ProblemSessionStatus.COMPLETED
             session = existing.model_copy(
                 update={
@@ -266,7 +231,6 @@ class ProblemSessionService:
 
     async def save_code(self, session_id: str, source_code: str) -> ProblemSession:
         session = await self._require(session_id)
-        # Only advance NOT_STARTED → IN_PROGRESS, never regress.
         status = (
             ProblemSessionStatus.IN_PROGRESS
             if session.status == ProblemSessionStatus.NOT_STARTED
@@ -290,7 +254,6 @@ class ProblemSessionService:
         )
         await self._session_repository.save(updated)
 
-        # Only plan sessions have nodes to advance (practice sessions have no node).
         if passed and session.lesson_node_id is not None:
             node = await self._plan_repository.get_node(session.lesson_node_id)
             if node is not None:

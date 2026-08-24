@@ -26,10 +26,14 @@ def get_connection() -> sqlite3.Connection:
 @asynccontextmanager
 async def connect(database_path: str | None = None):
     """The async connection every repository must use. Drop-in for
-    `async with aiosqlite.connect(path) as db`, minus the missing pragmas."""
+    `async with aiosqlite.connect(path) as db`, minus the missing pragmas.
+
+    row_factory is set here rather than per-query: every repository wants Row access, and
+    setting it in one place removes the chance of a new query forgetting to."""
     async with aiosqlite.connect(database_path or get_settings().database_path) as db:
         for pragma in _PRAGMAS:
             await db.execute(pragma)
+        db.row_factory = aiosqlite.Row
         yield db
 
 

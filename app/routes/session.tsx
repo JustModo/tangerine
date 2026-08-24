@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { EmptyState } from "@/components/Section";
 
 interface ChatMessage {
   id: string;
@@ -173,9 +174,7 @@ export default function SessionChat() {
         <ScrollArea className="flex-1 min-h-0 px-10 py-10">
           <div className="flex flex-col gap-6">
             {session.messages.length === 0 && !streamingText && (
-              <p className="text-zinc-500 text-xs uppercase tracking-widest text-center py-10">
-                What do you want to learn?
-              </p>
+              <EmptyState>What do you want to learn?</EmptyState>
             )}
             {session.messages.map((message) => (
               <div
@@ -188,7 +187,7 @@ export default function SessionChat() {
                 {message.role === "system" ? (
                   <p className="text-xs italic text-zinc-500 px-1">{message.content}</p>
                 ) : (
-                  <div className="border border-white/10 rounded-md px-4 py-3 text-sm">
+                  <div className="border border-white/10 px-4 py-3 text-sm">
                     {message.role === "assistant" ? (
                       <Markdown className="prose-p:my-0">{message.content}</Markdown>
                     ) : (
@@ -207,7 +206,7 @@ export default function SessionChat() {
             {streamingText && (
               <div className="self-start max-w-lg">
                 <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">assistant</p>
-                <div className="border border-white/10 rounded-md px-4 py-3 text-sm">
+                <div className="border border-white/10 px-4 py-3 text-sm">
                   <Markdown className="prose-p:my-0">{streamingText}</Markdown>
                 </div>
               </div>

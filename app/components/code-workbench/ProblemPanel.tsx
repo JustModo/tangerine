@@ -7,9 +7,11 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { LessonNotesPanel } from "@/components/LessonNotesPanel";
 import { CodeHelperPanel } from "./CodeHelperPanel";
-import { apiJson } from "~/lib/api";
+import { ApiError, apiJson } from "~/lib/api";
+import { useStatus } from "~/lib/status";
 import { cn } from "~/lib/utils";
 import type { HelperContext, ProblemDetail } from "~/lib/types";
+import { SectionLabel } from "@/components/Section";
 
 // Minutes an interview would expect for each difficulty. Shown, never enforced and never
 // recorded: notes and the helper chat are free here, so a clock that fed into any score
@@ -59,9 +61,9 @@ function SolutionSection({ problemSessionId }: { problemSessionId: string }) {
 
   return (
     <div className="space-y-2 border-t border-white/10 pt-5">
-      <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+      <SectionLabel>
         Reference solution
-      </h3>
+      </SectionLabel>
       {solution === null ? (
         <>
           <p className="text-xs text-zinc-500">
@@ -74,7 +76,7 @@ function SolutionSection({ problemSessionId }: { problemSessionId: string }) {
           {error && <p className="text-xs text-red-500">{error}</p>}
         </>
       ) : (
-        <pre className="text-xs font-mono bg-zinc-900 border border-white/10 rounded-md p-3 overflow-x-auto">
+        <pre className="text-xs font-mono bg-zinc-900 border border-white/10 p-3 overflow-x-auto">
           {solution}
         </pre>
       )}
@@ -94,14 +96,14 @@ function HintList({
 
   return (
     <div className="space-y-3">
-      <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+      <SectionLabel>
         Hints
-      </h3>
+      </SectionLabel>
       <div className="space-y-2">
         {hints.slice(0, revealed).map((hint, index) => (
           <div
             key={index}
-            className="flex gap-2 border border-white/10 bg-white/5 rounded-md px-3 py-2 text-xs text-zinc-300"
+            className="flex gap-2 border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-300"
           >
             <Lightbulb className="w-3.5 h-3.5 flex-none text-zinc-500 mt-0.5" />
             <span>{hint}</span>
@@ -153,6 +155,7 @@ export function ProblemPanel({
   const [lessonMounted, setLessonMounted] = useState(false);
   const [helperMounted, setHelperMounted] = useState(false);
   const [flagged, setFlagged] = useState(initiallyFlagged);
+  const { showError } = useStatus();
   const tabs: Tab[] = [
     "statement",
     ...(lessonNodeId ? (["lesson"] as const) : []),
@@ -169,8 +172,9 @@ export function ProblemPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ flagged: next }),
       });
-    } catch {
+    } catch (err) {
       setFlagged(!next);
+      showError(err instanceof ApiError ? err.message : "Couldn't update the flag");
     }
   }
 
@@ -252,10 +256,10 @@ export function ProblemPanel({
 
         {problem.constraints && (
           <div className="space-y-2">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+            <SectionLabel>
               Constraints
-            </h3>
-            <pre className="text-xs font-mono bg-zinc-900 border border-white/10 rounded-md p-3 whitespace-pre-wrap">
+            </SectionLabel>
+            <pre className="text-xs font-mono bg-zinc-900 border border-white/10 p-3 whitespace-pre-wrap">
               {problem.constraints}
             </pre>
           </div>
@@ -263,11 +267,11 @@ export function ProblemPanel({
 
         {problem.examples.length > 0 && (
           <div className="space-y-3">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+            <SectionLabel>
               Examples
-            </h3>
+            </SectionLabel>
             {problem.examples.map((example) => (
-              <div key={example.id} className="border border-white/10 rounded-md p-3 space-y-2 text-xs">
+              <div key={example.id} className="border border-white/10 p-3 space-y-2 text-xs">
                 <div>
                   <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Input</span>
                   <pre className="font-mono mt-1 whitespace-pre-wrap">{example.input}</pre>

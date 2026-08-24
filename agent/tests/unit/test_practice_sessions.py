@@ -69,10 +69,10 @@ def _service(db_path: str, validation=None) -> ProblemSessionService:
     )
 
 
-async def test_a_practice_session_belongs_to_no_lesson_node(db_path: str) -> None:
-    await _seed_bank_problem(db_path)
+async def test_a_session_started_outside_a_plan_belongs_to_no_lesson_node(db_path: str) -> None:
+    problem = await _seed_bank_problem(db_path)
 
-    session = await _service(db_path).practice_problem("local-user", "skill-1", Language.PYTHON)
+    session = await _service(db_path).start_for_problem("local-user", problem.id)
 
     assert session.lesson_node_id is None
     assert session.lesson_plan_id is None
@@ -82,10 +82,10 @@ async def test_a_practice_session_belongs_to_no_lesson_node(db_path: str) -> Non
     assert reloaded is not None and reloaded.lesson_node_id is None
 
 
-async def test_submitting_a_practice_session_touches_no_plan(db_path: str) -> None:
-    await _seed_bank_problem(db_path)
+async def test_submitting_a_node_less_session_touches_no_plan(db_path: str) -> None:
+    problem = await _seed_bank_problem(db_path)
     service = _service(db_path)
-    session = await service.practice_problem("local-user", "skill-1", Language.PYTHON)
+    session = await service.start_for_problem("local-user", problem.id)
 
     # A plan-bound session would look up and advance its node here; this must not explode
     # on the None, and there is nothing for it to advance.
@@ -94,15 +94,18 @@ async def test_submitting_a_practice_session_touches_no_plan(db_path: str) -> No
     assert updated.status == ProblemSessionStatus.COMPLETED
 
 
-async def test_practice_never_repeats_a_problem_the_learner_has_seen(db_path: str) -> None:
-    await _seed_bank_problem(db_path, "p1")
-    service = _service(db_path)
-    await service.practice_problem("local-user", "skill-1", Language.PYTHON)
+async def test_selection_never_repeats_a_problem_the_learner_has_seen(db_path: str) -> None:
+    from tests.db import seed_lesson_node
 
-    # The bank's only problem is now excluded, so selection misses and generation is
-    # required — which the fake refuses, proving the exclusion actually reached the query.
+    await _seed_bank_problem(db_path, "p1")
+    seed_lesson_node(db_path, "node-1", user_id="local-user", skill_id="skill-1")
+    service = _service(db_path)
+    await service.start_for_problem("local-user", "p1")
+
+    # The bank's only problem has already been served, so selection misses and generation
+    # is required — which the fake refuses, proving the exclusion reached the query.
     with pytest.raises(AssertionError, match="bank problem"):
-        await service.practice_problem("local-user", "skill-1", Language.PYTHON)
+        await service.next_problem("lp-node-1", "local-user")
 
 
 async def test_start_for_problem_creates_a_new_session(db_path: str) -> None:
@@ -405,10 +408,11 @@ async def test_set_plan_language_preserves_a_submitted_session(db_path: str) -> 
 async def test_flagging_round_trips(db_path: str) -> None:
     await _seed_bank_problem(db_path)
     service = _service(db_path)
-    session = await service.practice_problem("local-user", "skill-1", Language.PYTHON)
+    session = await service.start_for_problem("local-user", "p1")
 
     assert (await service.set_flagged(session.id, True)).flagged is True
-    assert [s.flagged for s in await service.list_for_user("local-user")] == [True]
+    sessions = await SqliteProblemSessionRepository(db_path).list_for_user("local-user")
+    assert [s.flagged for s in sessions] == [True]
     assert (await service.set_flagged(session.id, False)).flagged is False
 
 
@@ -439,5 +443,5 @@ async def test_starting_a_node_twice_resumes_instead_of_regenerating(db_path: st
     assert second.id == first.id
     assert second.problem_id == first.problem_id
     # And no second row was written for the same node.
-    assert len(await service.list_for_user("local-user")) == 1
+    assert len(await SqliteProblemSessionRepository(db_path).list_for_user("local-user")) == 1
     assert (await plan_repo.get_node("node-1")).status == LessonNodeStatus.IN_PROGRESS

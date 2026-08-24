@@ -15,6 +15,7 @@ import type {
 import { ProblemPanel } from "./ProblemPanel";
 import { MonacoEditor } from "./MonacoEditor";
 import { TestCasePanel, type TestPanelStatus } from "./TestCasePanel";
+import { SectionLabel } from "@/components/Section";
 
 const AUTOSAVE_DELAY_MS = 2000;
 
@@ -162,20 +163,25 @@ export function CodeWorkbench({
 
 
   // Ctrl/Cmd+Enter to run, +Shift to submit - the bindings every editor-plus-runner uses.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.key !== "Enter") return;
-      if (isRunning || isSubmitting) return;
-      event.preventDefault();
-      if (event.shiftKey) {
-        if (onSubmit) handleSubmit();
-      } else {
-        handleRun();
-      }
+  // Through a ref so the listener binds once: the handlers close over `code`, so binding
+  // them directly would add and remove a window listener on every keystroke.
+  const shortcutRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  shortcutRef.current = (event: KeyboardEvent) => {
+    if (!(event.metaKey || event.ctrlKey) || event.key !== "Enter") return;
+    if (isRunning || isSubmitting) return;
+    event.preventDefault();
+    if (event.shiftKey) {
+      if (onSubmit) handleSubmit();
+    } else {
+      handleRun();
     }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => shortcutRef.current(event);
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  });
+  }, []);
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-black text-white">
@@ -197,9 +203,9 @@ export function CodeWorkbench({
           <ResizablePanelGroup direction="vertical" className="h-full">
             <ResizablePanel defaultSize={55} minSize={15} className="flex flex-col">
               <div className="flex-none h-11 bg-zinc-950 border-b border-white/10 flex items-center justify-between px-4">
-                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+                <SectionLabel>
                   Editor
-                </span>
+                </SectionLabel>
               </div>
               <div className="flex-1 min-h-0">
                 <MonacoEditor language={problem.language} value={code} onChange={setCode} />
@@ -208,9 +214,9 @@ export function CodeWorkbench({
             <ResizableHandle className="h-1 bg-white/5" />
             <ResizablePanel defaultSize={45} minSize={15} className="flex flex-col">
               <div className="flex-none h-11 bg-zinc-950 border-b border-white/10 flex items-center justify-between px-4">
-                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">
+                <SectionLabel>
                   Test Cases
-                </span>
+                </SectionLabel>
                 <div className="flex items-center gap-2">
                   <Button
                     variant="secondary"

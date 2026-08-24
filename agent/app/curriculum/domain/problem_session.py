@@ -24,7 +24,6 @@ class ProblemSession(BaseModel):
     user_id: str
     source_code: str | None = None
     status: ProblemSessionStatus
-    # Learner-set "come back to this one".
     flagged: bool = False
     created_at: datetime
     updated_at: datetime

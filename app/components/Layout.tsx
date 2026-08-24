@@ -1,4 +1,3 @@
-import { Toaster } from "@/components/ui/sonner";
 import { BusyIndicator, ErrorBanner, StatusProvider } from "~/lib/status";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -10,7 +9,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     {children}
                 </main>
                 <BusyIndicator />
-                <Toaster />
             </div>
         </StatusProvider>
     );

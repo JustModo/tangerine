@@ -4,16 +4,10 @@ from app.execution.domain.models import ExecutionRequest, ExecutionStatus, TestR
 from app.shared.config import get_settings
 from app.shared.hashing import hash_output
 
-# Citron status ids that mean "the program never produced a comparable result" — these
-# are the WIRE ids the deployed `justmodo/citron:latest` image actually returns, live-
-# verified against a running container (id 4 = Wrong Answer, 5 = Time Limit Exceeded,
-# 6 = Compilation Error, 7 = SIGSEGV, 11 = NZEC — confirmed directly, 2026-08-21). This
-# does NOT match the sibling citron/ source tree's Go status.go const block, which uses
-# different (0-indexed) numbering — that tree is evidently ahead of / different from
-# what's actually baked into the pinned image, so the LIVE wire values win, not a static
-# source read. Id 4 (Wrong Answer) and id 0-3 below it are intentionally absent — Wrong
-# Answer still falls through to our own hash_output comparison, matching the class's
-# whole design intent of ignoring Citron's own verdict.
+# Status ids that mean the program produced no comparable result. These are the wire
+# values `justmodo/citron:latest` returns, verified against a running container on
+# 2026-08-21; do not derive them from Citron's source, which numbers them differently.
+# Ids 0-4 are absent: Wrong Answer falls through to our own hash comparison.
 _INFRA_FAILURE_STATUS = {
     5: ExecutionStatus.TIMEOUT,  # Time Limit Exceeded
     6: ExecutionStatus.ERROR,  # Compilation Error

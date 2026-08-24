@@ -9,6 +9,7 @@ import { ApiError, apiJson } from "~/lib/api";
 import { GeminiKeySettings } from "@/components/GeminiKey";
 import { AppSettings } from "@/components/AppSettings";
 import { Separator } from "@/components/ui/separator";
+import { EmptyState, SectionLabel } from "@/components/Section";
 
 interface SessionSummary {
   id: string;
@@ -116,16 +117,16 @@ export default function Home() {
         <div className="flex-none w-full border-b border-white/10 bg-zinc-950 px-10 py-5">
           <div className="max-w-3xl mx-auto w-full space-y-5">
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-3">
+              <SectionLabel as="p" className="mb-3">
                 Gemini
-              </p>
+              </SectionLabel>
               <Separator className="bg-white/10 mb-4" />
               <GeminiKeySettings />
             </div>
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-3">
+              <SectionLabel as="p" className="mb-3">
                 Preferences
-              </p>
+              </SectionLabel>
               <Separator className="bg-white/10 mb-4" />
               <AppSettings />
             </div>
@@ -137,9 +138,7 @@ export default function Home() {
         <div className="max-w-3xl mx-auto w-full flex flex-col pb-16">
           <div className="flex flex-col divide-y divide-white/5">
             {!loading && sessions.length === 0 && (
-              <p className="text-zinc-500 text-xs uppercase py-8 text-center">
-                No sessions yet. Start one above.
-              </p>
+              <EmptyState>No sessions yet. Start one above.</EmptyState>
             )}
             {sessions.map((session) => {
               const plan = plansBySession[session.id];

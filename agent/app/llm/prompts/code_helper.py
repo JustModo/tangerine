@@ -1,6 +1,5 @@
-# The prompt itself avoids em dashes and long sentences on purpose. The model copies the
-# register of its instructions, so a prompt full of the punctuation it is told to avoid
-# undoes the instruction.
+# The prompt avoids em dashes and long sentences itself: the model copies the register of
+# its instructions.
 CODE_HELPER_SYSTEM_PROMPT = (
     "You are a coding mentor helping a learner with ONE specific practice problem. You can "
     "see the problem, the code they have written so far, and the result of their last test "

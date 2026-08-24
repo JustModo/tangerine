@@ -1,10 +1,8 @@
-"""Everything about a generated problem that FAILED validation: how the rejection is
-described back to the model, and how the model's repair is merged back in.
+"""Describing a failed validation back to the model, and merging its repair back in.
 
-This lives apart from the validation service on purpose. Validation's job is to decide
-whether a problem is fit to serve; deciding what to tell the model about a rejection, and
-how much of it to send, is a separate concern with its own tuning (see the clip limits
-below) — and the whole repair path is optional to validation, not part of it.
+Kept out of the validation service: that decides whether a problem is fit to serve, while
+this decides what to tell the model and how much of it to send (see the clip limits below).
+The repair path is optional to validation.
 """
 
 from dataclasses import dataclass
@@ -14,7 +12,7 @@ from app.execution.domain.models import ExecutionStatus, TestResult
 from app.llm.schemas.problem import GeneratedExample, GeneratedProblem, ProblemPatch
 
 # How much of any one value reaches the repair prompt. A failing stdin or stdout can be a
-# stress-sized blob, and the model needs to see the SHAPE of it, not all of it.
+# stress-sized blob, and the model needs its shape rather than all of it.
 _CLIP = 200
 _CLIP_ERROR = 300
 # Two failing cases is enough to show a pattern; more just costs tokens for the same fix.
@@ -25,9 +23,9 @@ FailureKind = Literal["no_tests", "runtime", "mismatch"]
 
 @dataclass(frozen=True)
 class ValidationFailure:
-    """Why a generated problem was rejected, in a form small enough to send straight back
-    to the model. This is the whole point of the repair loop: the diagnosis already exists
-    at the moment of rejection, and throwing it away is what made the old retry blind."""
+    """Why a generated problem was rejected, small enough to send straight back to the
+    model. The diagnosis already exists at the moment of rejection; keeping it is what
+    separates a targeted repair from a blind retry."""
 
     kind: FailureKind
     detail: str

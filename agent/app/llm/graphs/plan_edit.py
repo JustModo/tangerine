@@ -60,7 +60,7 @@ async def revise_curriculum(
     current_steps: str,
     instruction: str,
 ) -> RevisedCurriculum:
-    # Deliberately uncached: the output depends on the learner's current plan AND a free-text
+    # Uncached: the output depends on the learner's current plan and a free-text
     # instruction, so it is never the same twice — the opposite of what SqliteLLMCache is for.
     graph = build_plan_edit_graph(provider)
     final_state = await graph.ainvoke(

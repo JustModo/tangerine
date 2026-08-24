@@ -41,7 +41,7 @@ export function ConfirmDialog({
       }}
       className="m-auto bg-transparent p-0 backdrop:bg-black/70 max-w-md w-[calc(100%-2rem)]"
     >
-      <div className="bg-zinc-950 border border-white/15 rounded-md p-6 space-y-4 text-white">
+      <div className="bg-zinc-950 border border-white/15 p-6 space-y-4 text-white">
         <div className="space-y-1.5">
           <h2 className="text-sm font-bold uppercase tracking-wide">{title}</h2>
           {body && <p className="text-xs text-zinc-400">{body}</p>}

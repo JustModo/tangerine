@@ -69,7 +69,7 @@ export function HealthGate({ children }: { children: React.ReactNode }) {
           {services.map(({ key, label, hint }) => {
             const ok = health?.services?.[key] ?? false;
             return (
-              <div key={key} className="flex items-start gap-3 border border-white/10 rounded-md px-4 py-3">
+              <div key={key} className="flex items-start gap-3 border border-white/10 px-4 py-3">
                 {ok ? (
                   <CheckCircle2 className="w-4 h-4 text-green-500 flex-none mt-0.5" />
                 ) : (

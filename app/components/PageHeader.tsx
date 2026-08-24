@@ -7,7 +7,6 @@ export function PageHeader({
   subtitle,
   actions,
   backTo,
-  showBack = true,
 }: {
   title?: React.ReactNode;
   subtitle?: React.ReactNode;
@@ -17,24 +16,21 @@ export function PageHeader({
    * real browser history otherwise, so a page reached from several places (like a problem
    * session) returns to wherever you actually came from. */
   backTo?: string;
-  showBack?: boolean;
 }) {
   const navigate = useNavigate();
 
   return (
     <div className="flex-none w-full px-6 py-3 flex items-center justify-between gap-4 border-b border-white/10 bg-black">
       <div className="flex items-center gap-3 min-w-0">
-        {showBack && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => (backTo ? navigate(backTo) : navigate(-1))}
-            aria-label="Back"
-            className="flex-none"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => (backTo ? navigate(backTo) : navigate(-1))}
+          aria-label="Back"
+          className="flex-none"
+        >
+          <ArrowLeft className="w-4 h-4" />
+        </Button>
         <div className="min-w-0">
           {title && <div className="text-sm font-bold uppercase tracking-wide truncate">{title}</div>}
           {subtitle && (

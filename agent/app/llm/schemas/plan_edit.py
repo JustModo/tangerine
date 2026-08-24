@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class RevisedStep(BaseModel):
-    # As in GeneratedCurriculumNode, `skill` IS the step's name in the UI, and it is also
+    # As in GeneratedCurriculumNode, `skill` is the step's name in the UI, and it is also
     # the key the reconciler matches on to preserve completed progress. There is no
     # separate title: one existed, was never read, and only invited the model to spend
     # tokens on it.

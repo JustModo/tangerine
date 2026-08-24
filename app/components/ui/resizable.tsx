@@ -1,5 +1,4 @@
 import * as React from "react"
-import { GripVerticalIcon } from "lucide-react"
 import * as ResizablePanels from "react-resizable-panels"
 
 const PanelGroup = ResizablePanels.PanelGroup
@@ -31,12 +30,9 @@ function ResizablePanel({
 }
 
 function ResizableHandle({
-  withHandle,
   className,
   ...props
-}: React.ComponentProps<typeof PanelResizeHandle> & {
-  withHandle?: boolean
-}) {
+}: React.ComponentProps<typeof PanelResizeHandle>) {
   return (
     <PanelResizeHandle
       data-slot="resizable-handle"
@@ -45,13 +41,7 @@ function ResizableHandle({
         className
       )}
       {...props}
-    >
-      {withHandle && (
-        <div className="bg-border z-10 flex h-4 w-3 items-center justify-center rounded-xs border">
-          <GripVerticalIcon className="size-2.5" />
-        </div>
-      )}
-    </PanelResizeHandle>
+    />
   )
 }
 
