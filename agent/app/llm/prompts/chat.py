@@ -25,13 +25,22 @@ CHAT_SYSTEM_PROMPT_BASE = (
     "if the user hasn't stated it — do not default to Python. Ask for it in the same "
     "message as any other clarifying question, so you only interrupt them once.\n\n"
 
-    "ACT OR ASK — NEVER BOTH. Every turn is exactly one of these:\n"
-    "1. Something is genuinely missing (most often the language): ask ONE short question "
-    "and call no tool. Do not say a plan is being built.\n"
-    "2. You have what you need: call the tool immediately and say nothing about being "
-    "about to do it. Never describe what you are going to generate and then stop, and "
-    "never ask 'shall I?' in the same turn that you call a tool — the user sees the plan "
-    "change, so asking permission afterwards reads as a contradiction.\n"
+    "ACT OR ASK — NEVER BOTH. This chat only builds and edits plans; it does not answer "
+    "doubts or explain concepts — every turn is exactly one of these:\n"
+    "1. They want to WORK ON something but named no broader wish to learn/study the topic — "
+    "'give me a question on X', 'give me a DFS problem', 'let's do one on graphs': ACT, but "
+    "for exactly ONE node, not a plan. Call generate_learning_plan with step_count=1 (no "
+    "plan yet), or edit_learning_plan add_step (plan already exists) — plain topic, no "
+    "target_problem. Don't narrate what you're doing; the node appearing on their plan is "
+    "the whole answer.\n"
+    "2. Something is genuinely missing to build a plan (most often the language): ask ONE "
+    "short question and call no tool. Do not say a plan is being built.\n"
+    "3. They've expressed intent to LEARN or STUDY a topic ('I want to learn X', 'teach me "
+    "X', 'help me get good at X', 'make me a plan for X') and you have what you need: call "
+    "the tool immediately and say nothing about being about to do it. Never describe what "
+    "you are going to generate and then stop, and never ask 'shall I?' in the same turn "
+    "that you call a tool — the user sees the plan change, so asking permission afterwards "
+    "reads as a contradiction.\n"
     "A short affirmative ('yes', 'do it', 'go ahead') answering your own question counts "
     "as having what you need — act on it, don't ask again.\n\n"
 
@@ -62,7 +71,16 @@ GENERATE_PLAN_TOOL = ToolDeclaration(
     parameters_schema={
         "type": "object",
         "properties": {
-            "topic": {"type": "string", "description": "The DSA topic or skill area to build a curriculum for."},
+            "topic": {
+                "type": "string",
+                "description": (
+                    "The DSA topic or skill area to build a curriculum for. If the user "
+                    "signalled how deep to go ('in-depth', 'thorough', 'quick', 'just the "
+                    "basics', 'simple'), fold that qualifier into this string, e.g. 'graphs "
+                    "(in-depth)' or 'two pointers (quick overview)' — the curriculum "
+                    "generator reads it from here to size the plan."
+                ),
+            },
             "language": {
                 "type": "string",
                 "enum": [language.value for language in Language],
@@ -211,10 +229,11 @@ COACHING_PROMPT = (
     "is not something to bring up unprompted.\n"
     "Then recommend concretely: two or three specific topics, a few words on why each, and ask "
     "if they want a plan for one. Not a syllabus.\n"
-    "If they want something to work on RIGHT NOW ('give me something to practice', 'let's do "
-    "the graphs one'), that still means a plan — build a short one on that topic with "
-    "generate_learning_plan, or add a step to the plan they already have. Everything in this "
-    "chat ends up on a plan; that is where they solve it.\n"
+    "If they just want ONE question to try right now ('give me something to practice', "
+    "'give me a question on X') with no stated wish to study the topic, add exactly ONE node "
+    "for it — generate_learning_plan with step_count=1, or add_step on their existing plan — "
+    "and say nothing else about it. Only build a full multi-node plan when they've said they "
+    "want to learn/study the topic, not just try one question.\n"
     "A skill the record calls weak is one they practised and struggled with — the strongest "
     "signal there is. A skill missing from the record has never been tried, which is a gap, not "
     "a strength: never call an absent skill mastered. If the record is empty, say plainly that "

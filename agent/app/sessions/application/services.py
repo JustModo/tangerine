@@ -212,6 +212,7 @@ class SessionService:
         existing_plan: bool,
         user_id: str | None,
         depth: int,
+        note_id: str | None = None,
     ) -> AsyncIterator[dict] | None:
         """Routes one tool call to its handler, or None when the name matches nothing.
 
@@ -220,10 +221,10 @@ class SessionService:
         args = tool_call.args
         if tool_call.name == "generate_learning_plan":
             return self._handle_generate_plan(
-                session_id, args, history, message, existing_plan, user_id, depth
+                session_id, args, history, message, existing_plan, user_id, depth, note_id
             )
         if tool_call.name == "edit_learning_plan":
-            return self._handle_edit_plan(session_id, args, history, message, depth)
+            return self._handle_edit_plan(session_id, args, history, message, depth, note_id)
         if tool_call.name == "get_practice_record":
             return self._handle_practice_record(
                 session_id, user_id, history, message, existing_plan, depth
@@ -234,13 +235,32 @@ class SessionService:
             )
         if tool_call.name == "create_practice_plan":
             return self._handle_create_practice_plan(
-                session_id, args, history, message, existing_plan, depth
+                session_id, args, history, message, existing_plan, depth, note_id
             )
         if tool_call.name == "set_problem_flag":
             return self._handle_set_problem_flag(
                 session_id, args, history, message, existing_plan, user_id, depth
             )
         return None
+
+    async def _announce(self, session_id: str, label: str, note_id: str | None) -> dict:
+        """The one place a tool writes its status line. A chained tool is handed the note id
+        the previous one made and rewrites that line instead of stacking a second, so a
+        two-tool turn ("a new one in python") reads as one step — the same single line a
+        lookup-then-act chain already gets by persisting nothing on the lookup."""
+        if note_id is not None:
+            await self._repository.update_message_content(note_id, label)
+        else:
+            note = ChatMessage(
+                id=str(uuid.uuid4()),
+                session_id=session_id,
+                role=ChatRole.SYSTEM,
+                content=label,
+                created_at=datetime.now(timezone.utc),
+            )
+            await self._repository.add_message(note)
+            note_id = note.id
+        return {"type": "tool_start", "label": label, "message_id": note_id}
 
     async def _resolve_language(self, requested_language: str) -> Language | None:
         """Explicit user language always wins. Absent that, the configured default fills in
@@ -263,6 +283,7 @@ class SessionService:
         existing_plan: bool,
         user_id: str | None,
         depth: int = 0,
+        note_id: str | None = None,
     ) -> AsyncIterator[dict]:
         # Enforced here, not just in the prompt: a plan in a language the learner never
         # chose — or one the sandbox cannot run — is worse than no plan, and
@@ -298,15 +319,9 @@ class SessionService:
             return
 
         label = "Updating your learning plan..." if existing_plan else "Generating a learning plan..."
-        system_note = ChatMessage(
-            id=str(uuid.uuid4()),
-            session_id=session_id,
-            role=ChatRole.SYSTEM,
-            content=label,
-            created_at=datetime.now(timezone.utc),
-        )
-        await self._repository.add_message(system_note)
-        yield {"type": "tool_start", "label": label, "message_id": system_note.id}
+        event = await self._announce(session_id, label, note_id)
+        note_id = event["message_id"]
+        yield event
 
         topic = args.get("topic") or "this topic"
         level = args.get("level") or "beginner"
@@ -359,6 +374,7 @@ class SessionService:
             fallback,
             plan.id if plan is not None else None,
             depth=depth,
+            note_id=note_id,
         ):
             yield event
 
@@ -374,6 +390,7 @@ class SessionService:
         history: list[ChatTurn],
         user_message: str,
         depth: int = 0,
+        note_id: str | None = None,
     ) -> AsyncIterator[dict]:
         """Single entry point for every kind of plan edit — the operation named in `args`
         picks a deterministic, targeted CurriculumService method (no LLM call, no other
@@ -512,15 +529,9 @@ class SessionService:
             action = lambda: self._curriculum_service.edit_plan(plan_id, instruction)
             done_text = lambda plan: f"Updated the plan. {self._plan_step_summary(plan)}"
 
-        system_note = ChatMessage(
-            id=str(uuid.uuid4()),
-            session_id=session_id,
-            role=ChatRole.SYSTEM,
-            content=label,
-            created_at=datetime.now(timezone.utc),
-        )
-        await self._repository.add_message(system_note)
-        yield {"type": "tool_start", "label": label, "message_id": system_note.id}
+        event = await self._announce(session_id, label, note_id)
+        note_id = event["message_id"]
+        yield event
 
         plan = None
         not_found: NotFoundError | None = None
@@ -554,6 +565,7 @@ class SessionService:
             fallback,
             plan.id if plan is not None else None,
             depth=depth,
+            note_id=note_id,
         ):
             yield event
 
@@ -678,6 +690,7 @@ class SessionService:
         user_message: str,
         existing_plan: bool,
         depth: int = 0,
+        note_id: str | None = None,
     ) -> AsyncIterator[dict]:
         """A plan whose steps are problems the learner already has. Costs no LLM call and
         no sandbox run — every step reopens its bound problem directly."""
@@ -698,15 +711,9 @@ class SessionService:
             return
 
         label = f"Building a plan from {len(problem_ids)} problem(s)..."
-        system_note = ChatMessage(
-            id=str(uuid.uuid4()),
-            session_id=session_id,
-            role=ChatRole.SYSTEM,
-            content=label,
-            created_at=datetime.now(timezone.utc),
-        )
-        await self._repository.add_message(system_note)
-        yield {"type": "tool_start", "label": label, "message_id": system_note.id}
+        event = await self._announce(session_id, label, note_id)
+        note_id = event["message_id"]
+        yield event
 
         plan = None
         try:
@@ -738,6 +745,7 @@ class SessionService:
             fallback,
             plan.id if plan is not None else None,
             depth=depth,
+            note_id=note_id,
         ):
             yield event
 
@@ -798,6 +806,7 @@ class SessionService:
         ),
         memo: str | None = None,
         depth: int = 0,
+        note_id: str | None = None,
     ) -> AsyncIterator[dict]:
         """Feeds a tool's result back to the model for a natural closing line, streamed like
         any other reply, then persists it. Shared by every tool.
@@ -860,7 +869,7 @@ class SessionService:
             if chunk.tool_call is not None and may_chain:
                 chained = self._handler_for(
                     chunk.tool_call, session_id, history, chained_context,
-                    chain_plan, chain_user_id, depth + 1,
+                    chain_plan, chain_user_id, depth + 1, note_id,
                 )
                 if chained is not None:
                     # ponytail: this call's memo is dropped — the chained handler persists

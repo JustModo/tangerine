@@ -15,8 +15,12 @@ CURRICULUM_SYSTEM_PROMPT = (
     "later edited. If two steps really cover the same skill, they should be one step.\n\n"
 
     "Length: if the request states how many steps the learner wants, honour that EXACTLY — "
-    "one step means one step. Otherwise keep the sequence focused at 4 to 8 nodes; that "
-    "range is a default, never an override of an explicit request.\n\n"
+    "one step means one step. Otherwise, size the sequence to how much depth they asked for: "
+    "'simple', 'quick', 'just the basics' means 2-3 nodes; an unqualified request defaults to "
+    "4-5; 'in-depth', 'thorough', 'cover it properly', 'don't skip anything' means 6-8 or more "
+    "— keep going past 8 if the topic genuinely has that many distinct prerequisite skills. "
+    "This is read from tone, not asked for explicitly — never stop to ask how many steps they "
+    "want.\n\n"
 
     "WHAT TO PICK. Unless the learner asked for something specific, bias the steps toward "
     "the patterns technical interviews actually test, roughly in order of how often they "

@@ -63,6 +63,14 @@ class SqliteSessionRepository:
             )
             await db.commit()
 
+    async def update_message_content(self, message_id: str, content: str) -> None:
+        async with connect(self._database_path) as db:
+            await db.execute(
+                "UPDATE chat_messages SET content = ? WHERE id = ?",
+                (content, message_id),
+            )
+            await db.commit()
+
     async def delete(self, session_id: str) -> None:
         async with connect(self._database_path) as db:
             # Helper-chat rows first — they hang off problem_sessions, so deleting the

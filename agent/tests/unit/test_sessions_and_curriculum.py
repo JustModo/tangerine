@@ -412,6 +412,68 @@ async def test_edit_plan_tool_call_change_language_switches_the_plan(db_path: st
     assert events[-1]["type"] == "done"
 
 
+async def test_two_plan_edits_in_one_turn_leave_a_single_status_line(db_path: str) -> None:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    generated = GeneratedCurriculum(
+        nodes=[
+            GeneratedCurriculumNode(skill="prefix-sum", difficulty=1),
+            GeneratedCurriculumNode(skill="range-query", difficulty=2),
+        ],
+    )
+    llm = FakeLLMProvider(structured_responses=[generated])
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path), llm, skill_repository=SqliteSkillRepository(db_path)
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, curriculum)
+    session = await service.create_session(user.id)
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.JAVA, "beginner")
+
+    llm._chat_streams = [
+        [
+            ChatChunk(
+                tool_call=ToolCallResult(
+                    name="edit_learning_plan", args={"operation": "remove_step", "step": "2"}
+                )
+            ),
+            ChatChunk(done=True),
+        ],
+        [
+            ChatChunk(
+                tool_call=ToolCallResult(
+                    name="edit_learning_plan",
+                    args={"operation": "change_language", "language": "python"},
+                )
+            ),
+            ChatChunk(done=True),
+        ],
+        [ChatChunk(text_delta="Dropped it and switched to Python."), ChatChunk(done=True)],
+    ]
+
+    events = [
+        event
+        async for event in service.add_message(session.id, "drop step 2 and make it python")
+    ]
+
+    # Both edits ran...
+    updated = await curriculum.get(plan.id)
+    assert updated is not None
+    assert [n.skill_name for n in updated.nodes] == ["prefix-sum"]
+    assert updated.language == Language.PYTHON
+
+    # ...and each showed its own label while the turn was in flight...
+    assert [e["label"] for e in events if e["type"] == "tool_start"] == [
+        "Removing step 2...",
+        "Switching the plan to python...",
+    ]
+
+    # ...but the transcript keeps one line, rewritten to the last step, not two.
+    fetched = await service.get_session(session.id)
+    assert fetched is not None
+    system_messages = [m for m in fetched.messages if m.role == ChatRole.SYSTEM]
+    assert len(system_messages) == 1
+    assert system_messages[0].content == "Switching the plan to python..."
+
+
 async def test_edit_plan_tool_call_change_language_asks_for_an_unsupported_language(db_path: str) -> None:
     user = await SqliteUserRepository(db_path).ensure_default_user()
     generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)])
