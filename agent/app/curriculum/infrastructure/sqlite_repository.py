@@ -17,6 +17,31 @@ _UPSERT_NODE_SQL = (
 )
 
 
+_NODE_SELECT = (
+    "SELECT n.*, s.name AS skill_name, p.title AS problem_title FROM lesson_nodes n "
+    "JOIN skills s ON s.id = n.skill_id "
+    "LEFT JOIN problems p ON p.id = COALESCE(n.problem_id, ("
+    "SELECT ps.problem_id FROM problem_sessions ps WHERE ps.lesson_node_id = n.id "
+    "ORDER BY ps.created_at DESC LIMIT 1)) "
+)
+
+
+def _node(row: aiosqlite.Row) -> LessonNode:
+    return LessonNode(
+        id=row["id"],
+        lesson_plan_id=row["lesson_plan_id"],
+        skill_id=row["skill_id"],
+        skill_name=row["skill_name"],
+        problem_title=row["problem_title"],
+        sequence_index=row["sequence_index"],
+        status=row["status"],
+        difficulty=row["difficulty"],
+        source_problem_md=row["source_problem_md"],
+        problem_id=row["problem_id"],
+        created_at=row["created_at"],
+    )
+
+
 def _node_params(node: LessonNode) -> tuple:
     return (
         node.id,
@@ -99,26 +124,9 @@ class SqliteLessonPlanRepository:
 
     async def get_node(self, node_id: str) -> LessonNode | None:
         async with connect(self._database_path) as db:
-            cursor = await db.execute(
-                "SELECT n.*, s.name AS skill_name FROM lesson_nodes n "
-                "JOIN skills s ON s.id = n.skill_id WHERE n.id = ?",
-                (node_id,),
-            )
+            cursor = await db.execute(_NODE_SELECT + "WHERE n.id = ?", (node_id,))
             row = await cursor.fetchone()
-            if row is None:
-                return None
-            return LessonNode(
-                id=row["id"],
-                lesson_plan_id=row["lesson_plan_id"],
-                skill_id=row["skill_id"],
-                skill_name=row["skill_name"],
-                sequence_index=row["sequence_index"],
-                status=row["status"],
-                difficulty=row["difficulty"],
-                source_problem_md=row["source_problem_md"],
-                problem_id=row["problem_id"],
-                created_at=row["created_at"],
-            )
+            return _node(row) if row else None
 
     async def update_node_status(self, node_id: str, status: LessonNodeStatus) -> None:
         async with connect(self._database_path) as db:
@@ -155,9 +163,7 @@ class SqliteLessonPlanRepository:
 
     async def _hydrate(self, db: aiosqlite.Connection, row: aiosqlite.Row) -> LessonPlan:
         cursor = await db.execute(
-            "SELECT n.*, s.name AS skill_name FROM lesson_nodes n "
-            "JOIN skills s ON s.id = n.skill_id "
-            "WHERE n.lesson_plan_id = ? ORDER BY n.sequence_index ASC",
+            _NODE_SELECT + "WHERE n.lesson_plan_id = ? ORDER BY n.sequence_index ASC",
             (row["id"],),
         )
         node_rows = await cursor.fetchall()
@@ -169,19 +175,5 @@ class SqliteLessonPlanRepository:
             level=row["level"],
             version=row["version"],
             created_at=row["created_at"],
-            nodes=[
-                LessonNode(
-                    id=n["id"],
-                    lesson_plan_id=n["lesson_plan_id"],
-                    skill_id=n["skill_id"],
-                    skill_name=n["skill_name"],
-                    sequence_index=n["sequence_index"],
-                    status=n["status"],
-                    difficulty=n["difficulty"],
-                    source_problem_md=n["source_problem_md"],
-                    problem_id=n["problem_id"],
-                    created_at=n["created_at"],
-                )
-                for n in node_rows
-            ],
+            nodes=[_node(n) for n in node_rows],
         )

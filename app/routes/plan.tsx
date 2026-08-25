@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/Section";
 interface LessonNode {
   id: string;
   skill_name: string | null;
+  problem_title: string | null;
   sequence_index: number;
   status: string;
   difficulty: string | null;
@@ -198,7 +199,7 @@ export default function PlanScreen() {
                   )}
                   <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
                     <span className="text-sm font-bold uppercase tracking-wide truncate">
-                      {node.sequence_index + 1}. {node.skill_name || node.id}
+                      {node.sequence_index + 1}. {node.problem_title || node.skill_name || node.id}
                     </span>
                     <div className="flex items-center gap-2 flex-none">
                       {node.difficulty && (

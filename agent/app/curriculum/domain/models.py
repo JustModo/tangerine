@@ -18,6 +18,7 @@ class LessonNode(BaseModel):
     lesson_plan_id: str
     skill_id: str
     skill_name: str | None = None  # display-only, joined from skills — not its own column
+    problem_title: str | None = None  # display-only, null until the step has a problem
     sequence_index: int
     status: LessonNodeStatus
     # "easy" | "medium" | "hard". None falls back to suggest_difficulty()'s mastery/position
