@@ -1,7 +1,7 @@
 # Bump LESSON_NOTES_VERSION whenever LESSON_NOTES_SYSTEM_PROMPT changes — SqliteLLMCache
 # keys on caller-supplied semantics, not prompt content, so previously cached notes are
 # not invalidated by editing the prompt alone.
-LESSON_NOTES_VERSION = "v2"
+LESSON_NOTES_VERSION = "v3"
 
 LESSON_NOTES_SYSTEM_PROMPT = (
     "You are a DSA coach teaching ONE core concept to a learner about to solve a problem "
@@ -15,12 +15,19 @@ LESSON_NOTES_SYSTEM_PROMPT = (
     "4. Pitfalls and cost — the mistake people actually make, plus time and space complexity.\n"
     "Merge steps rather than pad to hit a number, and never split one idea across two.\n\n"
 
-    "TEACH ON A DIFFERENT EXAMPLE. You are writing from the skill name alone and cannot see "
-    "the problem the learner is about to attempt, so never present a finished, general "
-    "solution to the class of problem this skill names. Demonstrate on a small unrelated toy "
-    "example instead — a fixed 4-6 element list, a short string — with real values, real "
-    "code, and real output. Showing the mechanic work on toy data teaches it; handing over "
-    "the general solution replaces the practice.\n\n"
+    "USING THE PROBLEM. When the problem the learner is about to attempt is given below, it "
+    "is there for ONE purpose: working out which mechanic actually solves it, so you teach "
+    "that mechanic and not a loose association with the skill name. The reference solution, "
+    "when given, is the fully assembled program — ignore its stdin parsing and printing, "
+    "only the middle function is the algorithm.\n\n"
+
+    "TEACH ON A DIFFERENT EXAMPLE. Never restate, paraphrase or reproduce the reference "
+    "solution, never walk through the problem's own example, never name its variables or "
+    "say 'in this problem'. Demonstrate on a small unrelated toy example instead — a fixed "
+    "4-6 element list, a short string — with real values, real code, and real output. "
+    "Showing the mechanic work on toy data teaches it; handing over the solution replaces "
+    "the practice. With no problem given, work from the skill name alone under the same "
+    "rule.\n\n"
 
     "WRITING STYLE — this matters as much as the content:\n"
     "- Plain English. Define every term the first time you use it.\n"
@@ -49,5 +56,33 @@ LESSON_NOTES_SYSTEM_PROMPT = (
 )
 
 
-def lesson_notes_user_prompt(skill: str, language: str, level: str) -> str:
-    return f"Skill: {skill}\nLanguage: {language}\nLearner level: {level}"
+# Same caps as the code helper's context: a statement or a reference solution is bounded
+# input, but an unbounded one multiplies straight into every regenerate.
+_MAX_STATEMENT_CHARS = 2000
+_MAX_CODE_CHARS = 4000
+
+
+def lesson_notes_user_prompt(
+    skill: str,
+    language: str,
+    level: str,
+    problem_title: str | None = None,
+    statement_md: str | None = None,
+    tags: list[str] | None = None,
+    reference_solution: str | None = None,
+) -> str:
+    """The problem is optional: notes can be opened before a problem session exists, and
+    the lesson is still worth generating from the skill alone in that case."""
+    sections = [f"Skill: {skill}\nLanguage: {language}\nLearner level: {level}"]
+    if problem_title:
+        sections.append(f"Problem: {problem_title}")
+    if tags:
+        sections.append("Tags: " + ", ".join(tags))
+    if statement_md:
+        sections.append(statement_md[:_MAX_STATEMENT_CHARS])
+    if reference_solution:
+        sections.append(
+            "REFERENCE SOLUTION (orientation only — never reproduce):\n"
+            + reference_solution[:_MAX_CODE_CHARS]
+        )
+    return "\n\n".join(sections)

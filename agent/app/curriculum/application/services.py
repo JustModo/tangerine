@@ -441,9 +441,14 @@ class CurriculumService:
     async def get_node_notes(
         self, node_id: str, refresh: bool = False
     ) -> GeneratedLessonNotes:
-        """Lesson for a node's skill, generated on request and cached after. Locked nodes
-        are refused so lessons can't be generated (and paid for) ahead of the curriculum.
-        refresh forces a fresh generation over the cached one."""
+        """Lesson for the problem the node is serving, generated on request and cached
+        after. Locked nodes are refused so lessons can't be generated (and paid for) ahead
+        of the curriculum. refresh forces a fresh generation over the cached one.
+
+        The problem is passed in so the lesson teaches the mechanic that actually solves
+        it rather than a loose association with the skill name. It is genuinely optional:
+        the notes tab can be opened before the learner presses Start, and a skill-only
+        lesson is still worth having then."""
         node = await self._repository.get_node(node_id)
         if node is None:
             raise NotFoundError(f"Lesson node {node_id} not found")
@@ -456,10 +461,17 @@ class CurriculumService:
         if plan is None:
             raise NotFoundError(f"Lesson plan {node.lesson_plan_id} not found")
 
-        # ponytail: lessons live in llm_cache keyed by (skill, language, level) — they're
-        # derivable, shared across every plan, and cheap to regenerate, so they need no
-        # table of their own. Give them one only if they ever become user-editable or
-        # per-user personalized, at which point they stop being derivable.
+        problem = version = None
+        if self._problem_session_repository is not None and self._problem_repository is not None:
+            session = await self._problem_session_repository.get_by_node(node_id)
+            if session is not None:
+                problem = await self._problem_repository.get(session.problem_id)
+                version = await self._problem_repository.get_latest_version(session.problem_id)
+
+        # ponytail: lessons live in llm_cache keyed by (problem or skill, language, level)
+        # — they're derivable and cheap to regenerate, so they need no table of their own.
+        # Give them one only if they ever become user-editable or per-user personalized, at
+        # which point they stop being derivable.
         return await generate_lesson_notes(
             self._llm_provider,
             # The skills JOIN is INNER so skill_name is always present; the fallback only
@@ -469,6 +481,11 @@ class CurriculumService:
             plan.level,
             cache=self._llm_cache,
             refresh=refresh,
+            problem_id=problem.id if problem else None,
+            problem_title=problem.title if problem else None,
+            tags=problem.tags if problem else None,
+            statement_md=version.statement_md if version else None,
+            reference_solution=version.reference_solution if version else None,
         )
 
     async def list_for_session(self, session_id: str) -> list[LessonPlan]:

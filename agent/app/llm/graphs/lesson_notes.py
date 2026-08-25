@@ -20,6 +20,10 @@ class LessonNotesGraphState(TypedDict):
     skill: str
     language: str
     level: str
+    problem_title: str | None
+    statement_md: str | None
+    tags: list[str] | None
+    reference_solution: str | None
     result: GeneratedLessonNotes | None
     error: str | None
     attempts: int
@@ -29,7 +33,15 @@ def build_lesson_notes_graph(provider: LLMProvider):
     async def generate(state: LessonNotesGraphState) -> LessonNotesGraphState:
         request = StructuredGenerationRequest(
             system_prompt=LESSON_NOTES_SYSTEM_PROMPT,
-            user_prompt=lesson_notes_user_prompt(state["skill"], state["language"], state["level"]),
+            user_prompt=lesson_notes_user_prompt(
+                state["skill"],
+                state["language"],
+                state["level"],
+                problem_title=state["problem_title"],
+                statement_md=state["statement_md"],
+                tags=state["tags"],
+                reference_solution=state["reference_solution"],
+            ),
         )
         try:
             result = await provider.generate_structured(request, GeneratedLessonNotes)
@@ -56,11 +68,20 @@ async def generate_lesson_notes(
     level: str,
     cache: SqliteLLMCache | None = None,
     refresh: bool = False,
+    problem_id: str | None = None,
+    problem_title: str | None = None,
+    statement_md: str | None = None,
+    tags: list[str] | None = None,
+    reference_solution: str | None = None,
 ) -> GeneratedLessonNotes:
-    # One lesson per (skill, language, level), shared across every plan and user. The
-    # version segment is the cache's only invalidation lever.
+    # One lesson per (problem, language, level) once a problem is known — a lesson written
+    # against this problem's solution is not reusable for the next problem on the same
+    # skill. Without a problem it falls back to the shared per-skill lesson. The version
+    # segment is the cache's only invalidation lever.
     key = (
-        cache_key("lesson_notes", LESSON_NOTES_VERSION, skill, language, level)
+        cache_key(
+            "lesson_notes", LESSON_NOTES_VERSION, problem_id or skill, language, level
+        )
         if cache is not None
         else None
     )
@@ -77,6 +98,10 @@ async def generate_lesson_notes(
             "skill": skill,
             "language": language,
             "level": level,
+            "problem_title": problem_title,
+            "statement_md": statement_md,
+            "tags": tags,
+            "reference_solution": reference_solution,
             "result": None,
             "error": None,
             "attempts": 0,

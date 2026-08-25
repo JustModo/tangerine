@@ -11,6 +11,7 @@ from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.llm.schemas.lesson_notes import GeneratedLessonNotes
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
+from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.errors import NotFoundError
 from app.shared.progress import stage_stream
 from app.shared.sse import sse_stream
@@ -26,6 +27,7 @@ def get_service() -> CurriculumService:
         llm_cache=SqliteLLMCache(),
         mastery_repository=SqliteUserSkillStateRepository(),
         problem_session_repository=SqliteProblemSessionRepository(),
+        problem_repository=SqliteProblemRepository(),
     )
 
 
