@@ -97,19 +97,30 @@ class SessionService:
         # A reply's `intent` carries what its tool returned — the ids, above all. Without it
         # the model reaches a follow-up "yes" holding titles and nothing to act on, so it
         # re-searches or guesses; that single gap is what made "yes" loop.
+        conversation = [
+            m
+            for m in (existing.messages if existing else [])
+            if m.role in (ChatRole.USER, ChatRole.ASSISTANT)
+        ][-MAX_HISTORY_TURNS:]
+        # Only the LAST memo is still live — it exists so a follow-up "yes" has the ids of
+        # what was just offered. Older ones describe offers already answered, and at ~1KB
+        # of stale ids each they were re-sent on every turn for the rest of the window.
+        latest_memo = next(
+            (m.id for m in reversed(conversation) if m.role == ChatRole.ASSISTANT and m.intent),
+            None,
+        )
         history = [
             ChatTurn(
                 role="user" if m.role == ChatRole.USER else "assistant",
                 content=(
                     f"{m.content}\n\n[tool context — yours to act on, never repeat to the "
                     f"user]\n{m.intent}"
-                    if m.intent
+                    if m.id == latest_memo
                     else m.content
                 ),
             )
-            for m in (existing.messages if existing else [])
-            if m.role in (ChatRole.USER, ChatRole.ASSISTANT)
-        ][-MAX_HISTORY_TURNS:]
+            for m in conversation
+        ]
 
         user_message = ChatMessage(
             id=str(uuid.uuid4()),
@@ -148,7 +159,7 @@ class SessionService:
         depth: int = 0,
     ) -> AsyncIterator[dict]:
         request = ChatStreamRequest(
-            system_prompt=chat_system_prompt(existing_plan, (await get_preferences())["default_language"]),
+            system_prompt=await self._system_prompt(existing_plan, user_id),
             history=history,
             message=message,
             tools=self._tools_for(existing_plan, user_id),
@@ -178,10 +189,20 @@ class SessionService:
         reply = await self._persist_assistant_reply(session_id, reply_text)
         yield {"type": "done", "message_id": reply.id, "content": reply_text}
 
-    def _tools_for(self, existing_plan: bool, user_id: str | None) -> list:
+    async def _system_prompt(self, existing_plan: bool, user_id: str | None) -> str:
+        """The same conditions _tools_for gates the tools on, so the prompt never explains
+        a tool this session was not given."""
+        return chat_system_prompt(
+            existing_plan,
+            (await get_preferences())["default_language"],
+            has_record=self._revision_service is not None and bool(user_id),
+            has_library=self._library_service is not None and bool(user_id),
+        )
+
+    def _tools_for(self, existing_plan: bool, user_id: str | None, after_lookup: bool = False) -> list:
         # edit_learning_plan is only offered once a plan exists — there's nothing to edit
         # otherwise, and omitting it keeps the model from reaching for it prematurely.
-        return (
+        tools = (
             [GENERATE_PLAN_TOOL]
             + ([EDIT_PLAN_TOOL] if existing_plan else [])
             # Only offered when there's a record to look up. Fetching it on every turn would
@@ -202,6 +223,13 @@ class SessionService:
                 else []
             )
         )
+        # After a lookup has already run, the read-only tools are dead weight: the prompt
+        # tells the model in as many words not to call them again to re-derive what it was
+        # just handed. Dropping them keeps every way of ACTING on the result while cutting
+        # ~2.2KB of schema from the follow-up call.
+        if after_lookup:
+            tools = [t for t in tools if t not in (FIND_PROBLEMS_TOOL, PRACTICE_RECORD_TOOL)]
+        return tools
 
     def _handler_for(
         self,
@@ -821,10 +849,13 @@ class SessionService:
         they asked for."""
         may_chain = depth + 1 < MAX_TOOL_CHAIN
         chained_context = f"{user_message}\n\n[{tool_name} tool result]\n{result_summary}"
-        chain_user_id, chain_plan = None, existing_plan
+        # Resolved even when we cannot chain: it decides which coaching blocks the system
+        # prompt carries, and letting it fall to None on the last call of a turn would
+        # quietly hand that call a different prompt than the rest of the turn.
+        session = await self._repository.get(session_id)
+        chain_user_id = session.user_id if session is not None else None
+        chain_plan = existing_plan
         if may_chain:
-            session = await self._repository.get(session_id)
-            chain_user_id = session.user_id if session is not None else None
             # A tool may have just created the plan the next one needs to edit.
             if not chain_plan and self._curriculum_service is not None:
                 try:
@@ -835,7 +866,10 @@ class SessionService:
                     logger.warning("Plan re-check failed for %s", session_id, exc_info=True)
 
         follow_up_request = ChatStreamRequest(
-            system_prompt=chat_system_prompt(existing_plan, (await get_preferences())["default_language"]),
+            # chain_plan, not existing_plan: a tool may have just created the plan, and
+            # calling it absent while offering edit_learning_plan alongside is both wrong
+            # and a needless second variant of an otherwise identical, cacheable prompt.
+            system_prompt=await self._system_prompt(chain_plan, chain_user_id),
             history=history + [ChatTurn(role="user", content=user_message)],
             message=(
                 f"[{tool_name} tool result] {result_summary}\n\n"
@@ -849,7 +883,15 @@ class SessionService:
                     "code — only prose."
                 )
             ),
-            tools=self._tools_for(chain_plan, chain_user_id) if may_chain else [],
+            tools=(
+                self._tools_for(
+                    chain_plan,
+                    chain_user_id,
+                    after_lookup=tool_name in ("find_problems", "get_practice_record"),
+                )
+                if may_chain
+                else []
+            ),
         )
         # The model sometimes answers a tool result by echoing another tool call as raw
         # JSON. Nothing is streamed until the text is known not to be one, so a blob can

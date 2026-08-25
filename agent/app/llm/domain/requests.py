@@ -9,12 +9,6 @@ class StructuredGenerationRequest(BaseModel):
     model: str | None = None  # falls back to Settings.llm_model when unset
 
 
-class TextGenerationRequest(BaseModel):
-    system_prompt: str
-    user_prompt: str
-    model: str | None = None
-
-
 class ToolDeclaration(BaseModel):
     name: str
     description: str

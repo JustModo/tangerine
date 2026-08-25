@@ -84,6 +84,13 @@ CODE_HELPER_SYSTEM_PROMPT = (
 
 _MAX_FAILURES = 3
 _MAX_FIELD_CHARS = 400
+# The two fields that are re-sent in full on every single helper turn. Generous rather
+# than tight — the helper is useless if it cannot see the learner's actual code — but
+# bounded, because an unbounded paste was previously billed again on every message.
+# ponytail: truncates the tail, so a bug past 4k chars is invisible; raise the cap if
+# real solutions ever run that long.
+_MAX_CODE_CHARS = 4_000
+_MAX_STATEMENT_CHARS = 2_000
 
 
 def _truncate(value: str | None, limit: int = _MAX_FIELD_CHARS) -> str:
@@ -114,7 +121,7 @@ def code_helper_context(
         f"Language: {language} | Difficulty: {difficulty}",
         "",
         "## Statement",
-        statement_md.strip(),
+        _truncate(statement_md, _MAX_STATEMENT_CHARS),
     ]
 
     if constraints:
@@ -137,7 +144,10 @@ def code_helper_context(
         "",
         "## Their current code",
         f"```{language}",
-        (source_code.strip() or "(empty — they have not written anything yet)"),
+        (
+            _truncate(source_code, _MAX_CODE_CHARS)
+            or "(empty — they have not written anything yet)"
+        ),
         "```",
     ]
 

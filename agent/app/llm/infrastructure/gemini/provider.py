@@ -2,7 +2,7 @@ from typing import AsyncIterator, TypeVar
 
 from pydantic import BaseModel
 
-from app.llm.domain.requests import ChatChunk, ChatStreamRequest, StructuredGenerationRequest, TextGenerationRequest
+from app.llm.domain.requests import ChatChunk, ChatStreamRequest, StructuredGenerationRequest
 from app.llm.infrastructure.gemini.client import GeminiClient
 from app.llm.infrastructure.gemini.mapping import parse_structured_response
 from app.shared.config import get_settings
@@ -38,13 +38,6 @@ class GeminiProvider:
             response_schema=response_model.model_json_schema(),
         )
         return parse_structured_response(raw, response_model)  # type: ignore[return-value]
-
-    async def generate_text(self, request: TextGenerationRequest) -> str:
-        return await (await self._get_client()).generate_text(
-            model=request.model or self._default_model,
-            system_prompt=request.system_prompt,
-            user_prompt=request.user_prompt,
-        )
 
     async def stream_chat(self, request: ChatStreamRequest) -> AsyncIterator[ChatChunk]:
         async for chunk in (await self._get_client()).stream_chat(

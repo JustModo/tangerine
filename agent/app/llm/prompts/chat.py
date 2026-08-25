@@ -218,7 +218,11 @@ EDIT_PLAN_TOOL = ToolDeclaration(
 )
 
 
-COACHING_PROMPT = (
+# Split by the tool each block talks about, so a session that was never offered those
+# tools doesn't pay for instructions on using them. Wording is unchanged from when this
+# was one constant; only the seams are new. COACHING_PROMPT keeps the whole thing for
+# callers that want it (and for the tests that assert on it).
+_COACHING_RECOMMEND = (
     "COACHING — recommending what to learn next.\n"
     "You do NOT know how the learner is doing until you look. When they ask what to focus on "
     "— 'what am I weak in', 'what should I do next', 'teach me something new', 'I don't know "
@@ -229,11 +233,6 @@ COACHING_PROMPT = (
     "is not something to bring up unprompted.\n"
     "Then recommend concretely: two or three specific topics, a few words on why each, and ask "
     "if they want a plan for one. Not a syllabus.\n"
-    "If they just want ONE question to try right now ('give me something to practice', "
-    "'give me a question on X') with no stated wish to study the topic, add exactly ONE node "
-    "for it — generate_learning_plan with step_count=1, or add_step on their existing plan — "
-    "and say nothing else about it. Only build a full multi-node plan when they've said they "
-    "want to learn/study the topic, not just try one question.\n"
     "A skill the record calls weak is one they practised and struggled with — the strongest "
     "signal there is. A skill missing from the record has never been tried, which is a gap, not "
     "a strength: never call an absent skill mastered. If the record is empty, say plainly that "
@@ -244,7 +243,18 @@ COACHING_PROMPT = (
     "record and level rather than reciting the list.\n"
     "When they accept a recommendation ('yes', 'that one', 'do the graphs one'), that topic is "
     "the topic — go build it. ACT OR ASK still applies, and you still never assume the language.\n"
-    "\n"
+)
+
+# Always sent: about generate_learning_plan/add_step, which every session is offered.
+_COACHING_ONE_NODE = (
+    "If they just want ONE question to try right now ('give me something to practice', "
+    "'give me a question on X') with no stated wish to study the topic, add exactly ONE node "
+    "for it — generate_learning_plan with step_count=1, or add_step on their existing plan — "
+    "and say nothing else about it. Only build a full multi-node plan when they've said they "
+    "want to learn/study the topic, not just try one question.\n"
+)
+
+_COACHING_LIBRARY = (
     "PROBLEMS THEY HAVE ALREADY SEEN. The moment they point at past work — 'revise', 'redo', "
     "'again', 'that one', 'the one I flagged', 'have I done X', 'what have I solved', 'is there "
     "a X problem' — call find_problems FIRST and answer from what it returns.\n"
@@ -278,6 +288,20 @@ COACHING_PROMPT = (
     "If more than a handful come back and they asked for a plan, say how many you found and "
     "ask which before building it.\n"
 )
+
+COACHING_PROMPT = _COACHING_RECOMMEND + _COACHING_ONE_NODE + "\n" + _COACHING_LIBRARY
+
+
+def coaching_prompt(has_record: bool = True, has_library: bool = True) -> str:
+    """The coaching rules that match the tools this session was actually offered.
+
+    An anonymous session gets neither the practice record nor the problem bank, so the
+    pages of instruction on using them are ~1KB of tokens it can never act on."""
+    blocks = [_COACHING_RECOMMEND] if has_record else []
+    blocks.append(_COACHING_ONE_NODE)
+    if has_library:
+        blocks.append("\n" + _COACHING_LIBRARY)
+    return "".join(blocks)
 
 FIND_PROBLEMS_TOOL = ToolDeclaration(
     name="find_problems",
@@ -494,7 +518,12 @@ def library_memo(entries: list) -> str:
     return "\n".join(lines)
 
 
-def chat_system_prompt(existing_plan: bool, default_language: str = "ask") -> str:
+def chat_system_prompt(
+    existing_plan: bool,
+    default_language: str = "ask",
+    has_record: bool = True,
+    has_library: bool = True,
+) -> str:
     language_note = (
         f"\n\nThe user's configured default language is {default_language} — use it without "
         "asking whenever a language is needed and they haven't said one for THIS request. "
@@ -515,4 +544,14 @@ def chat_system_prompt(existing_plan: bool, default_language: str = "ask") -> st
         if existing_plan
         else "\n\nNo learning plan exists yet for this session."
     )
-    return CHAT_SYSTEM_PROMPT_BASE + language_note + plan_note + "\n\n" + COACHING_PROMPT
+    # Static blocks first, per-session notes last. Gemini bills a repeated prompt PREFIX at
+    # a discount, and the prefix ends at the first byte that varies — so with the notes in
+    # the middle nothing after them could ever be cached. This ordering makes the whole
+    # ~7.8KB of BASE + COACHING one prefix shared by every user, session and call.
+    return (
+        CHAT_SYSTEM_PROMPT_BASE
+        + "\n\n"
+        + coaching_prompt(has_record, has_library)
+        + language_note
+        + plan_note
+    )

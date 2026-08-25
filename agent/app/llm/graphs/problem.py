@@ -8,6 +8,7 @@ from app.llm.domain.requests import StructuredGenerationRequest
 from app.llm.infrastructure.cache import SqliteLLMCache, cache_key
 from app.llm.infrastructure.gemini.mapping import SchemaValidationError
 from app.llm.prompts.problem import (
+    PATCH_SYSTEM_PROMPT,
     PROBLEM_SYSTEM_PROMPT,
     adapt_problem_user_prompt,
     patch_problem_user_prompt,
@@ -123,8 +124,10 @@ async def patch_problem(
     would be actively wrong — the key would be the same broken problem every time."""
     needs_statement = kind == "mismatch"
     request = StructuredGenerationRequest(
-        # Reuse system prompt to avoid drift between generation and repair.
-        system_prompt=PROBLEM_SYSTEM_PROMPT,
+        # The repair subset of the generation prompt — same blocks, so the rules a patch
+        # must honour cannot drift from the ones that produced the problem, without paying
+        # for the authoring rules (title, hints, tags, stress test) it cannot act on.
+        system_prompt=PATCH_SYSTEM_PROMPT,
         user_prompt=patch_problem_user_prompt(
             kind=kind,
             detail=detail,

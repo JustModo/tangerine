@@ -1,16 +1,15 @@
 from pydantic import BaseModel
 
 from app.execution.domain.models import ExecutionRequest, TestResult
-from app.llm.domain.requests import ChatChunk, ChatStreamRequest, StructuredGenerationRequest, TextGenerationRequest
+from app.llm.domain.requests import ChatChunk, ChatStreamRequest, StructuredGenerationRequest
 
 
 class FakeLLMProvider:
     """Test double for LLMProvider — returns/raises queued canned responses in order,
     so graph logic (retry loops, schema handling) can be tested without a live API key."""
 
-    def __init__(self, structured_responses=None, text_responses=None, chat_streams=None) -> None:
+    def __init__(self, structured_responses=None, chat_streams=None) -> None:
         self._structured_responses = list(structured_responses or [])
-        self._text_responses = list(text_responses or [])
         # Each item is a list[ChatChunk] (one queued call to stream_chat()).
         self._chat_streams = list(chat_streams or [])
         # Captured for test assertions on prompt content.
@@ -25,11 +24,6 @@ class FakeLLMProvider:
         if isinstance(next_item, Exception):
             raise next_item
         return next_item
-
-    async def generate_text(self, request: TextGenerationRequest) -> str:
-        if not self._text_responses:
-            raise AssertionError("FakeLLMProvider: no more text responses queued")
-        return self._text_responses.pop(0)
 
     async def stream_chat(self, request: ChatStreamRequest):
         self.last_chat_request = request

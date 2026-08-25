@@ -27,6 +27,10 @@ from app.shared.types import Language
 
 logger = logging.getLogger(__name__)
 
+# Most recent titles to tell the generator not to repeat. Enough to keep consecutive
+# problems on a skill feeling different, without the list growing forever.
+MAX_AVOID_TITLES = 8
+
 
 def _conceptual_id(title: str) -> str:
     """Identity of the QUESTION rather than of the row. Two generations for one skill
@@ -80,7 +84,11 @@ class ProblemValidationService:
         avoid_titles: list[str] = []
         if not source_problem:
             skill_id = await self._skill_repository.ensure_skill(skill)
-            avoid_titles = await self._repository.list_titles(skill_id, language)
+            # Capped for two reasons: it grows without bound as the bank fills, and it is
+            # part of the generation cache key — every extra title is another key nobody
+            # else will ever hit. Not repeating a problem is already guaranteed upstream by
+            # ProblemSelectionService.find_suitable; this list is only a nudge for variety.
+            avoid_titles = (await self._repository.list_titles(skill_id, language))[-MAX_AVOID_TITLES:]
 
         stage("generating")
         generated = await generate_problem(

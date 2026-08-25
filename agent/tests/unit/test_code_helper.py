@@ -154,7 +154,9 @@ async def test_helper_truncates_a_large_failing_run(db_path: str) -> None:
     async for _ in service.send_message(session_id, "help", "some code", last_run):
         pass
 
-    prompt = llm.last_chat_request.system_prompt
+    # The per-turn context rides with the message, not the system prompt — the static
+    # rules are kept alone there so they stay a cacheable prefix.
+    prompt = llm.last_chat_request.message
     # Only the first 3 failures are worth the tokens; a 10-case dump would swamp the prompt.
     assert prompt.count("their_output=") == 3
     assert "case-0" in prompt and "case-9" not in prompt

@@ -4,6 +4,7 @@ from google import genai
 from google.genai import types
 
 from app.llm.domain.requests import ChatChunk, ChatTurn, ToolCallResult, ToolDeclaration
+from app.llm.infrastructure.gemini.usage import log_usage
 
 
 class GeminiClient:
@@ -28,14 +29,7 @@ class GeminiClient:
             ),
         )
         response = await chat.send_message(user_prompt)
-        return response.text or ""
-
-    async def generate_text(self, *, model: str, system_prompt: str, user_prompt: str) -> str:
-        chat = self._client.aio.chats.create(
-            model=model,
-            config=types.GenerateContentConfig(system_instruction=system_prompt),
-        )
-        response = await chat.send_message(user_prompt)
+        log_usage("generate_json", model, len(system_prompt), response.usage_metadata)
         return response.text or ""
 
     async def stream_chat(
@@ -73,7 +67,12 @@ class GeminiClient:
             ],
             config=types.GenerateContentConfig(system_instruction=system_prompt, tools=genai_tools),
         )
+        usage = None
         async for chunk in await chat.send_message_stream(message):
+            # Only the final chunk normally carries it, but keeping the latest non-None
+            # means we report whatever the stream actually ended with.
+            if chunk.usage_metadata is not None:
+                usage = chunk.usage_metadata
             if not chunk.candidates or not chunk.candidates[0].content:
                 continue
             for part in chunk.candidates[0].content.parts or []:
@@ -85,4 +84,5 @@ class GeminiClient:
                     )
                 elif getattr(part, "text", None):
                     yield ChatChunk(text_delta=part.text)
+        log_usage("stream_chat", model, len(system_prompt), usage)
         yield ChatChunk(done=True)

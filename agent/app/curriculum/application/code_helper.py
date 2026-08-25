@@ -90,10 +90,14 @@ class CodeHelperService:
             last_run=last_run,
         )
 
+        # The static rules stay alone as the system prompt so they form a byte-identical
+        # prefix Gemini can bill at the cached rate; the context changes every turn (the
+        # learner's file above all), and concatenating the two made the whole 5KB look
+        # new each time. It rides with the message instead, where it belongs anyway.
         request = ChatStreamRequest(
-            system_prompt=f"{CODE_HELPER_SYSTEM_PROMPT}\n\n{context}",
+            system_prompt=CODE_HELPER_SYSTEM_PROMPT,
             history=history,
-            message=content,
+            message=f"{context}\n\n{content}",
         )
 
         text_parts: list[str] = []

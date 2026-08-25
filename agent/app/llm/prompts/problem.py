@@ -1,16 +1,24 @@
-PROBLEM_SYSTEM_PROMPT = (
+# Split into blocks so the repair call can take the subset it actually needs. A patch
+# cannot return a title, hints, tags or a stress test (see ProblemPatch), so the rules for
+# writing those are dead weight on every repair — and repairs are budgeted at up to two
+# per problem. Wording is unchanged; only the seams are new.
+_PROBLEM_INTRO = (
     "You write a single DSA practice problem for a given skill, language, and difficulty. "
     "Produce a clear statement (markdown), 2-4 worked examples, and the problem's code as "
     "four separate fragments: pre_code, user_code, post_code, and reference_user_code.\n\n"
 
     "title: concise, 5-6 words maximum (e.g. 'Reverse a Linked List', 'Two Sum with Hash "
     "Map') — never a full sentence or a restatement of the whole problem.\n\n"
+)
 
+_EXAMPLE_FORMAT = (
     "Each example's explanation: 2-4 short lines separated by \\n (a real multi-line "
     "string), not one long paragraph. First line states the key insight; the remaining "
     "lines briefly walk through how that example's specific numbers produce its output. "
     "Keep each line under ~15 words.\n\n"
+)
 
+_CODE_SHAPE = (
     "EXECUTION MODEL: the backend concatenates pre_code + \"\\n\\n\" + user_code (or, for "
     "validation, reference_user_code) + \"\\n\\n\" + post_code into ONE source file and runs "
     "it as-is — no test harness, no injected imports, nothing else added. Your fragments "
@@ -66,7 +74,9 @@ PROBLEM_SYSTEM_PROMPT = (
     "with `public static void main(String[] args) { ... }` that uses Scanner to read "
     "stdin, calls solve(...), prints the result, and ends with the final `}` that closes "
     "the class opened in pre_code.\n\n"
+)
 
+_WORKED_EXAMPLES = (
     "WORKED EXAMPLE (python) — problem: read two integers from one line, return their sum:\n"
     "pre_code: `a, b = map(int, input().split())`\n"
     "user_code: `def solve(a, b):\\n    # TODO: implement\\n    return 0`\n"
@@ -99,7 +109,10 @@ PROBLEM_SYSTEM_PROMPT = (
     "```\n"
     "Concatenated, this is one valid Main.java that compiles and, against stdin `2 3`, "
     "prints `5`.\n\n"
+)
 
+# Everything here describes a field ProblemPatch cannot return, so repairs skip it.
+_AUTHORING_EXTRAS = (
     "Also produce: a short constraints section (input value ranges, expected time/space "
     "complexity); 1-3 progressive hints ordered from a gentle nudge to a stronger hint, "
     "never revealing the full solution; and 2-4 short topical tags (e.g. 'two-pointers', "
@@ -111,13 +124,17 @@ PROBLEM_SYSTEM_PROMPT = (
     "in well under a second. Same stdin format as everything else. If the problem has no "
     "meaningful size to scale (fixed-size input, pure arithmetic), omit it rather than "
     "inventing one.\n\n"
+)
 
+_HIDDEN_TESTS = (
     "hidden_tests: 3-5 ADDITIONAL stdin inputs used only for grading, never shown to the "
     "learner. Same stdin format as the examples, but different values, chosen to catch the "
     "mistakes the examples don't — a single-element input, all-equal values, the minimum "
     "and maximum of the stated constraints, negative numbers, no-answer-exists. "
     "Give inputs only; expected outputs come from running the reference solution.\n\n"
+)
 
+_INPUT_RULES = (
     "EVERY INPUT MUST BE READABLE BY YOUR OWN HARNESS. Each example input, each hidden "
     "test and the stress test is fed to the program as stdin exactly as written, and your "
     "pre_code/post_code must be able to parse all of them. In particular:\n"
@@ -130,6 +147,29 @@ PROBLEM_SYSTEM_PROMPT = (
     "input is one element — use that instead and do not test empty at all.\n"
     "- Read your own pre_code and post_code back against each input line by line. If any "
     "input would leave a read with nothing to consume, fix the input, not the harness."
+)
+
+PROBLEM_SYSTEM_PROMPT = (
+    _PROBLEM_INTRO
+    + _EXAMPLE_FORMAT
+    + _CODE_SHAPE
+    + _WORKED_EXAMPLES
+    + _AUTHORING_EXTRAS
+    + _HIDDEN_TESTS
+    + _INPUT_RULES
+)
+
+# What a repair actually needs: how the fragments fit together, and the rules covering the
+# fields ProblemPatch can return (code, examples, hidden_tests, statement). It is NOT
+# writing a new problem, so the authoring intro, the worked examples and the
+# hints/tags/stress-test rules are all left out.
+PATCH_SYSTEM_PROMPT = (
+    "You repair one DSA practice problem that failed automated validation. You are not "
+    "writing a new problem — the question stays exactly as it is.\n\n"
+    + _EXAMPLE_FORMAT
+    + _CODE_SHAPE
+    + _HIDDEN_TESTS
+    + _INPUT_RULES
 )
 
 
