@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { MetaFunction } from "react-router";
 import { Link, useNavigate } from "react-router";
-import { BarChart3, ListTree, MessageSquare, Settings } from "lucide-react";
+import { BarChart3, Download, DownloadCloud, ListTree, MessageSquare, RefreshCw, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useStatus } from "~/lib/status";
@@ -28,11 +28,36 @@ export const meta: MetaFunction = () => [
   { name: "description", content: "Your Tangerine sessions. Start a new one, or pick up a plan you are partway through." },
 ];
 
+const OUTDATED_CACHE_KEY = "tangerine:outdated-check";
+const OUTDATED_CACHE_TTL_MS = 60 * 60 * 1000; // recheck GitHub at most once an hour
+
+async function checkOutdated(): Promise<boolean> {
+  try {
+    const cached = localStorage.getItem(OUTDATED_CACHE_KEY);
+    if (cached) {
+      const { outdated, checkedAt } = JSON.parse(cached);
+      if (Date.now() - checkedAt < OUTDATED_CACHE_TTL_MS) return outdated;
+    }
+
+    const [health, latest] = await Promise.all([
+      apiJson<{ git_sha: string }>("/health"),
+      fetch("https://api.github.com/repos/JustModo/tangerine/commits/master").then((r) => r.json()),
+    ]);
+    const outdated = health.git_sha !== "unknown" && !latest.sha?.startsWith(health.git_sha);
+    localStorage.setItem(OUTDATED_CACHE_KEY, JSON.stringify({ outdated, checkedAt: Date.now() }));
+    return outdated;
+  } catch {
+    // Offline, rate-limited, or dev mode without a built image - just stay quiet.
+    return false;
+  }
+}
+
 export default function Home() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [plansBySession, setPlansBySession] = useState<Record<string, LessonPlanSummary | undefined>>({});
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [outdated, setOutdated] = useState(false);
   const navigate = useNavigate();
   const { showError, setBusyMessage } = useStatus();
 
@@ -65,6 +90,7 @@ export default function Home() {
 
   useEffect(() => {
     loadSessions();
+    checkOutdated().then(setOutdated);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -82,6 +108,17 @@ export default function Home() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 w-full">
+      {outdated && (
+        <a
+          href="https://github.com/JustModo/tangerine"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="A newer version is available on GitHub, pull and rebuild to update"
+          className="fixed bottom-6 left-6 z-50 text-amber-500 hover:text-amber-400"
+        >
+          <DownloadCloud className="w-4 h-4" />
+        </a>
+      )}
       <div className="flex-none w-full px-6 py-3 flex items-center justify-between gap-4 border-b border-white/10 bg-black">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.5em] text-zinc-500">Tangerine</p>

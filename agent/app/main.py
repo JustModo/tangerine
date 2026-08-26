@@ -25,6 +25,14 @@ from app.users.infrastructure.sqlite_repository import SqliteUserRepository
 # `uvicorn --reload` dev mode, where the Vite dev server proxies to this process instead.
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
+# Written by the Dockerfile's gitinfo stage — absent in dev mode, where the frontend
+# just skips the outdated-version check.
+GIT_SHA_FILE = Path(__file__).resolve().parent.parent / "GIT_SHA"
+
+
+def _git_sha() -> str:
+    return GIT_SHA_FILE.read_text().strip() if GIT_SHA_FILE.is_file() else "unknown"
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -51,6 +59,7 @@ app.include_router(settings_router, prefix="/api")
 class HealthResponse(BaseModel):
     status: str  # "ok" | "degraded"
     services: dict[str, bool]
+    git_sha: str
 
 
 # One client for the whole process rather than one per probe: /health is polled for the
@@ -71,7 +80,11 @@ async def _citron_ready() -> bool:
 @app.get("/health")
 async def health() -> HealthResponse:
     services = {"citron": await _citron_ready(), "gemini": bool(await get_gemini_api_key())}
-    return HealthResponse(status="ok" if all(services.values()) else "degraded", services=services)
+    return HealthResponse(
+        status="ok" if all(services.values()) else "degraded",
+        services=services,
+        git_sha=_git_sha(),
+    )
 
 
 if STATIC_DIR.is_dir():
