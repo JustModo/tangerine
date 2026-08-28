@@ -57,6 +57,8 @@ def _generated_problem() -> GeneratedProblem:
         examples=[GeneratedExample(input="1 2 3", output="6")],
         hidden_tests=["0", "5", "-1 -2"],
         constraints="1 <= len(nums) <= 10^5",
+        input_format="nums: list[int], the array to sum.",
+        output_format="Return the sum as an int; printed on one line.",
         hints=["Consider a running total."],
         tags=["prefix-sum", "arrays"],
     )

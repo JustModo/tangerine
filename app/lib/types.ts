@@ -13,6 +13,8 @@ export interface ProblemDetail {
   statement_md: string;
   user_code: string;
   constraints?: string | null;
+  input_format?: string | null;
+  output_format?: string | null;
   hints: string[];
   tags: string[];
   examples: ProblemExample[];

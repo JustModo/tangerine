@@ -181,9 +181,9 @@ class SqliteProblemRepository:
             await db.execute(
                 "INSERT INTO problem_versions "
                 "(id, problem_id, version, statement_md, reference_solution, user_code, "
-                "pre_code, post_code, constraints, hints_json, stress_input, "
-                "stress_runtime_ms, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "pre_code, post_code, constraints, input_format, output_format, hints_json, "
+                "stress_input, stress_runtime_ms, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     version.id,
                     version.problem_id,
@@ -194,6 +194,8 @@ class SqliteProblemRepository:
                     version.pre_code,
                     version.post_code,
                     version.constraints,
+                    version.input_format,
+                    version.output_format,
                     json.dumps(version.hints),
                     version.stress_input,
                     version.stress_runtime_ms,
@@ -243,6 +245,8 @@ class SqliteProblemRepository:
                 pre_code=row["pre_code"],
                 post_code=row["post_code"],
                 constraints=row["constraints"],
+                input_format=row["input_format"],
+                output_format=row["output_format"],
                 hints=json.loads(row["hints_json"] or "[]"),
                 stress_input=row["stress_input"],
                 stress_runtime_ms=row["stress_runtime_ms"],

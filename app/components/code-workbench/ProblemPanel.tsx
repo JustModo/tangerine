@@ -254,6 +254,32 @@ export function ProblemPanel({
         <div className={tab === "statement" ? "space-y-6" : "hidden"}>
         <Markdown>{problem.statement_md}</Markdown>
 
+        {problem.input_format && (
+          <div className="space-y-2">
+            <SectionLabel>
+              Input Format
+            </SectionLabel>
+            <ul className="text-xs text-zinc-400 space-y-1 list-disc list-inside">
+              {problem.input_format.split("\n").filter(Boolean).map((line, index) => (
+                <li key={index}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {problem.output_format && (
+          <div className="space-y-2">
+            <SectionLabel>
+              Output Format
+            </SectionLabel>
+            <ul className="text-xs text-zinc-400 space-y-1 list-disc list-inside">
+              {problem.output_format.split("\n").filter(Boolean).map((line, index) => (
+                <li key={index}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {problem.constraints && (
           <div className="space-y-2">
             <SectionLabel>

@@ -50,6 +50,8 @@ class ProblemVersion(BaseModel):
     # standalone runnable script.
     user_code: str = ""
     constraints: str | None = None
+    input_format: str | None = None
+    output_format: str | None = None
     hints: list[str] = []
     examples: list[ProblemExample] = []
     tests: list[ProblemTest] = []

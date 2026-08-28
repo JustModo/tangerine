@@ -240,6 +240,8 @@ class ProblemValidationService:
             pre_code=generated.pre_code,
             post_code=generated.post_code,
             constraints=generated.constraints,
+            input_format=generated.input_format,
+            output_format=generated.output_format,
             hints=generated.hints,
             examples=[
                 ProblemExample(id=str(uuid.uuid4()), input=ex.input, output=ex.output, explanation=ex.explanation)

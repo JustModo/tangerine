@@ -35,7 +35,23 @@ class GeneratedProblem(BaseModel):
         "brute-force one — it must be large enough that the difference in running time is "
         "obvious, while the reference solution still finishes comfortably.",
     )
-    constraints: str | None = None
+    constraints: str = Field(
+        description="Input value ranges and input-size bounds, one per line (e.g. "
+        "'1 <= n <= 10^5'). Never the expected time or space complexity — that names the "
+        "approach, which is most of the exercise.",
+    )
+    input_format: str = Field(
+        description="One stdin variable per line, separated by \\n, in the order pre_code "
+        "(python) or post_code's main (c/cpp/java) reads it. Each line: name, type, and a "
+        "concise meaning — use the SAME names as the function parameters. No prose, no "
+        "blank lines.",
+    )
+    output_format: str = Field(
+        description="Same style as input_format: one point per line, separated by \\n, "
+        "concise. Cover what the function returns (type included) and what the single "
+        "printed line looks like, e.g. 'Returns the list of indices.\\nPrinted "
+        "space-separated on one line.'",
+    )
     hints: list[str] = []
     tags: list[str] = []
 
@@ -45,8 +61,8 @@ class ProblemPatch(BaseModel):
     actually wrong — anything left null keeps its original value.
 
     Narrow by design: a repair costs a fraction of a regeneration's output tokens, and
-    anything not named here (title, difficulty, skills, constraints, hints, tags,
-    stress_test) is untouched."""
+    anything not named here (title, difficulty, skills, constraints, input_format,
+    output_format, hints, tags, stress_test) is untouched."""
 
     pre_code: str | None = Field(default=None, description="Only if the harness before the function was wrong.")
     user_code: str | None = Field(default=None, description="Only if the learner's stub no longer matches the reference signature.")

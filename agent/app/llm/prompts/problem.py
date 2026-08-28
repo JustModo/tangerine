@@ -188,9 +188,18 @@ _WORKED_EXAMPLES = (
 
 # Everything here describes a field ProblemPatch cannot return, so repairs skip it.
 _AUTHORING_EXTRAS = (
-    "Also produce: a short constraints section — input value ranges and input-size bounds "
-    "ONLY. Do NOT state the expected time or space complexity: naming the target complexity "
-    "names the approach, which is most of the exercise. Use the hints for that instead. "
+    "Also produce these as their OWN fields — never restate them inside statement_md, "
+    "which is the problem description only:\n"
+    "- constraints: input value ranges and input-size bounds ONLY. Do NOT state the "
+    "expected time or space complexity: naming the target complexity names the approach, "
+    "which is most of the exercise. Use the hints for that instead.\n"
+    "- input_format: one stdin variable per line (separated by \\n), in the order pre_code "
+    "(python) or post_code's main (c/cpp/java) reads it — name, type, and a concise meaning. "
+    "Use the SAME names as the function parameters. No prose, no blank lines.\n"
+    "- output_format: same style as input_format — one point per line, separated by \\n, "
+    "concise. Cover what the function returns (type included) and what the single printed "
+    "line looks like.\n\n"
+
     "Then 1-3 progressive hints ordered from a gentle nudge to a stronger hint, "
     "never revealing the full solution; and 2-4 short topical tags (e.g. 'two-pointers', "
     "'hash-map').\n\n"
@@ -353,6 +362,7 @@ def adapt_problem_user_prompt(source_problem: str, language: str) -> str:
         "- hidden_tests: still required. The original's examples are rarely enough to grade "
         "on, so add 3-5 extra edge-case inputs of your own in the same stdin format.\n"
         "- Everything else (pre_code, user_code, post_code, reference_user_code, "
-        "constraints, hints, tags, skills) follows the same rules as always.\n\n"
+        "constraints, input_format, output_format, hints, tags, skills) follows the same "
+        "rules as always.\n\n"
         f"The learner's problem:\n{source_problem}"
     )

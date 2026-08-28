@@ -82,6 +82,8 @@ class CodeHelperService:
             difficulty=problem.difficulty,
             statement_md=version.statement_md,
             constraints=version.constraints,
+            input_format=version.input_format,
+            output_format=version.output_format,
             examples=[
                 {"input": example.input, "output": example.output} for example in version.examples
             ],

@@ -105,6 +105,8 @@ def code_helper_context(
     difficulty: str,
     statement_md: str,
     constraints: str | None,
+    input_format: str | None,
+    output_format: str | None,
     examples: list[dict],
     starter_code: str,
     source_code: str,
@@ -123,6 +125,12 @@ def code_helper_context(
         "## Statement",
         _truncate(statement_md, _MAX_STATEMENT_CHARS),
     ]
+
+    if input_format:
+        parts += ["", "## Input Format", input_format.strip()]
+
+    if output_format:
+        parts += ["", "## Output Format", output_format.strip()]
 
     if constraints:
         parts += ["", "## Constraints", constraints.strip()]

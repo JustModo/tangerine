@@ -38,6 +38,9 @@ async def test_generate_problem_returns_structured_result() -> None:
         post_code="print(solve(nums))",
         reference_user_code="def solve(nums): return sum(nums)",
         examples=[GeneratedExample(input="[1,2,3]", output="6")],
+        constraints="1 <= len(nums) <= 10^5",
+        input_format="nums: list[int], the array to sum.",
+        output_format="Return the sum as an int; printed on one line.",
     )
     provider = FakeLLMProvider(structured_responses=[problem])
 

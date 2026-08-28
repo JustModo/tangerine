@@ -70,6 +70,8 @@ class ProblemDetail(BaseModel):
     statement_md: str
     user_code: str
     constraints: str | None
+    input_format: str | None
+    output_format: str | None
     hints: list[str]
     tags: list[str]
     examples: list[ProblemExample]
@@ -93,6 +95,8 @@ async def get_problem(
         statement_md=version.statement_md,
         user_code=version.user_code,
         constraints=version.constraints,
+        input_format=version.input_format,
+        output_format=version.output_format,
         hints=version.hints,
         tags=problem.tags,
         examples=version.examples,
