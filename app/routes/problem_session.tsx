@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import type { MetaFunction } from "react-router";
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
+import { Check } from "lucide-react";
 import { CodeWorkbench } from "@/components/code-workbench/CodeWorkbench";
 import { PageHeader } from "@/components/PageHeader";
+import { Button } from "@/components/ui/button";
 import { useStatus } from "~/lib/status";
 import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
 import type { AttemptMetrics, EvaluationResult, ProblemDetail, TestResult } from "~/lib/types";
@@ -26,12 +28,15 @@ export default function ProblemSessionScreen() {
   const { id } = useParams();
   const [session, setSession] = useState<ProblemSessionData | null>(null);
   const [problem, setProblem] = useState<ProblemDetail | null>(null);
+  const [solved, setSolved] = useState(false);
+  const navigate = useNavigate();
   const { showError } = useStatus();
 
   async function load() {
     try {
       const sessionData = await apiJson<ProblemSessionData>(`/api/problem-sessions/${id}`);
       setSession(sessionData);
+      setSolved(sessionData.status === "COMPLETED");
       setProblem(await apiJson<ProblemDetail>(`/api/problems/${sessionData.problem_id}`));
     } catch (err) {
       showError(err instanceof ApiError ? err.message : "Failed to load problem session");
@@ -87,6 +92,20 @@ export default function ProblemSessionScreen() {
       <PageHeader
         title={problem.title}
         subtitle={`${problem.language} · ${problem.difficulty}`}
+        actions={
+          solved && session.lesson_plan_id ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate(`/plans/${session.lesson_plan_id}`)}
+              >
+                Back to plan
+              </Button>
+              <Check className="h-4 w-4 text-green-500" />
+            </>
+          ) : null
+        }
       />
       <div className="flex-1 min-h-0">
         <CodeWorkbench
@@ -99,6 +118,7 @@ export default function ProblemSessionScreen() {
           problemSessionId={session.id}
           initiallySolved={session.status === "COMPLETED"}
           initiallyFlagged={session.flagged}
+          onSolved={() => setSolved(true)}
         />
       </div>
     </div>

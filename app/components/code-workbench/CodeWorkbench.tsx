@@ -35,6 +35,7 @@ interface CodeWorkbenchProps {
   /** The session's actual flagged state on load - otherwise the flag button always starts
    * unlit even for a problem you already flagged last time you opened it. */
   initiallyFlagged?: boolean;
+  onSolved?: () => void;
 }
 
 export function CodeWorkbench({
@@ -47,6 +48,7 @@ export function CodeWorkbench({
   problemSessionId,
   initiallySolved = false,
   initiallyFlagged = false,
+  onSolved,
 }: CodeWorkbenchProps) {
   const [code, setCode] = useState(initialCode);
   const [isRunning, setIsRunning] = useState(false);
@@ -153,6 +155,7 @@ export function CodeWorkbench({
         results: evaluation.results,
       };
       setPanelStatus("done");
+      if (evaluation.passed_tests === evaluation.total_tests) onSolved?.();
     } catch (err) {
       showError(err instanceof ApiError ? err.message : "Submission failed");
       setPanelStatus("idle");

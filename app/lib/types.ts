@@ -86,6 +86,7 @@ export interface ProblemSummary {
   tags: string[];
   created_at: string;
   flagged: boolean;
+  status: string | null;
 }
 
 export interface ProblemsPage {

@@ -25,6 +25,7 @@ class ProblemSummary(BaseModel):
     tags: list[str]
     created_at: str
     flagged: bool = False
+    status: str | None = None
 
 
 class ProblemsPage(BaseModel):
@@ -48,11 +49,16 @@ async def list_all_problems(
     )
     sessions = await SqliteProblemSessionRepository().list_for_user(LOCAL_USER_ID)
     flagged_problem_ids = {s.problem_id for s in sessions if s.flagged}
+    # list_for_user is ORDER BY updated_at DESC, so the newest session per problem wins.
+    status_by_problem: dict[str, str] = {}
+    for session in sessions:
+        status_by_problem.setdefault(session.problem_id, session.status.value)
     return ProblemsPage(
         items=[
             ProblemSummary(
                 id=p.id, title=p.title, language=p.language, difficulty=p.difficulty,
                 tags=p.tags, created_at=str(p.created_at), flagged=p.id in flagged_problem_ids,
+                status=status_by_problem.get(p.id),
             )
             for p in items
         ],

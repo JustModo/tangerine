@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { MetaFunction } from "react-router";
 import { useNavigate } from "react-router";
-import { Flag, Flame, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { Check, Flag, Flame, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/PageHeader";
 import { useStatus } from "~/lib/status";
@@ -252,10 +252,10 @@ export default function ProgressScreen() {
                     key={item.problem_session_id}
                     type="button"
                     onClick={() => navigate(`/problem-sessions/${item.problem_session_id}`)}
-                    className="py-4 flex items-center justify-between gap-4 text-left hover:bg-zinc-950 transition-colors px-2"
+                    className="group cursor-pointer py-4 flex items-center justify-between gap-4 text-left px-2"
                   >
                     <div className="min-w-0">
-                      <p className="text-sm font-bold uppercase tracking-wide truncate">
+                      <p className="text-sm font-bold uppercase tracking-wide truncate group-hover:underline">
                         {item.title}
                       </p>
                       <p className="text-zinc-500 text-[10px] uppercase tracking-widest">
@@ -306,10 +306,10 @@ export default function ProgressScreen() {
                       type="button"
                       disabled={openingProblemId !== null}
                       onClick={() => openProblem(problem)}
-                      className="flex-1 min-w-0 py-4 flex items-center justify-between gap-4 text-left hover:bg-zinc-950 transition-colors disabled:opacity-50"
+                      className="group flex-1 min-w-0 py-4 flex items-center justify-between gap-4 text-left cursor-pointer disabled:cursor-default disabled:opacity-50"
                     >
                       <div className="min-w-0">
-                        <p className="text-sm font-bold uppercase tracking-wide truncate">
+                        <p className="text-sm font-bold uppercase tracking-wide truncate group-hover:underline">
                           {problem.title}
                         </p>
                         <p className="text-zinc-500 text-[10px] uppercase tracking-widest truncate">
@@ -318,6 +318,9 @@ export default function ProgressScreen() {
                         </p>
                       </div>
                     </button>
+                    {problem.status === "COMPLETED" && (
+                      <Check className="w-4 h-4 flex-none text-green-500" aria-label="Solved" />
+                    )}
                     <button
                       type="button"
                       aria-label={problem.flagged ? "Unflag this problem" : "Flag to come back to"}
