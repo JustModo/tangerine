@@ -74,8 +74,7 @@ export function LessonNotesPanel({ lessonNodeId }: { lessonNodeId: string }) {
 
       {notes === null && !loading && !failed && (
         <p className="text-xs text-zinc-500">
-          A short lesson on the core concept behind this problem — what it is, why it's used,
-          and how to apply it.
+          A short lesson on the core concept behind this problem
         </p>
       )}
 

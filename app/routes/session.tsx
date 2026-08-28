@@ -77,14 +77,14 @@ export default function SessionChat() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [session?.messages.length, streamingText, activity, pendingMessage]);
 
-  // Autosize the composer: 1 line at rest, growing to at most 3 before it scrolls.
+  // Autosize the composer: 1 line at rest, growing to at most 7 before it scrolls.
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 24;
     const padding = el.offsetHeight - el.clientHeight + 16; // borders + py-2 top/bottom
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, lineHeight * 3 + padding)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, lineHeight * 7 + padding)}px`;
   }, [draft]);
 
   async function sendMessage() {
@@ -228,7 +228,6 @@ export default function SessionChat() {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Message..."
-            // Grows from 1 line up to 3, then scrolls - see the autosize effect above.
             className="flex-1 resize-none min-h-0 py-2 overflow-y-auto leading-6"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {

@@ -28,6 +28,7 @@ export function CodeHelperPanel({
   const [streamingText, setStreamingText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   async function loadMessages() {
     try {
@@ -45,6 +46,16 @@ export function CodeHelperPanel({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length, streamingText]);
+
+  // Autosize the composer: 1 line at rest, growing to at most 7 before it scrolls.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 24;
+    const padding = el.offsetHeight - el.clientHeight + 16; // borders + py-2 top/bottom
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, lineHeight * 7 + padding)}px`;
+  }, [draft]);
 
   async function send() {
     if (!draft.trim() || sending) return;
@@ -119,11 +130,12 @@ export function CodeHelperPanel({
       </div>
       <div className="flex-none pt-3 flex items-end gap-2 border-t border-white/10">
         <Textarea
+          ref={inputRef}
           rows={1}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Ask about your code..."
-          className="flex-1 resize-none min-h-0 py-2 text-sm leading-6"
+          className="flex-1 resize-none min-h-0 py-2 overflow-y-auto text-sm leading-6"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
