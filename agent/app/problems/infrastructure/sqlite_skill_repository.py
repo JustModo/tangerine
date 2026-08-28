@@ -10,7 +10,9 @@ class SqliteSkillRepository:
         self._database_path = database_path or get_settings().database_path
 
     async def ensure_skill(self, name: str) -> str:
-        """Find-or-create a skill by name, returning its id."""
+        """Find-or-create a skill by name, returning its id. Normalised because the UNIQUE
+        constraint is byte-exact while every caller compares with .strip().lower()."""
+        name = " ".join(name.split()).lower()
         async with connect(self._database_path) as db:
             cursor = await db.execute("SELECT id FROM skills WHERE name = ?", (name,))
             row = await cursor.fetchone()

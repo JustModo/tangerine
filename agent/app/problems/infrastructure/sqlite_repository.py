@@ -15,6 +15,8 @@ from app.shared.database import connect
 from app.shared.fuzzy import match_score
 from app.shared.types import Language
 
+SIMILAR_TITLE_THRESHOLD = 0.6
+
 
 class SqliteProblemRepository:
     """ProblemRepository backed by SQLite. Implements app.problems.domain.repository.ProblemRepository."""
@@ -111,14 +113,33 @@ class SqliteProblemRepository:
             items = [await self._hydrate(db, row) for row in page_rows]
         return items, total
 
-    async def find_by_conceptual_id(self, conceptual_id: str, language: Language) -> Problem | None:
-        """Duplicate check: two generations for the same skill routinely land on the same
-        classic problem, and without this the bank fills with near-identical rows."""
+    async def find_similar(
+        self, title: str, language: Language, exclude_problem_ids: list[str] | None = None
+    ) -> Problem | None:
+        """The bank's closest question to one just generated, or None. Titles-only scan,
+        then a single hydrate of the winner. An exact title scores 1.0."""
+        query = "SELECT id, title FROM problems WHERE language = ? AND status = ?"
+        params: list[object] = [language.value, ProblemStatus.AVAILABLE.value]
+        if exclude_problem_ids:
+            placeholders = ",".join("?" for _ in exclude_problem_ids)
+            query += f" AND id NOT IN ({placeholders})"
+            params.extend(exclude_problem_ids)
+
         async with connect(self._database_path) as db:
-            cursor = await db.execute(
-                "SELECT * FROM problems WHERE conceptual_id = ? AND language = ? AND status = ? LIMIT 1",
-                (conceptual_id, language.value, ProblemStatus.AVAILABLE.value),
-            )
+            cursor = await db.execute(query, params)
+            rows = await cursor.fetchall()
+
+            # max, not min: near-duplicate titles are containments, and containment only
+            # scores 1.0 in the shorter-title direction.
+            best_id, best_score = None, 0.0
+            for row in rows:
+                score = max(match_score(title, row["title"]), match_score(row["title"], title))
+                if score > best_score:
+                    best_id, best_score = row["id"], score
+            if best_id is None or best_score < SIMILAR_TITLE_THRESHOLD:
+                return None
+
+            cursor = await db.execute("SELECT * FROM problems WHERE id = ?", (best_id,))
             row = await cursor.fetchone()
             return await self._hydrate(db, row) if row else None
 

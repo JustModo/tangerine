@@ -114,7 +114,7 @@ class ProblemSessionService:
         difficulty = node.difficulty or suggest_difficulty(mastery_score, node.sequence_index)
 
         problem = await self._select_or_generate(
-            node.skill_id, skill_name, plan.language, difficulty, user_id, on_stage
+            plan, node.skill_id, skill_name, plan.language, difficulty, user_id, on_stage
         )
         if problem is None:
             raise NotFoundError(f"Could not generate a valid problem for skill {skill_name}")
@@ -123,6 +123,7 @@ class ProblemSessionService:
 
     async def _select_or_generate(
         self,
+        plan,
         skill_id: str,
         skill_name: str,
         language,
@@ -131,18 +132,29 @@ class ProblemSessionService:
         on_stage: Callable[[str], None] | None = None,
     ):
         """Bank first, generation on a miss — excluding everything this learner has already
-        been served, so practising a skill twice is never the same question twice."""
+        been served, so practising a skill twice is never the same question twice.
+
+        The do-not-repeat list is scoped to the plan, not the step's skill: a plan's steps
+        are all different skills, so a skill-scoped list is empty on every first visit and
+        the generator keeps reaching for the same canonical question. Nodes already carry
+        the title they served, so this costs no extra lookup."""
+        seen_problem_ids = await self._session_repository.list_problem_ids_for_user(user_id)
         criteria = ProblemCriteria(
             skill_id=skill_id,
             language=language,
             difficulty=difficulty,
-            exclude_problem_ids=await self._session_repository.list_problem_ids_for_user(user_id),
+            exclude_problem_ids=seen_problem_ids,
         )
         problem = await self._problem_selection.find_suitable(criteria)
         if problem is not None:
             return problem
         return await self._problem_validation.generate_and_validate(
-            skill_name, language, difficulty, on_stage=on_stage
+            skill_name,
+            language,
+            difficulty,
+            on_stage=on_stage,
+            avoid_titles=[node.problem_title for node in plan.nodes if node.problem_title],
+            exclude_problem_ids=seen_problem_ids,
         )
 
     async def start_for_problem(self, user_id: str, problem_id: str) -> ProblemSession:

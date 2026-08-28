@@ -23,7 +23,7 @@ from app.revision.application.services import RevisionService
 from app.curriculum.domain.models import LessonNodeStatus
 from app.sessions.domain.models import ChatMessage, ChatRole, LearningSession, SessionStatus
 from app.sessions.domain.repository import SessionRepository
-from app.shared.errors import NotFoundError
+from app.shared.errors import AgentError, ConflictError, NotFoundError
 from app.shared.preferences import get_preferences
 from app.shared.types import Language
 
@@ -562,23 +562,24 @@ class SessionService:
         yield event
 
         plan = None
-        not_found: NotFoundError | None = None
+        
+        not_run: AgentError | None = None
         try:
             plan = await action()
-        except NotFoundError as exc:
-            not_found = exc
+        except (NotFoundError, ConflictError) as exc:
+            not_run = exc
         except Exception:
             logger.warning("Plan edit (%s) failed for session %s", operation, session_id, exc_info=True)
 
         if plan is not None:
             result_summary = done_text(plan)
             fallback = "Updated your plan — open it with the corner button to see the changes."
-        elif not_found is not None:
+        elif not_run is not None:
             result_summary = (
-                f"NOT RUN — {not_found}. Nothing was changed. Tell the user this plainly and "
+                f"NOT RUN — {not_run}. Nothing was changed. Tell the user this plainly and "
                 "ask them to clarify or try something else."
             )
-            fallback = f"{not_found} — want to try something else?"
+            fallback = f"{not_run} — want to try something else?"
         else:
             result_summary = "Plan edit failed — tell the user something went wrong and they can try again."
             fallback = "Something went wrong updating the plan — want to try again?"

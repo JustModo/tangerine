@@ -14,10 +14,12 @@ class FakeLLMProvider:
         self._chat_streams = list(chat_streams or [])
         # Captured for test assertions on prompt content.
         self.last_chat_request: ChatStreamRequest | None = None
+        self.last_structured_request: StructuredGenerationRequest | None = None
 
     async def generate_structured(
         self, request: StructuredGenerationRequest, response_model: type[BaseModel]
     ) -> BaseModel:
+        self.last_structured_request = request
         if not self._structured_responses:
             raise AssertionError("FakeLLMProvider: no more structured responses queued")
         next_item = self._structured_responses.pop(0)

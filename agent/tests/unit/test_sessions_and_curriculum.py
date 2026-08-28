@@ -958,3 +958,28 @@ async def test_a_plan_for_an_unknown_learner_starts_from_the_first_step(db_path:
         LessonNodeStatus.AVAILABLE,
         LessonNodeStatus.LOCKED,
     ]
+
+
+async def test_create_draft_drops_a_repeated_skill(db_path: str) -> None:
+    """The prompt asks for distinct skills, but two steps on one skill are indistinguishable
+    in the plan and draw from the same pool of questions."""
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    session = await SessionService(SqliteSessionRepository(db_path)).create_session(user.id)
+
+    generated = GeneratedCurriculum(
+        nodes=[
+            GeneratedCurriculumNode(skill="prefix-sum", difficulty=1),
+            GeneratedCurriculumNode(skill="Prefix-Sum", difficulty=2),
+            GeneratedCurriculumNode(skill="sliding window", difficulty=2),
+        ],
+    )
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path),
+        FakeLLMProvider(structured_responses=[generated]),
+        skill_repository=SqliteSkillRepository(db_path),
+    )
+
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+
+    assert [node.skill_name for node in plan.nodes] == ["prefix-sum", "sliding window"]
+    assert [node.sequence_index for node in plan.nodes] == [0, 1]

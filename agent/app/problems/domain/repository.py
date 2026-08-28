@@ -15,8 +15,8 @@ class ProblemRepository(Protocol):
         self, page: int, page_size: int, query: str | None = None, language: str | None = None
     ) -> tuple[list[Problem], int]: ...
 
-    async def find_by_conceptual_id(
-        self, conceptual_id: str, language: Language
+    async def find_similar(
+        self, title: str, language: Language, exclude_problem_ids: list[str] | None = None
     ) -> Problem | None: ...
 
     async def list_titles(self, skill_id: str, language: Language) -> list[str]: ...

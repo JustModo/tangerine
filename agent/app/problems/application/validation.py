@@ -65,6 +65,8 @@ class ProblemValidationService:
         difficulty: str,
         source_problem: str | None = None,
         on_stage: Callable[[str], None] | None = None,
+        avoid_titles: list[str] | None = None,
+        exclude_problem_ids: list[str] | None = None,
     ) -> Problem | None:
         """Generate, prove it out against the real sandbox, and — when it fails — repair it
         with the failure in hand before falling back to starting over.
@@ -78,17 +80,23 @@ class ProblemValidationService:
         When source_problem is given, the learner pasted that question in and the LLM adapts
         it rather than inventing one. Neither the repair nor the fresh generation may change
         what is being asked — the regeneration re-adapts the SAME source, and the repair is
-        barred from touching the statement."""
+        barred from touching the statement.
+
+        avoid_titles, when given, is the caller's own do-not-repeat list; a plan passes the
+        questions its earlier steps served. Without it, the skill's own titles are used —
+        right for the plan-less practice path."""
         stage = on_stage or (lambda _: None)
 
-        avoid_titles: list[str] = []
-        if not source_problem:
+        if source_problem:
+            avoid_titles = []
+        elif avoid_titles is None:
             skill_id = await self._skill_repository.ensure_skill(skill)
-            # Capped for two reasons: it grows without bound as the bank fills, and it is
-            # part of the generation cache key — every extra title is another key nobody
-            # else will ever hit. Not repeating a problem is already guaranteed upstream by
-            # ProblemSelectionService.find_suitable; this list is only a nudge for variety.
-            avoid_titles = (await self._repository.list_titles(skill_id, language))[-MAX_AVOID_TITLES:]
+            avoid_titles = await self._repository.list_titles(skill_id, language)
+        # Capped for two reasons: it grows without bound as the bank fills, and it is part of
+        # the generation cache key — every extra title is another key nobody else will ever
+        # hit. Not repeating a problem is already guaranteed upstream by
+        # ProblemSelectionService.find_suitable; this list is only a nudge for variety.
+        avoid_titles = avoid_titles[-MAX_AVOID_TITLES:]
 
         stage("generating")
         generated = await generate_problem(
@@ -101,28 +109,34 @@ class ProblemValidationService:
             avoid_titles=avoid_titles,
         )
 
-        duplicate_of = await self._find_duplicate(generated, source_problem, language)
-        if duplicate_of is None:
-            stage("validating")
-            problem, failure = await self._validate(
-                generated, _conceptual_id(generated.title), skill, language, difficulty
+        # A question the bank already has is served from the bank: already validated, not
+        # yet seen by this learner, and no further LLM call.
+        duplicate_of = await self._find_duplicate(
+            generated, source_problem, language, exclude_problem_ids
+        )
+        if duplicate_of is not None:
+            return duplicate_of
+
+        stage("validating")
+        problem, failure = await self._validate(
+            generated, _conceptual_id(generated.title), skill, language, difficulty
+        )
+        if problem is not None:
+            return problem
+
+        # Repair attempt with failure context (old blind retry didn't have this).
+        stage("patching")
+        patch = await patch_problem(
+            self._llm_provider, generated, failure.kind, failure.detail, language.value
+        )
+        patched = apply_patch(generated, patch, source_problem)
+        if patched is not generated:
+            stage("revalidating")
+            problem, _ = await self._validate(
+                patched, _conceptual_id(patched.title), skill, language, difficulty
             )
             if problem is not None:
                 return problem
-
-            # Repair attempt with failure context (old blind retry didn't have this).
-            stage("patching")
-            patch = await patch_problem(
-                self._llm_provider, generated, failure.kind, failure.detail, language.value
-            )
-            patched = apply_patch(generated, patch, source_problem)
-            if patched is not generated:
-                stage("revalidating")
-                problem, _ = await self._validate(
-                    patched, _conceptual_id(patched.title), skill, language, difficulty
-                )
-                if problem is not None:
-                    return problem
 
         # Regenerate without cache (replaying rejected cached answer would loop).
         stage("regenerating")
@@ -135,30 +149,32 @@ class ProblemValidationService:
             source_problem=source_problem,
             avoid_titles=avoid_titles + [generated.title],
         )
-        duplicate_of = duplicate_of or await self._find_duplicate(
-            generated, source_problem, language
+        duplicate_of = await self._find_duplicate(
+            generated, source_problem, language, exclude_problem_ids
         )
-        if duplicate_of is None:
-            stage("validating")
-            problem, _ = await self._validate(
-                generated, _conceptual_id(generated.title), skill, language, difficulty
-            )
-            if problem is not None:
-                return problem
+        if duplicate_of is not None:
+            return duplicate_of
 
-        # Fallback to duplicate (something > nothing).
-        return duplicate_of
+        stage("validating")
+        problem, _ = await self._validate(
+            generated, _conceptual_id(generated.title), skill, language, difficulty
+        )
+        return problem
 
     async def _find_duplicate(
-        self, generated: GeneratedProblem, source_problem: str | None, language: Language
+        self,
+        generated: GeneratedProblem,
+        source_problem: str | None,
+        language: Language,
+        exclude_problem_ids: list[str] | None,
     ) -> Problem | None:
-        """The generator reached for a problem the bank already has. Worth starting over
-        for a different one rather than storing a near-identical row — and never worth
-        spending the repair budget on, since nothing about it is broken."""
+        """The bank's existing take on the question just generated, if it has one. Fuzzy on
+        the title rather than an exact hash, which only ever caught identical ones. Never for
+        a pasted problem — the learner asked for that exact question."""
         if source_problem:
             return None
-        return await self._repository.find_by_conceptual_id(
-            _conceptual_id(generated.title), language
+        return await self._repository.find_similar(
+            generated.title, language, exclude_problem_ids
         )
 
     async def _validate(

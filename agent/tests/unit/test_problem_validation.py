@@ -44,6 +44,16 @@ def _rows_for_skill(db_path: str, skill_id: str) -> list[tuple[str, str]]:
     return rows
 
 
+def _passing_results() -> list[TestResult]:
+    """1 example + 3 hidden tests, all matching the reference for _generated_problem()."""
+    return [
+        TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6\n"),
+        TestResult(id="1", status=ExecutionStatus.PASSED, input="0", actual_output="0\n"),
+        TestResult(id="2", status=ExecutionStatus.PASSED, input="5", actual_output="5\n"),
+        TestResult(id="3", status=ExecutionStatus.PASSED, input="-1 -2", actual_output="-3\n"),
+    ]
+
+
 def _generated_problem() -> GeneratedProblem:
     return GeneratedProblem(
         title="Static Range Sum",
@@ -215,17 +225,93 @@ async def test_a_repeat_of_an_existing_problem_is_not_stored_twice(db_path: str)
     ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
     assert first is not None
 
-    # Same title → same conceptual id → duplicate found.
+    # One queued response, not two: a duplicate is served from the bank, so the regeneration
+    # that used to run before falling back to this same row never happens.
     second = await ProblemValidationService(
         repo,
-        FakeLLMProvider(structured_responses=[_generated_problem(), _generated_problem()]),
+        FakeLLMProvider(structured_responses=[_generated_problem()]),
         FakeCodeExecutor(passing),
         skill_repo,
     ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
 
-    # Falls back to existing problem (don't duplicate).
     assert second is not None and second.id == first.id
     assert len(_rows_for_skill(db_path, await skill_repo.ensure_skill("prefix-sum"))) == 1
+
+
+async def test_a_near_duplicate_title_is_served_from_the_bank(db_path: str) -> None:
+    """The reported bug: one plan served "Climbing Stairs", "Min Cost Climbing Stairs" and
+    "Climbing Stairs" as three separate steps. An exact title hash caught none of them."""
+    repo = SqliteProblemRepository(db_path)
+    skill_repo = SqliteSkillRepository(db_path)
+    first = await ProblemValidationService(
+        repo, FakeLLMProvider(structured_responses=[_generated_problem()]),
+        FakeCodeExecutor(_passing_results()), skill_repo,
+    ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
+    assert first is not None
+
+    variant = _generated_problem()
+    variant.title = "Minimum Cost Static Range Sum"
+    second = await ProblemValidationService(
+        repo, FakeLLMProvider(structured_responses=[variant]),
+        FakeCodeExecutor(_passing_results()), skill_repo,
+    ).generate_and_validate("dynamic programming", Language.PYTHON, "easy")
+
+    assert second is not None and second.id == first.id
+
+
+async def test_a_problem_the_learner_has_seen_is_not_reused(db_path: str) -> None:
+    repo = SqliteProblemRepository(db_path)
+    skill_repo = SqliteSkillRepository(db_path)
+    first = await ProblemValidationService(
+        repo, FakeLLMProvider(structured_responses=[_generated_problem()]),
+        FakeCodeExecutor(_passing_results()), skill_repo,
+    ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
+    assert first is not None
+
+    variant = _generated_problem()
+    variant.title = "Minimum Cost Static Range Sum"
+    second = await ProblemValidationService(
+        repo, FakeLLMProvider(structured_responses=[variant]),
+        FakeCodeExecutor(_passing_results()), skill_repo,
+    ).generate_and_validate(
+        "prefix-sum", Language.PYTHON, "easy", exclude_problem_ids=[first.id]
+    )
+
+    assert second is not None and second.id != first.id
+
+
+async def test_an_unrelated_title_is_not_treated_as_a_duplicate(db_path: str) -> None:
+    repo = SqliteProblemRepository(db_path)
+    skill_repo = SqliteSkillRepository(db_path)
+    first = await ProblemValidationService(
+        repo, FakeLLMProvider(structured_responses=[_generated_problem()]),
+        FakeCodeExecutor(_passing_results()), skill_repo,
+    ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
+    assert first is not None
+
+    unrelated = _generated_problem()
+    unrelated.title = "Climbing Stairs"
+    second = await ProblemValidationService(
+        repo, FakeLLMProvider(structured_responses=[unrelated]),
+        FakeCodeExecutor(_passing_results()), skill_repo,
+    ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
+
+    assert second is not None and second.id != first.id
+    assert len(_rows_for_skill(db_path, await skill_repo.ensure_skill("prefix-sum"))) == 2
+
+
+async def test_the_plan_scoped_avoid_list_reaches_the_prompt(db_path: str) -> None:
+    """A plan passes the titles its earlier steps served; a skill-scoped list would be empty
+    here and the generator would be free to repeat one."""
+    repo = SqliteProblemRepository(db_path)
+    llm = FakeLLMProvider(structured_responses=[_generated_problem()])
+    await ProblemValidationService(
+        repo, llm, FakeCodeExecutor(_passing_results()), SqliteSkillRepository(db_path)
+    ).generate_and_validate(
+        "prefix-sum", Language.PYTHON, "easy", avoid_titles=["Climbing Stairs"]
+    )
+
+    assert "Climbing Stairs" in llm.last_structured_request.user_prompt
 
 
 async def test_a_stress_input_that_fails_leaves_the_problem_usable(db_path: str) -> None:

@@ -102,16 +102,22 @@ class CurriculumService:
             )
             generated_nodes = generated.nodes
 
+        # The prompt asks for distinct skills; this enforces it. sequence_index stays 0 —
+        # _ensure_startable reindexes below, so a skipped node leaves no gap.
         nodes = []
-        for index, generated_node in enumerate(generated_nodes):
+        seen_skill_ids: set[str] = set()
+        for generated_node in generated_nodes:
             skill_id = await self._skill_repository.ensure_skill(generated_node.skill)
+            if skill_id in seen_skill_ids:
+                continue
+            seen_skill_ids.add(skill_id)
             already_known = generated_node.skill.strip().lower() in known_skills
             nodes.append(
                 LessonNode(
                     id=str(uuid.uuid4()),
                     lesson_plan_id=plan.id,
                     skill_id=skill_id,
-                    sequence_index=index,
+                    sequence_index=0,
                     status=LessonNodeStatus.DONE if already_known else LessonNodeStatus.LOCKED,
                     difficulty=_difficulty_label(generated_node.difficulty),
                     created_at=datetime.now(timezone.utc),
@@ -291,10 +297,15 @@ class CurriculumService:
         """Inserts a brand new step — no existing step's row, session, or progress is
         touched, so nothing needs invalidating."""
         plan = await self._require_plan(plan_id)
+        skill_id = await self._skill_repository.ensure_skill(skill)
+        # Same guard add_problem_step has.
+        if any(node.skill_id == skill_id for node in plan.nodes):
+            raise ConflictError(f"'{skill}' is already a step on this plan.")
+
         new_node = LessonNode(
             id=str(uuid.uuid4()),
             lesson_plan_id=plan.id,
-            skill_id=await self._skill_repository.ensure_skill(skill),
+            skill_id=skill_id,
             sequence_index=0,  # reindexed below
             status=LessonNodeStatus.LOCKED,
             difficulty=difficulty or "medium",
@@ -402,8 +413,14 @@ class CurriculumService:
         # revision actually changed its difficulty, the session that was already selected or
         # started no longer matches what the step is supposed to be, and must regenerate.
         redifficultied_ids: set[str] = set()
+        seen_skills: set[str] = set()
         for step in revised.steps:
-            candidates = existing_by_skill.get(step.skill.strip().lower(), [])
+            skill_key = step.skill.strip().lower()
+            # Without this a repeated skill falls through to creating a second node for it.
+            if skill_key in seen_skills:
+                continue
+            seen_skills.add(skill_key)
+            candidates = existing_by_skill.get(skill_key, [])
             match = next((c for c in candidates if c.id not in matched_ids), None)
             # Already easy/medium/hard — the revision schema speaks the same vocabulary the
             # plan stores, so an untouched step's difficulty round-trips unchanged.
