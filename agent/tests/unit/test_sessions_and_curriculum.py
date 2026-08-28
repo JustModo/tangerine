@@ -983,3 +983,130 @@ async def test_create_draft_drops_a_repeated_skill(db_path: str) -> None:
 
     assert [node.skill_name for node in plan.nodes] == ["prefix-sum", "sliding window"]
     assert [node.sequence_index for node in plan.nodes] == [0, 1]
+
+
+async def _plan_and_service(db_path: str) -> tuple[SessionService, CurriculumService, str, "LessonPlan"]:
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    generated = GeneratedCurriculum(
+        nodes=[
+            GeneratedCurriculumNode(skill="prefix-sum", difficulty=1),
+            GeneratedCurriculumNode(skill="range-query", difficulty=2),
+        ],
+    )
+    llm = FakeLLMProvider(structured_responses=[generated])
+    curriculum = CurriculumService(
+        SqliteLessonPlanRepository(db_path), llm, skill_repository=SqliteSkillRepository(db_path)
+    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, curriculum)
+    session = await service.create_session(user.id)
+    plan = await curriculum.create_draft(session.id, "prefix sums", Language.PYTHON, "beginner")
+    return service, curriculum, session.id, plan
+
+
+async def _run_edit(service: SessionService, llm: FakeLLMProvider, session_id: str, args: dict) -> list[dict]:
+    llm._chat_streams = [
+        [ChatChunk(tool_call=ToolCallResult(name="edit_learning_plan", args=args)), ChatChunk(done=True)],
+        [ChatChunk(text_delta="Okay."), ChatChunk(done=True)],
+    ]
+    return [event async for event in service.add_message(session_id, "do the thing")]
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        ({"operation": "change_step_difficulty", "step": "", "difficulty": "hard"},
+         "missing which step or what difficulty"),
+        ({"operation": "change_step_difficulty", "step": "1", "difficulty": "spicy"},
+         "missing which step or what difficulty"),
+        ({"operation": "add_step", "skill": ""}, "no skill/topic given"),
+        ({"operation": "add_problem", "problem_id": ""}, "no problem id given"),
+        ({"operation": "remove_step", "step": ""}, "no step named to remove"),
+        ({"operation": "reorder_step", "step": "1"}, "missing which step or where to move it"),
+        ({"operation": "reorder_step", "step": "", "to_position": 1},
+         "missing which step or where to move it"),
+    ],
+)
+async def test_edit_plan_refuses_incomplete_arguments(db_path: str, args: dict, expected: str) -> None:
+    """Every NOT RUN validation branch: nothing changes, the model is told why in the exact
+    words it acts on, and the turn still completes."""
+    service, curriculum, session_id, plan = await _plan_and_service(db_path)
+    before = [n.skill_name for n in (await curriculum.get(plan.id)).nodes]
+
+    events = await _run_edit(service, service._llm_provider, session_id, args)
+
+    after = await curriculum.get(plan.id)
+    assert [n.skill_name for n in after.nodes] == before
+    followup = service._llm_provider.last_chat_request.message
+    assert "NOT RUN" in followup and expected in followup
+    assert events[-1]["type"] == "done"
+
+
+async def test_edit_plan_unknown_operation_falls_back_to_rework(db_path: str) -> None:
+    service, curriculum, session_id, plan = await _plan_and_service(db_path)
+    called: list[tuple[str, str]] = []
+
+    async def fake_edit_plan(plan_id: str, instruction: str):
+        called.append((plan_id, instruction))
+        return await curriculum.get(plan_id)
+
+    curriculum.edit_plan = fake_edit_plan
+
+    events = await _run_edit(
+        service, service._llm_provider, session_id, {"operation": "nonsense", "instruction": "mix it up"}
+    )
+
+    assert called == [(plan.id, "mix it up")]
+    assert events[-1]["type"] == "done"
+
+
+async def test_edit_plan_missing_operation_falls_back_to_rework(db_path: str) -> None:
+    service, curriculum, session_id, plan = await _plan_and_service(db_path)
+    called: list[str] = []
+
+    async def fake_edit_plan(plan_id: str, instruction: str):
+        called.append(instruction)
+        return await curriculum.get(plan_id)
+
+    curriculum.edit_plan = fake_edit_plan
+
+    await _run_edit(service, service._llm_provider, session_id, {})
+
+    assert called == ["do the thing"]
+
+
+def _expected_tools(has_revision, has_library, has_sessions, has_curriculum, existing_plan, user_id, after_lookup):
+    """The gating rules spelled out independently of the implementation, so a registry that
+    mis-transcribes one is caught rather than silently hiding a tool from the model."""
+    names = ["generate_learning_plan"]
+    if existing_plan:
+        names.append("edit_learning_plan")
+    if has_revision and user_id:
+        names.append("get_practice_record")
+    if has_library and has_sessions and user_id:
+        names += ["find_problems", "set_problem_flag"]
+    if has_library and has_curriculum and user_id:
+        names.append("create_practice_plan")
+    if after_lookup:
+        names = [n for n in names if n not in ("find_problems", "get_practice_record")]
+    return names
+
+
+@pytest.mark.parametrize("existing_plan", [False, True])
+@pytest.mark.parametrize("user_id", [None, "local-user"])
+@pytest.mark.parametrize("after_lookup", [False, True])
+@pytest.mark.parametrize("wired", [False, True])
+def test_tools_offered_match_the_gating_rules(db_path, existing_plan, user_id, after_lookup, wired):
+    sentinel = object()
+    service = SessionService(
+        SqliteSessionRepository(db_path),
+        curriculum_service=sentinel if wired else None,
+        revision_service=sentinel if wired else None,
+        problem_session_service=sentinel if wired else None,
+        library_service=sentinel if wired else None,
+    )
+
+    offered = [t.name for t in service._tools_for(existing_plan, user_id, after_lookup)]
+
+    assert offered == _expected_tools(
+        wired, wired, wired, wired, existing_plan, user_id, after_lookup
+    )

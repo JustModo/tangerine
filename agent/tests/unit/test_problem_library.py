@@ -621,3 +621,33 @@ async def test_a_flagged_problem_in_a_plan_keeps_its_single_session_and_flag(db_
     assert problem_session.lesson_node_id == plan.nodes[0].id
     # Re-doable: solving it before is recorded in mastery, not on this row.
     assert problem_session.status == ProblemSessionStatus.NOT_STARTED
+
+
+async def test_set_problem_flag_tool_call_flags_the_problem(db_path: str) -> None:
+    """The one tool with no coverage through the dispatch path — only its service method
+    was exercised directly."""
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    problem = await _make_problem(db_path, "Merge Two Sorted Lists")
+
+    llm = FakeLLMProvider(
+        chat_streams=[
+            [
+                ChatChunk(
+                    tool_call=ToolCallResult(
+                        name="set_problem_flag",
+                        args={"problem_id": problem.id, "flagged": True},
+                    )
+                ),
+                ChatChunk(done=True),
+            ],
+            [ChatChunk(text_delta="Flagged it."), ChatChunk(done=True)],
+        ],
+    )
+    service = _chat_service(db_path, llm, await _problem_session_service(db_path))
+    session = await service.create_session(user.id)
+
+    events = [e async for e in service.add_message(session.id, "flag that one")]
+
+    sessions = await SqliteProblemSessionRepository(db_path).list_for_user(user.id)
+    assert [s.flagged for s in sessions if s.problem_id == problem.id] == [True]
+    assert events[-1]["type"] == "done"
