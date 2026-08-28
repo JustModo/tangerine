@@ -161,20 +161,17 @@ export function CodeWorkbench({
     }
   }
 
-
-  // Ctrl/Cmd+Enter to run, +Shift to submit - the bindings every editor-plus-runner uses.
-  // Through a ref so the listener binds once: the handlers close over `code`, so binding
-  // them directly would add and remove a window listener on every keystroke.
   const shortcutRef = useRef<(event: KeyboardEvent) => void>(() => {});
   shortcutRef.current = (event: KeyboardEvent) => {
-    if (!(event.metaKey || event.ctrlKey) || event.key !== "Enter") return;
-    if (isRunning || isSubmitting) return;
+    if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
+
+    const isRun = event.code === "Backquote";
+    const isSubmit = event.key === "Enter";
+    if (!isRun && !isSubmit) return;
     event.preventDefault();
-    if (event.shiftKey) {
-      if (onSubmit) handleSubmit();
-    } else {
-      handleRun();
-    }
+    if (isRunning || isSubmitting) return;
+    if (isRun) handleRun();
+    else if (onSubmit) handleSubmit();
   };
 
   useEffect(() => {
@@ -223,7 +220,7 @@ export function CodeWorkbench({
                     size="sm"
                     onClick={handleRun}
                     disabled={isRunning || isSubmitting}
-                    title="Ctrl/Cmd + Enter"
+                    title="Ctrl/Cmd + `"
                   >
                     {isRunning ? (
                       <RefreshCcw className="mr-2 h-3.5 w-3.5 animate-spin" />
@@ -237,7 +234,7 @@ export function CodeWorkbench({
                       size="sm"
                       onClick={handleSubmit}
                       disabled={isRunning || isSubmitting}
-                      title="Ctrl/Cmd + Shift + Enter"
+                      title="Ctrl/Cmd + Enter"
                     >
                       {isSubmitting ? (
                         <RefreshCcw className="mr-2 h-3.5 w-3.5 animate-spin" />

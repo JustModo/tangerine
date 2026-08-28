@@ -17,4 +17,10 @@ self.MonacoEnvironment = {
   },
 };
 
+// Monaco binds Ctrl/Cmd+Enter to insertLineAfter and consumes the event, so the workbench's
+// submit shortcut never reached the window listener. Unbinding lets the keydown bubble.
+monaco.editor.addKeybindingRules([
+  { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, command: null },
+]);
+
 loader.config({ monaco });
