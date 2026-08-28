@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.mastery.domain.models import UserSkillState
 from app.mastery.domain.repository import UserSkillStateRepository
@@ -47,7 +47,7 @@ class MasteryService:
             skill_id=skill_id,
             mastery_score=score,
             streak=streak,
-            last_seen_at=datetime.now(timezone.utc),
+            last_seen_at=datetime.now(UTC),
         )
         await self._repository.save(state)
         return state

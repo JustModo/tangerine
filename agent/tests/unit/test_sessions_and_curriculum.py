@@ -1,11 +1,11 @@
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from app.curriculum.application.services import CurriculumService
-from app.curriculum.domain.models import LessonNodeStatus
+from app.curriculum.domain.models import LessonNodeStatus, LessonPlan
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
 from app.llm.domain.requests import ChatChunk, ToolCallResult
 from app.llm.infrastructure.cache import SqliteLLMCache
@@ -343,7 +343,9 @@ async def test_set_plan_language_changes_and_persists(db_path: str) -> None:
     generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)])
     repo = SqliteLessonPlanRepository(db_path)
     curriculum = CurriculumService(
-        repo, FakeLLMProvider(structured_responses=[generated]), skill_repository=SqliteSkillRepository(db_path)
+        repo,
+        FakeLLMProvider(structured_responses=[generated]),
+        skill_repository=SqliteSkillRepository(db_path),
     )
     plan = await curriculum.create_draft(session.id, "prefix sums", Language.JAVA, "beginner")
 
@@ -367,7 +369,9 @@ async def test_set_plan_language_preserves_steps_and_completed_status(db_path: s
     )
     repo = SqliteLessonPlanRepository(db_path)
     curriculum = CurriculumService(
-        repo, FakeLLMProvider(structured_responses=[generated]), skill_repository=SqliteSkillRepository(db_path)
+        repo,
+        FakeLLMProvider(structured_responses=[generated]),
+        skill_repository=SqliteSkillRepository(db_path),
     )
     plan = await curriculum.create_draft(session.id, "prefix sums", Language.JAVA, "beginner")
     await repo.update_node_status(plan.nodes[0].id, LessonNodeStatus.DONE)
@@ -449,10 +453,7 @@ async def test_two_plan_edits_in_one_turn_leave_a_single_status_line(db_path: st
         [ChatChunk(text_delta="Dropped it and switched to Python."), ChatChunk(done=True)],
     ]
 
-    events = [
-        event
-        async for event in service.add_message(session.id, "drop step 2 and make it python")
-    ]
+    events = [event async for event in service.add_message(session.id, "drop step 2 and make it python")]
 
     # Both edits ran...
     updated = await curriculum.get(plan.id)
@@ -641,7 +642,7 @@ async def test_edit_plan_tool_call_reorder_step(db_path: str) -> None:
     assert events[-1]["type"] == "done"
 
 
-async def _two_step_plan(db_path: str) -> tuple[CurriculumService, "LessonPlan"]:
+async def _two_step_plan(db_path: str) -> tuple[CurriculumService, LessonPlan]:
     user = await SqliteUserRepository(db_path).ensure_default_user()
     sessions = SessionService(SqliteSessionRepository(db_path))
     session = await sessions.create_session(user.id)
@@ -653,7 +654,8 @@ async def _two_step_plan(db_path: str) -> tuple[CurriculumService, "LessonPlan"]
     )
     repo = SqliteLessonPlanRepository(db_path)
     curriculum = CurriculumService(
-        repo, FakeLLMProvider(structured_responses=[generated]),
+        repo,
+        FakeLLMProvider(structured_responses=[generated]),
         skill_repository=SqliteSkillRepository(db_path),
     )
     plan = await curriculum.create_draft(session.id, "topic", Language.PYTHON, "beginner")
@@ -820,9 +822,7 @@ async def test_lesson_notes_refresh_bypasses_the_cache_read_but_still_writes(db_
 
     assert (await curriculum.get_node_notes(node_id)).steps[0].title == "First lesson"
     # refresh skips the cached entry and generates again...
-    assert (
-        await curriculum.get_node_notes(node_id, refresh=True)
-    ).steps[0].title == "Second lesson"
+    assert (await curriculum.get_node_notes(node_id, refresh=True)).steps[0].title == "Second lesson"
     # ...and replaced it, so the next plain read serves the regenerated lesson.
     assert (await curriculum.get_node_notes(node_id)).steps[0].title == "Second lesson"
 
@@ -849,12 +849,14 @@ async def test_practice_record_tool_answers_from_the_real_record(db_path: str) -
         ]
     )
     candidate = RevisionCandidate(
-        skill_id="s1", skill_name="graphs", reason="weak_skill", priority=2.0,
-        mastery_score=0.1, days_since_seen=4.0,
+        skill_id="s1",
+        skill_name="graphs",
+        reason="weak_skill",
+        priority=2.0,
+        mastery_score=0.1,
+        days_since_seen=4.0,
     )
-    service = SessionService(
-        SqliteSessionRepository(db_path), llm, None, _StubRevisionService([candidate])
-    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, None, _StubRevisionService([candidate]))
     session = await service.create_session(user.id)
 
     events = [event async for event in service.add_message(session.id, "what am I weak in?")]
@@ -865,9 +867,7 @@ async def test_practice_record_tool_answers_from_the_real_record(db_path: str) -
     assert events[-1]["type"] == "done"
     assert events[-1]["content"] == "Graphs is worth a look."
     # The label shows progress during the turn...
-    assert [e["label"] for e in events if e["type"] == "tool_start"] == [
-        "Checking your progress..."
-    ]
+    assert [e["label"] for e in events if e["type"] == "tool_start"] == ["Checking your progress..."]
     # ...but a lookup changed nothing, so it leaves no line in the transcript.
     fetched = await service.get_session(session.id)
     assert fetched is not None
@@ -882,9 +882,7 @@ async def test_a_broken_mastery_lookup_still_returns_a_reply(db_path: str) -> No
             [ChatChunk(done=True)],
         ]
     )
-    service = SessionService(
-        SqliteSessionRepository(db_path), llm, None, _RaisingRevisionService()
-    )
+    service = SessionService(SqliteSessionRepository(db_path), llm, None, _RaisingRevisionService())
     session = await service.create_session(user.id)
 
     events = [event async for event in service.add_message(session.id, "what should I do next?")]
@@ -904,8 +902,11 @@ async def test_a_plan_skips_steps_the_learner_has_already_mastered(db_path: str)
     mastery_repo = SqliteUserSkillStateRepository(db_path)
     await mastery_repo.save(
         UserSkillState(
-            user_id=user.id, skill_id=known_id, mastery_score=0.95, streak=6,
-            last_seen_at=datetime.now(timezone.utc),
+            user_id=user.id,
+            skill_id=known_id,
+            mastery_score=0.95,
+            streak=6,
+            last_seen_at=datetime.now(UTC),
         )
     )
 
@@ -985,7 +986,7 @@ async def test_create_draft_drops_a_repeated_skill(db_path: str) -> None:
     assert [node.sequence_index for node in plan.nodes] == [0, 1]
 
 
-async def _plan_and_service(db_path: str) -> tuple[SessionService, CurriculumService, str, "LessonPlan"]:
+async def _plan_and_service(db_path: str) -> tuple[SessionService, CurriculumService, str, LessonPlan]:
     user = await SqliteUserRepository(db_path).ensure_default_user()
     generated = GeneratedCurriculum(
         nodes=[
@@ -1014,16 +1015,22 @@ async def _run_edit(service: SessionService, llm: FakeLLMProvider, session_id: s
 @pytest.mark.parametrize(
     ("args", "expected"),
     [
-        ({"operation": "change_step_difficulty", "step": "", "difficulty": "hard"},
-         "missing which step or what difficulty"),
-        ({"operation": "change_step_difficulty", "step": "1", "difficulty": "spicy"},
-         "missing which step or what difficulty"),
+        (
+            {"operation": "change_step_difficulty", "step": "", "difficulty": "hard"},
+            "missing which step or what difficulty",
+        ),
+        (
+            {"operation": "change_step_difficulty", "step": "1", "difficulty": "spicy"},
+            "missing which step or what difficulty",
+        ),
         ({"operation": "add_step", "skill": ""}, "no skill/topic given"),
         ({"operation": "add_problem", "problem_id": ""}, "no problem id given"),
         ({"operation": "remove_step", "step": ""}, "no step named to remove"),
         ({"operation": "reorder_step", "step": "1"}, "missing which step or where to move it"),
-        ({"operation": "reorder_step", "step": "", "to_position": 1},
-         "missing which step or where to move it"),
+        (
+            {"operation": "reorder_step", "step": "", "to_position": 1},
+            "missing which step or where to move it",
+        ),
     ],
 )
 async def test_edit_plan_refuses_incomplete_arguments(db_path: str, args: dict, expected: str) -> None:
@@ -1074,7 +1081,7 @@ async def test_edit_plan_missing_operation_falls_back_to_rework(db_path: str) ->
     assert called == ["do the thing"]
 
 
-def _expected_tools(has_revision, has_library, has_sessions, has_curriculum, existing_plan, user_id, after_lookup):
+def _expected_tools(has_revision, has_library, has_sessions, has_curriculum, existing_plan, user_id):
     """The gating rules spelled out independently of the implementation, so a registry that
     mis-transcribes one is caught rather than silently hiding a tool from the model."""
     names = ["generate_learning_plan"]
@@ -1086,16 +1093,13 @@ def _expected_tools(has_revision, has_library, has_sessions, has_curriculum, exi
         names += ["find_problems", "set_problem_flag"]
     if has_library and has_curriculum and user_id:
         names.append("create_practice_plan")
-    if after_lookup:
-        names = [n for n in names if n not in ("find_problems", "get_practice_record")]
     return names
 
 
 @pytest.mark.parametrize("existing_plan", [False, True])
 @pytest.mark.parametrize("user_id", [None, "local-user"])
-@pytest.mark.parametrize("after_lookup", [False, True])
 @pytest.mark.parametrize("wired", [False, True])
-def test_tools_offered_match_the_gating_rules(db_path, existing_plan, user_id, after_lookup, wired):
+def test_tools_offered_match_the_gating_rules(db_path, existing_plan, user_id, wired):
     sentinel = object()
     service = SessionService(
         SqliteSessionRepository(db_path),
@@ -1105,8 +1109,6 @@ def test_tools_offered_match_the_gating_rules(db_path, existing_plan, user_id, a
         library_service=sentinel if wired else None,
     )
 
-    offered = [t.name for t in service._tools_for(existing_plan, user_id, after_lookup)]
+    offered = [t.name for t in service._tools_for(existing_plan, user_id)]
 
-    assert offered == _expected_tools(
-        wired, wired, wired, wired, existing_plan, user_id, after_lookup
-    )
+    assert offered == _expected_tools(wired, wired, wired, wired, existing_plan, user_id)

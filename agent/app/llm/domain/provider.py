@@ -1,4 +1,5 @@
-from typing import AsyncIterator, Protocol, TypeVar
+from collections.abc import AsyncIterator
+from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -8,7 +9,8 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class LLMProvider(Protocol):
-    """Every LLM boundary in the app depends on this, never on a concrete SDK — LangGraph graphs call generate_structured only."""
+    """Every LLM boundary in the app depends on this, never on a concrete SDK — LangGraph
+    graphs call generate_structured only."""
 
     async def generate_structured(
         self, request: StructuredGenerationRequest, response_model: type[T]

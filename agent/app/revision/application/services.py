@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.mastery.domain.repository import UserSkillStateRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
@@ -20,7 +20,8 @@ def decayed_score(mastery_score: float, days_since_seen: float) -> float:
 
 
 def suggest_difficulty(mastery_score: float | None, sequence_index: int) -> str:
-    """Feeds problem selection with a mastery-aware difficulty instead of pure curriculum-position guessing."""
+    """Feeds problem selection with a mastery-aware difficulty instead of pure
+    curriculum-position guessing."""
     if mastery_score is not None:
         if mastery_score < 0.3:
             return "easy"
@@ -48,7 +49,8 @@ class RevisionService:
 
     async def get_revision_queue(self, user_id: str) -> list[RevisionCandidate]:
         states = await self._mastery_repository.list_for_user(user_id)
-        now = datetime.now(timezone.utc)
+        skill_names = await self._skill_repository.names()
+        now = datetime.now(UTC)
 
         candidates = []
         for state in states:
@@ -65,7 +67,7 @@ class RevisionService:
             else:
                 reason = "review"
 
-            skill_name = await self._skill_repository.get_name(state.skill_id) or state.skill_id
+            skill_name = skill_names.get(state.skill_id) or state.skill_id
             candidates.append(
                 RevisionCandidate(
                     skill_id=state.skill_id,

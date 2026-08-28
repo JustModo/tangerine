@@ -8,7 +8,9 @@ from app.curriculum.application.code_helper import CodeHelperService
 from app.curriculum.application.problem_sessions import ProblemSessionService
 from app.curriculum.domain.problem_chat import ProblemChatMessage
 from app.curriculum.domain.problem_session import ProblemSession, ProblemSessionStatus
-from app.curriculum.infrastructure.sqlite_problem_session_repository import SqliteProblemSessionRepository
+from app.curriculum.infrastructure.sqlite_problem_session_repository import (
+    SqliteProblemSessionRepository,
+)
 from app.evaluation.application.services import EvaluationService
 from app.evaluation.domain.models import AttemptMetrics, Evaluation
 from app.evaluation.infrastructure.sqlite_repository import SqliteEvaluationRepository
@@ -22,8 +24,8 @@ from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRep
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.code_assembly import assemble_program
 from app.shared.hashing import hash_output
-from app.users.domain.models import LOCAL_USER_ID
 from app.shared.sse import sse_stream
+from app.users.domain.models import LOCAL_USER_ID
 
 router = APIRouter(prefix="/problem-sessions", tags=["problem-sessions"])
 

@@ -5,7 +5,7 @@ from app.curriculum.infrastructure.sqlite_problem_session_repository import (
     SqliteProblemSessionRepository,
 )
 from app.problems.application.services import ProblemSelectionService
-from app.problems.domain.models import Problem, ProblemExample
+from app.problems.domain.models import ProblemExample
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.types import Language
 from app.users.domain.models import LOCAL_USER_ID

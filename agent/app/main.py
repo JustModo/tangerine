@@ -9,13 +9,13 @@ from pydantic import BaseModel
 
 from app.curriculum.api.problem_sessions_router import router as problem_sessions_router
 from app.curriculum.api.router import router as curriculum_router
+from app.llm.infrastructure.cache import SqliteLLMCache
 from app.problems.api.router import router as problems_router
 from app.sessions.api.router import router as sessions_router
 from app.settings.router import router as settings_router
 from app.setup.router import router as setup_router
 from app.shared.config import get_settings
 from app.shared.database import run_migrations
-from app.llm.infrastructure.cache import SqliteLLMCache
 from app.shared.errors import register_exception_handlers
 from app.shared.secrets import get_gemini_api_key
 from app.users.api.router import router as users_router

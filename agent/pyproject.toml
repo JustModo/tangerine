@@ -18,6 +18,7 @@ dependencies = [
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    "ruff>=0.9",
 ]
 
 [tool.uv]
@@ -26,3 +27,21 @@ package = false
 [tool.pytest.ini_options]
 pythonpath = ["."]
 asyncio_mode = "auto"
+
+[tool.ruff]
+# Matches what the codebase already writes (median 104): picked to describe the existing
+# convention rather than to force a 93-line reflow the first time the linter runs.
+line-length = 110
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, pyupgrade, flake8-bugbear, comprehensions.
+select = ["E", "F", "I", "UP", "B", "C4"]
+
+[tool.ruff.lint.per-file-ignores]
+# Prompt modules are one long string constant each; wrapping is dictated by the prose.
+# Prompt text, either as a module constant or as a pydantic Field description the model reads.
+"app/llm/prompts/*.py" = ["E501"]
+"app/llm/schemas/*.py" = ["E501"]
+# Depends()/Query() in a signature default is how FastAPI declares dependencies.
+"app/*/api/*.py" = ["B008"]
+"app/*/router.py" = ["B008"]

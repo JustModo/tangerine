@@ -8,7 +8,7 @@ to advance). Asserting on the returned object cannot catch it; only a reload can
 
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -37,7 +37,7 @@ def db_path(tmp_path: Path) -> str:
 
 async def test_every_mutable_field_survives_a_reload(db_path: str) -> None:
     repo = SqliteProblemSessionRepository(db_path)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     session = ProblemSession(
         id=str(uuid.uuid4()),
         problem_id="p1",
@@ -56,7 +56,7 @@ async def test_every_mutable_field_survives_a_reload(db_path: str) -> None:
             "source_code": "print(42)",
             "status": ProblemSessionStatus.COMPLETED,
             "flagged": True,
-            "updated_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(UTC),
         }
     )
     await repo.save(mutated)
@@ -78,7 +78,7 @@ async def test_attaching_a_session_to_a_node_makes_it_findable_by_that_node(
     step. If the attach doesn't persist, get_by_node returns nothing forever — so the step
     re-adopts on every open and submitting never advances the plan."""
     repo = SqliteProblemSessionRepository(db_path)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     session = ProblemSession(
         id=str(uuid.uuid4()),
         problem_id="p1",

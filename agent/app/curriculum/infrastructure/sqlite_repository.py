@@ -4,7 +4,6 @@ from app.curriculum.domain.models import LessonNode, LessonNodeStatus, LessonPla
 from app.shared.config import get_settings
 from app.shared.database import connect
 
-
 _UPSERT_NODE_SQL = (
     "INSERT INTO lesson_nodes "
     "(id, lesson_plan_id, skill_id, sequence_index, status, difficulty, source_problem_md, "

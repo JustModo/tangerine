@@ -7,11 +7,11 @@ from app.execution.domain.models import ExecutionStatus, TestResult
 from app.llm.schemas.problem import GeneratedExample, GeneratedProblem, ProblemPatch
 from app.problems.application.repair import apply_patch
 from app.problems.application.validation import ProblemValidationService
-from app.shared.hashing import hash_output
 from app.problems.domain.models import ProblemStatus
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.shared.database import MIGRATIONS_DIR
+from app.shared.hashing import hash_output
 from app.shared.types import Language
 from tests.fakes import FakeCodeExecutor, FakeLLMProvider
 

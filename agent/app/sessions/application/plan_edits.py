@@ -9,8 +9,9 @@ The refusal strings are prompt input, not user-facing copy. The model reads `sum
 acts on it, so the wording is load-bearing.
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from app.llm.prompts.chat import SUPPORTED_LANGUAGES
 from app.shared.types import Language

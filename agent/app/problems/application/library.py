@@ -10,7 +10,7 @@ the answer is worth.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from app.curriculum.domain.problem_session import ProblemSession, ProblemSessionStatus
@@ -115,15 +115,9 @@ class ProblemLibraryService:
             # slice so the skill filter below still has something to work with.
             problems, _ = await self._problems.list_all(1, _BANK_CANDIDATES, query, language)
         else:
-            # ponytail: one get() per candidate. Dozens of rows for a single local learner,
-            # and it mirrors what the progress endpoint already does; batch it into one
-            # WHERE id IN (...) if a learner's history ever reaches the thousands.
-            problems = [
-                problem
-                for problem_id in latest
-                if (problem := await self._problems.get(problem_id)) is not None
-            ]
+            problems = list((await self._problems.get_many(list(latest))).values())
 
+        skill_names = await self._skills.names()
         entries: list[tuple[float, LibraryEntry]] = []
         for problem in problems:
             session = latest.get(problem.id)
@@ -144,9 +138,7 @@ class ProblemLibraryService:
                 if score < _MATCH_THRESHOLD:
                     continue
 
-            skill_name = None
-            if problem.skill_ids:
-                skill_name = await self._skills.get_name(problem.skill_ids[0])
+            skill_name = skill_names.get(problem.skill_ids[0]) if problem.skill_ids else None
 
             entries.append(
                 (
@@ -171,7 +163,7 @@ class ProblemLibraryService:
         talk about skills and never about how much work the learner had actually done."""
         sessions = await self._sessions.list_for_user(user_id)
         completed = [s for s in sessions if s.status == ProblemSessionStatus.COMPLETED]
-        week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        week_ago = datetime.now(UTC) - timedelta(days=7)
 
         best_streak = 0
         if self._mastery is not None:

@@ -10,8 +10,9 @@ and a registry module importing SessionService while services.py imports the reg
 be circular.
 """
 
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Callable
+from typing import Any
 
 from app.llm.domain.requests import ChatTurn, ToolDeclaration
 
@@ -38,5 +39,3 @@ class ToolSpec:
     # (service, existing_plan, user_id) -> bool. Some tools need a collaborator that may not
     # be wired up, and offering one whose handler cannot run is worse than not offering it.
     available: Callable[[Any, bool, str | None], bool]
-    # Lookups, dropped from the follow-up call once one has already run.
-    read_only: bool = False

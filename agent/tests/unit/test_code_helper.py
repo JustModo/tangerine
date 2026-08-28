@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -65,7 +65,7 @@ async def _seed(db_path: str) -> str:
             created_at="2026-01-01T00:00:00",
         )
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sessions = SqliteProblemSessionRepository(db_path)
     await sessions.save(
         ProblemSession(

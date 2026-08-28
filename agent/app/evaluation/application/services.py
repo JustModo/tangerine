@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.evaluation.domain.models import AttemptMetrics, Evaluation, Submission
 from app.evaluation.domain.repository import EvaluationRepository
@@ -90,7 +90,7 @@ class EvaluationService:
         memory_mb = max(memories) / 1024 if memories else None
 
         metrics = metrics or AttemptMetrics()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         submission = Submission(
             id=str(uuid.uuid4()),
             problem_id=problem_id,

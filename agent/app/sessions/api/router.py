@@ -22,8 +22,8 @@ from app.revision.application.services import RevisionService
 from app.sessions.application.services import SessionService
 from app.sessions.domain.models import LearningSession
 from app.sessions.infrastructure.sqlite_repository import SqliteSessionRepository
-from app.users.domain.models import LOCAL_USER_ID
 from app.shared.sse import sse_stream
+from app.users.domain.models import LOCAL_USER_ID
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 

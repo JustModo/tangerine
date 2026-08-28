@@ -1,7 +1,7 @@
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 from app.execution.domain.executor import CodeExecutor
 from app.execution.domain.models import ExecutionRequest, ExecutionStatus, parse_runtime_ms
@@ -18,7 +18,13 @@ from app.problems.application.repair import (
     normalise_output,
     runtime_failure,
 )
-from app.problems.domain.models import Problem, ProblemExample, ProblemStatus, ProblemTest, ProblemVersion
+from app.problems.domain.models import (
+    Problem,
+    ProblemExample,
+    ProblemStatus,
+    ProblemTest,
+    ProblemVersion,
+)
 from app.problems.domain.repository import ProblemRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.shared.code_assembly import assemble_program
@@ -111,9 +117,7 @@ class ProblemValidationService:
 
         # A question the bank already has is served from the bank: already validated, not
         # yet seen by this learner, and no further LLM call.
-        duplicate_of = await self._find_duplicate(
-            generated, source_problem, language, exclude_problem_ids
-        )
+        duplicate_of = await self._find_duplicate(generated, source_problem, language, exclude_problem_ids)
         if duplicate_of is not None:
             return duplicate_of
 
@@ -149,9 +153,7 @@ class ProblemValidationService:
             source_problem=source_problem,
             avoid_titles=avoid_titles + [generated.title],
         )
-        duplicate_of = await self._find_duplicate(
-            generated, source_problem, language, exclude_problem_ids
-        )
+        duplicate_of = await self._find_duplicate(generated, source_problem, language, exclude_problem_ids)
         if duplicate_of is not None:
             return duplicate_of
 
@@ -173,9 +175,7 @@ class ProblemValidationService:
         a pasted problem — the learner asked for that exact question."""
         if source_problem:
             return None
-        return await self._repository.find_similar(
-            generated.title, language, exclude_problem_ids
-        )
+        return await self._repository.find_similar(generated.title, language, exclude_problem_ids)
 
     async def _validate(
         self,
@@ -199,7 +199,7 @@ class ProblemValidationService:
             status=ProblemStatus.VALIDATING,
             skill_ids=skill_ids,
             tags=generated.tags or generated.skills or [skill],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         await self._repository.save(problem)
 
@@ -227,18 +227,17 @@ class ProblemValidationService:
 
         # Catch empty outputs (broken reference solution or all-passing submission).
         broken = len(results) != len(graded_inputs) or any(
-            r.status in (ExecutionStatus.ERROR, ExecutionStatus.TIMEOUT) or not (r.actual_output or "").strip()
+            r.status in (ExecutionStatus.ERROR, ExecutionStatus.TIMEOUT)
+            or not (r.actual_output or "").strip()
             for r in results
         )
         if broken:
-            return await self._mark_invalid(
-                problem, runtime_failure(results, len(graded_inputs))
-            )
+            return await self._mark_invalid(problem, runtime_failure(results, len(graded_inputs)))
 
         # The correctness check: the reference must match the statement's examples.
         if any(
             normalise_output(result.actual_output) != normalise_output(example.output)
-            for example, result in zip(examples, results)
+            for example, result in zip(examples, results, strict=False)
         ):
             return await self._mark_invalid(problem, mismatch_failure(examples, results))
 
@@ -260,7 +259,9 @@ class ProblemValidationService:
             output_format=generated.output_format,
             hints=generated.hints,
             examples=[
-                ProblemExample(id=str(uuid.uuid4()), input=ex.input, output=ex.output, explanation=ex.explanation)
+                ProblemExample(
+                    id=str(uuid.uuid4()), input=ex.input, output=ex.output, explanation=ex.explanation
+                )
                 for ex in examples
             ],
             # Expected outputs from running reference solution, never from LLM.
@@ -271,11 +272,11 @@ class ProblemValidationService:
                     output_hash=hash_output(result.actual_output or ""),
                     is_hidden=True,
                 )
-                for value, result in zip(graded_inputs, results)
+                for value, result in zip(graded_inputs, results, strict=True)
             ],
             stress_input=stress_input,
             stress_runtime_ms=stress_runtime_ms,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         await self._repository.save_version(version)
 

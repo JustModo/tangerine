@@ -1,9 +1,7 @@
 import hashlib
 
-
 from app.shared.config import get_settings
 from app.shared.database import connect
-
 
 MAX_ENTRIES = 5000
 

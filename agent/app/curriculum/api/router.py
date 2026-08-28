@@ -5,7 +5,9 @@ from app.curriculum.api.deps import get_problem_session_service
 from app.curriculum.application.problem_sessions import ProblemSessionService
 from app.curriculum.application.services import CurriculumService
 from app.curriculum.domain.models import LessonPlan
-from app.curriculum.infrastructure.sqlite_problem_session_repository import SqliteProblemSessionRepository
+from app.curriculum.infrastructure.sqlite_problem_session_repository import (
+    SqliteProblemSessionRepository,
+)
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider

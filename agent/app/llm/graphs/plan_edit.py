@@ -3,8 +3,7 @@ from typing import TypedDict
 from langgraph.graph import END, StateGraph
 
 from app.llm.domain.provider import LLMProvider
-from app.llm.graphs.shared import attempt, cached_generate, route, run_graph
-from app.llm.infrastructure.gemini.mapping import SchemaValidationError
+from app.llm.graphs.shared import attempt, route, run_graph
 from app.llm.prompts.plan_edit import PLAN_EDIT_SYSTEM_PROMPT, plan_edit_user_prompt
 from app.llm.schemas.plan_edit import RevisedCurriculum
 

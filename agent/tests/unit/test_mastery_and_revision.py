@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -44,7 +44,7 @@ async def test_revision_queue_prioritizes_weak_and_overdue_skills(db_path: str) 
     strong_skill_id = await skill_repo.ensure_skill("strong-skill")
 
     mastery_repo = SqliteUserSkillStateRepository(db_path)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     await mastery_repo.save(
         UserSkillState(user_id="u1", skill_id=weak_skill_id, mastery_score=0.1, streak=0, last_seen_at=now)
     )
@@ -84,7 +84,7 @@ async def test_revision_queue_exposes_score_and_recency_for_the_chat_prompt(db_p
             skill_id=skill_id,
             mastery_score=0.25,
             streak=0,
-            last_seen_at=datetime.now(timezone.utc) - timedelta(days=3),
+            last_seen_at=datetime.now(UTC) - timedelta(days=3),
         )
     )
 
@@ -168,7 +168,7 @@ async def test_the_revision_queue_reports_the_decayed_score(db_path: str) -> Non
             skill_id=skill_id,
             mastery_score=0.9,
             streak=3,
-            last_seen_at=datetime.now(timezone.utc) - timedelta(days=200),
+            last_seen_at=datetime.now(UTC) - timedelta(days=200),
         )
     )
 

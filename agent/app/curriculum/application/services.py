@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.curriculum.domain.models import LessonNode, LessonNodeStatus, LessonPlan
 from app.curriculum.domain.problem_session_repository import ProblemSessionRepository
@@ -14,7 +14,6 @@ from app.mastery.domain.repository import UserSkillStateRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.shared.errors import ConflictError, NotFoundError
 from app.shared.types import Language
-
 
 # The curriculum LLM rates each step 1-5; problem selection speaks easy/medium/hard.
 _DIFFICULTY_BY_RATING = {1: "easy", 2: "easy", 3: "medium", 4: "hard", 5: "hard"}
@@ -77,7 +76,7 @@ class CurriculumService:
             language=language,
             level=level,
             version=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         await self._repository.save(plan)
 
@@ -85,9 +84,7 @@ class CurriculumService:
         # prerequisites — one fewer than the learner asked for in total. "Just this one
         # problem" therefore means zero prerequisites, and we skip curriculum generation
         # altogether rather than padding the plan with a step they explicitly didn't want.
-        prerequisite_count = (
-            step_count - 1 if step_count is not None and target_problem else step_count
-        )
+        prerequisite_count = step_count - 1 if step_count is not None and target_problem else step_count
         generated_nodes = []
         if prerequisite_count is None or prerequisite_count > 0:
             generated = await generate_curriculum(
@@ -120,7 +117,7 @@ class CurriculumService:
                     sequence_index=0,
                     status=LessonNodeStatus.DONE if already_known else LessonNodeStatus.LOCKED,
                     difficulty=_difficulty_label(generated_node.difficulty),
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -136,7 +133,7 @@ class CurriculumService:
                     status=LessonNodeStatus.LOCKED,
                     difficulty="hard",
                     source_problem_md=target_problem,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -173,18 +170,20 @@ class CurriculumService:
             language=problems[0].language,
             level="revision",
             version=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         await self._repository.save(plan)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         nodes = [
             LessonNode(
                 id=str(uuid.uuid4()),
                 lesson_plan_id=plan.id,
                 # Straight off the problem — ensure_skill takes a NAME and would create a
                 # junk row, and the problem already carries resolved ids.
-                skill_id=problem.skill_ids[0] if problem.skill_ids else await self._skill_repository.ensure_skill(topic),
+                skill_id=problem.skill_ids[0]
+                if problem.skill_ids
+                else await self._skill_repository.ensure_skill(topic),
                 sequence_index=index,
                 status=LessonNodeStatus.LOCKED,
                 difficulty=problem.difficulty,
@@ -309,7 +308,7 @@ class CurriculumService:
             sequence_index=0,  # reindexed below
             status=LessonNodeStatus.LOCKED,
             difficulty=difficulty or "medium",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         nodes = list(plan.nodes)
         insert_at = len(nodes) if position is None else max(0, min(position - 1, len(nodes)))
@@ -346,11 +345,9 @@ class CurriculumService:
             status=LessonNodeStatus.AVAILABLE,
             difficulty=problem.difficulty,
             problem_id=problem.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
-        await self._repository.replace_nodes(
-            plan.id, self._ensure_startable([*plan.nodes, new_node])
-        )
+        await self._repository.replace_nodes(plan.id, self._ensure_startable([*plan.nodes, new_node]))
         return await self._repository.get(plan_id) or plan
 
     async def remove_step(self, plan_id: str, step: str) -> LessonPlan:
@@ -439,7 +436,7 @@ class CurriculumService:
                         sequence_index=0,  # reindexed below
                         status=LessonNodeStatus.LOCKED,
                         difficulty=difficulty,
-                        created_at=datetime.now(timezone.utc),
+                        created_at=datetime.now(UTC),
                     )
                 )
 
@@ -455,9 +452,7 @@ class CurriculumService:
         await self._invalidate_unsubmitted(redifficultied_ids)
         return await self._repository.get(plan.id) or plan
 
-    async def get_node_notes(
-        self, node_id: str, refresh: bool = False
-    ) -> GeneratedLessonNotes:
+    async def get_node_notes(self, node_id: str, refresh: bool = False) -> GeneratedLessonNotes:
         """Lesson for the problem the node is serving, generated on request and cached
         after. Locked nodes are refused so lessons can't be generated (and paid for) ahead
         of the curriculum. refresh forces a fresh generation over the cached one.
@@ -470,9 +465,7 @@ class CurriculumService:
         if node is None:
             raise NotFoundError(f"Lesson node {node_id} not found")
         if node.status == LessonNodeStatus.LOCKED:
-            raise NotFoundError(
-                f"Lesson notes for node {node_id} are not available until it is unlocked"
-            )
+            raise NotFoundError(f"Lesson notes for node {node_id} are not available until it is unlocked")
 
         plan = await self._repository.get(node.lesson_plan_id)
         if plan is None:
@@ -507,4 +500,3 @@ class CurriculumService:
 
     async def list_for_session(self, session_id: str) -> list[LessonPlan]:
         return await self._repository.list_for_session(session_id)
-

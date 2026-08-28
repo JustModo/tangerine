@@ -88,7 +88,7 @@ class CitronAdapter:
         # surface each missing one as an explicit ERROR.
         returned = data.get("testcases") or []
         padded = list(returned) + [None] * max(0, len(request.test_cases) - len(returned))
-        for test_case, tc_result in zip(request.test_cases, padded):
+        for test_case, tc_result in zip(request.test_cases, padded, strict=False):
             if tc_result is None:
                 yield TestResult(
                     id=test_case.id,
@@ -117,7 +117,9 @@ class CitronAdapter:
                 status=status,
                 input=test_case.input,
                 actual_output=stdout,
-                error=_error_detail(status, tc_result.get("stderr"), tc_result.get("message"), status_description),
+                error=_error_detail(
+                    status, tc_result.get("stderr"), tc_result.get("message"), status_description
+                ),
                 execution_time_ms=str(wall_time_ms) if wall_time_ms is not None else None,
                 exit_code=tc_result.get("exit_code"),
                 signal=tc_result.get("signal"),

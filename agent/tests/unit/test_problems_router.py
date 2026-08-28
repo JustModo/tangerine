@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -38,7 +38,7 @@ async def _seed(db_path: str, problem_id: str, language: Language = Language.PYT
             language=language,
             difficulty="easy",
             status=ProblemStatus.AVAILABLE,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
 

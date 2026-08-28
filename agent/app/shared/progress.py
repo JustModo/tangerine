@@ -8,7 +8,8 @@ callback into an async iterator a stream can consume.
 """
 
 import asyncio
-from typing import AsyncIterator, Awaitable, Callable, TypeVar
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import TypeVar
 
 T = TypeVar("T")
 
@@ -17,7 +18,7 @@ StageReporter = Callable[[str], None]
 _DONE = object()
 
 
-async def stage_stream(
+async def stage_stream[T](
     work: Callable[[StageReporter], Awaitable[T]],
     encode_result: Callable[[T], dict],
 ) -> AsyncIterator[dict]:

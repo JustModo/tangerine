@@ -30,6 +30,38 @@ class SqliteProblemRepository:
             row = await cursor.fetchone()
             return await self._hydrate(db, row) if row else None
 
+    async def get_many(self, problem_ids: list[str]) -> dict[str, Problem]:
+        """Several problems in two queries instead of two per problem. Callers that walk a
+        learner's sessions were opening a connection per row."""
+        if not problem_ids:
+            return {}
+        placeholders = ",".join("?" for _ in problem_ids)
+        async with connect(self._database_path) as db:
+            cursor = await db.execute(f"SELECT * FROM problems WHERE id IN ({placeholders})", problem_ids)
+            rows = await cursor.fetchall()
+            cursor = await db.execute(
+                f"SELECT problem_id, skill_id FROM problem_skills WHERE problem_id IN ({placeholders})",
+                problem_ids,
+            )
+            skills: dict[str, list[str]] = {}
+            for skill_row in await cursor.fetchall():
+                skills.setdefault(skill_row["problem_id"], []).append(skill_row["skill_id"])
+
+        return {
+            row["id"]: Problem(
+                id=row["id"],
+                conceptual_id=row["conceptual_id"],
+                title=row["title"],
+                language=row["language"],
+                difficulty=row["difficulty"],
+                status=row["status"],
+                skill_ids=skills.get(row["id"], []),
+                tags=json.loads(row["tags_json"] or "[]"),
+                created_at=row["created_at"],
+            )
+            for row in rows
+        }
+
     async def find_suitable(self, criteria: ProblemCriteria) -> Problem | None:
         query = "SELECT DISTINCT p.* FROM problems p"
         conditions = ["p.status = ?"]
@@ -162,9 +194,7 @@ class SqliteProblemRepository:
             # language is immutable: the stored versions' code, tests and output hashes are
             # all in that language. Raised rather than dropped from the ON CONFLICT list, so
             # the caller learns the write did nothing.
-            cursor = await db.execute(
-                "SELECT language FROM problems WHERE id = ?", (problem.id,)
-            )
+            cursor = await db.execute("SELECT language FROM problems WHERE id = ?", (problem.id,))
             row = await cursor.fetchone()
             if row is not None and row[0] != problem.language.value:
                 raise ValueError(
@@ -174,7 +204,8 @@ class SqliteProblemRepository:
                 )
 
             await db.execute(
-                "INSERT INTO problems (id, conceptual_id, title, language, difficulty, status, tags_json, created_at) "
+                "INSERT INTO problems (id, conceptual_id, title, language, difficulty, "
+                "status, tags_json, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET "
                 "title=excluded.title, difficulty=excluded.difficulty, status=excluded.status, "
@@ -273,12 +304,17 @@ class SqliteProblemRepository:
                 stress_runtime_ms=row["stress_runtime_ms"],
                 created_at=row["created_at"],
                 examples=[
-                    ProblemExample(id=e["id"], input=e["input"], output=e["output"], explanation=e["explanation"])
+                    ProblemExample(
+                        id=e["id"], input=e["input"], output=e["output"], explanation=e["explanation"]
+                    )
                     for e in example_rows
                 ],
                 tests=[
                     ProblemTest(
-                        id=t["id"], input=t["input"], output_hash=t["output_hash"], is_hidden=bool(t["is_hidden"])
+                        id=t["id"],
+                        input=t["input"],
+                        output_hash=t["output_hash"],
+                        is_hidden=bool(t["is_hidden"]),
                     )
                     for t in test_rows
                 ],

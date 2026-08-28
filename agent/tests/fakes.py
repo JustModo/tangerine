@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 from app.execution.domain.models import ExecutionRequest, TestResult
-from app.llm.domain.requests import ChatChunk, ChatStreamRequest, StructuredGenerationRequest
+from app.llm.domain.requests import ChatStreamRequest, StructuredGenerationRequest
 
 
 class FakeLLMProvider:

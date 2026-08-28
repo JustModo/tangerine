@@ -3,7 +3,7 @@ the EXACT one rather than generating a lookalike."""
 
 import sqlite3
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -62,7 +62,7 @@ async def _make_problem(
         status=ProblemStatus.AVAILABLE,
         skill_ids=[skill_id],
         tags=[skill],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     await SqliteProblemRepository(db_path).save(problem)
     return problem
@@ -75,7 +75,7 @@ async def _make_session(
     status: ProblemSessionStatus = ProblemSessionStatus.COMPLETED,
     flagged: bool = False,
 ) -> ProblemSession:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     session = ProblemSession(
         id=str(uuid.uuid4()),
         problem_id=problem_id,
@@ -110,7 +110,9 @@ async def test_scope_filters_by_what_the_learner_actually_did(db_path: str) -> N
 
     library = _library(db_path)
 
-    titles = lambda entries: {e.title for e in entries}
+    def titles(entries):
+        return {e.title for e in entries}
+
     assert titles(await library.find(user.id, scope="solved")) == {"Solved One"}
     assert titles(await library.find(user.id, scope="flagged")) == {"Flagged One"}
     # A submitted-but-failed problem is the best revision candidate there is — dropping it
@@ -182,7 +184,7 @@ async def test_stats_count_solved_problems_and_the_last_week(db_path: str) -> No
 
     stale = await _make_session(db_path, user.id, old.id, ProblemSessionStatus.COMPLETED)
     await SqliteProblemSessionRepository(db_path).save(
-        stale.model_copy(update={"updated_at": datetime.now(timezone.utc) - timedelta(days=30)})
+        stale.model_copy(update={"updated_at": datetime.now(UTC) - timedelta(days=30)})
     )
 
     stats = await _library(db_path).stats(user.id)

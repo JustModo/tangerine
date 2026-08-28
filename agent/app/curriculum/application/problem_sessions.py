@@ -1,7 +1,7 @@
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 from app.curriculum.domain.models import LessonNodeStatus
 from app.curriculum.domain.problem_session import ProblemSession, ProblemSessionStatus
@@ -164,7 +164,7 @@ class ProblemSessionService:
         if existing is not None:
             return existing
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         session = ProblemSession(
             id=str(uuid.uuid4()),
             problem_id=problem_id,
@@ -187,13 +187,13 @@ class ProblemSessionService:
     async def set_flagged(self, session_id: str, flagged: bool) -> ProblemSession:
         session = await self._require(session_id)
         updated = session.model_copy(
-            update={"flagged": flagged, "updated_at": datetime.now(timezone.utc)}
+            update={"flagged": flagged, "updated_at": datetime.now(UTC)}
         )
         await self._session_repository.save(updated)
         return updated
 
     async def _start_session(self, plan, node, problem, user_id: str) -> ProblemSession:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # A revision plan serves problems the learner already has a session for — flagging
         # one from the browser creates a node-less session. Adopting it keeps the flag and
@@ -252,7 +252,7 @@ class ProblemSessionService:
             update={
                 "source_code": source_code,
                 "status": status,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(UTC),
             }
         )
         await self._session_repository.save(updated)
@@ -262,7 +262,7 @@ class ProblemSessionService:
         session = await self._require(session_id)
         new_status = ProblemSessionStatus.COMPLETED if passed else ProblemSessionStatus.SUBMITTED
         updated = session.model_copy(
-            update={"status": new_status, "updated_at": datetime.now(timezone.utc)}
+            update={"status": new_status, "updated_at": datetime.now(UTC)}
         )
         await self._session_repository.save(updated)
 

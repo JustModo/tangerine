@@ -5,7 +5,7 @@ revalidate on a bad one. The UI used to guess at that with timers; these tests p
 contract that lets it stop guessing.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -36,7 +36,7 @@ async def test_a_bank_hit_streams_a_stage_then_the_session(db_path: str) -> None
         Problem(
             id="p1", conceptual_id="c1", title="Bank Problem", language=Language.PYTHON,
             difficulty="easy", status=ProblemStatus.AVAILABLE, skill_ids=["skill-1"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
 

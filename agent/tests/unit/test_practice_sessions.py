@@ -1,7 +1,7 @@
 """Practice sessions: a problem for one skill, started from the revision queue rather than
 from a plan. The distinguishing property is that they have no lesson node at all."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -52,7 +52,7 @@ async def _seed_bank_problem(db_path: str, problem_id: str = "p1") -> Problem:
         difficulty="easy",
         status=ProblemStatus.AVAILABLE,
         skill_ids=["skill-1"],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     await SqliteProblemRepository(db_path).save(problem)
     return problem
@@ -162,14 +162,14 @@ async def test_edit_plan_regenerates_a_step_whose_difficulty_actually_changed(db
         Problem(
             id="p-easy", conceptual_id="c-easy", title="Easy One", language=Language.PYTHON,
             difficulty="easy", status=ProblemStatus.AVAILABLE, skill_ids=["skill-1"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     await SqliteProblemRepository(db_path).save(
         Problem(
             id="p-hard", conceptual_id="c-hard", title="Hard One", language=Language.PYTHON,
             difficulty="hard", status=ProblemStatus.AVAILABLE, skill_ids=["skill-1"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="skill-1", difficulty=1)])
@@ -235,7 +235,7 @@ async def test_set_step_difficulty_regenerates_only_the_targeted_step(db_path: s
             Problem(
                 id=problem_id, conceptual_id=f"c-{problem_id}", title=problem_id,
                 language=Language.PYTHON, difficulty=difficulty, status=ProblemStatus.AVAILABLE,
-                skill_ids=["skill-1"], created_at=datetime.now(timezone.utc),
+                skill_ids=["skill-1"], created_at=datetime.now(UTC),
             )
         )
     generated = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="skill-1", difficulty=1)])
@@ -336,7 +336,7 @@ async def test_set_plan_language_regenerates_an_untouched_next_problem(db_path: 
         Problem(
             id="p-java", conceptual_id="c-java", title="Bank Problem Java",
             language=Language.JAVA, difficulty="easy", status=ProblemStatus.AVAILABLE,
-            skill_ids=["skill-1"], created_at=datetime.now(timezone.utc),
+            skill_ids=["skill-1"], created_at=datetime.now(UTC),
         )
     )
     problem_sessions = _service(db_path)
@@ -365,7 +365,7 @@ async def test_set_plan_language_also_regenerates_an_in_progress_session(db_path
         Problem(
             id="p-java", conceptual_id="c-java", title="Bank Problem Java",
             language=Language.JAVA, difficulty="easy", status=ProblemStatus.AVAILABLE,
-            skill_ids=["skill-1"], created_at=datetime.now(timezone.utc),
+            skill_ids=["skill-1"], created_at=datetime.now(UTC),
         )
     )
     problem_sessions = _service(db_path)

@@ -87,16 +87,16 @@ async def test_save_version_then_get_latest_version_round_trips_metadata(db_path
 
 
 async def _save_with_version(repo: SqliteProblemRepository, **overrides) -> Problem:
-    defaults = dict(
-        id="p1",
-        conceptual_id="c1",
-        title="Two Sum",
-        language=Language.PYTHON,
-        difficulty="easy",
-        status=ProblemStatus.AVAILABLE,
-        tags=["arrays", "hashing"],
-        created_at="2026-01-01T00:00:00",
-    )
+    defaults = {
+        "id": "p1",
+        "conceptual_id": "c1",
+        "title": "Two Sum",
+        "language": Language.PYTHON,
+        "difficulty": "easy",
+        "status": ProblemStatus.AVAILABLE,
+        "tags": ["arrays", "hashing"],
+        "created_at": "2026-01-01T00:00:00",
+    }
     defaults.update(overrides)
     problem = Problem(**defaults)
     await repo.save(problem)
@@ -116,7 +116,9 @@ async def _save_with_version(repo: SqliteProblemRepository, **overrides) -> Prob
 async def test_list_all_paginates_available_problems(db_path: str) -> None:
     repo = SqliteProblemRepository(db_path)
     for i in range(3):
-        await _save_with_version(repo, id=f"p{i}", conceptual_id=f"c{i}", created_at=f"2026-01-0{i+1}T00:00:00")
+        await _save_with_version(
+            repo, id=f"p{i}", conceptual_id=f"c{i}", created_at=f"2026-01-0{i + 1}T00:00:00"
+        )
 
     page1, total = await repo.list_all(page=1, page_size=2)
     page2, _ = await repo.list_all(page=2, page_size=2)
@@ -166,12 +168,20 @@ async def test_list_all_matches_a_tag_even_behind_a_long_problem_statement(db_pa
         "across the entire input array, which can be quite large in the worst case. "
     ) * 3
     await _save_with_version(
-        repo, id="p1", conceptual_id="c1", title="Two Sum",
-        tags=["hash-table", "arrays"], statement_md=long_statement,
+        repo,
+        id="p1",
+        conceptual_id="c1",
+        title="Two Sum",
+        tags=["hash-table", "arrays"],
+        statement_md=long_statement,
     )
     await _save_with_version(
-        repo, id="p2", conceptual_id="c2", title="Binary Tree Traversal",
-        tags=["trees"], statement_md="Walk a tree.",
+        repo,
+        id="p2",
+        conceptual_id="c2",
+        title="Binary Tree Traversal",
+        tags=["trees"],
+        statement_md="Walk a tree.",
     )
 
     items, total = await repo.list_all(page=1, page_size=10, query="hash")
@@ -196,12 +206,20 @@ async def test_list_all_falls_back_to_closest_matches_when_nothing_clears_the_th
 ) -> None:
     repo = SqliteProblemRepository(db_path)
     await _save_with_version(
-        repo, id="p1", conceptual_id="c1", title="Two Sum",
-        tags=["hash-table"], statement_md="Find two numbers.",
+        repo,
+        id="p1",
+        conceptual_id="c1",
+        title="Two Sum",
+        tags=["hash-table"],
+        statement_md="Find two numbers.",
     )
     await _save_with_version(
-        repo, id="p2", conceptual_id="c2", title="Binary Tree Traversal",
-        tags=["trees"], statement_md="Walk a tree.",
+        repo,
+        id="p2",
+        conceptual_id="c2",
+        title="Binary Tree Traversal",
+        tags=["trees"],
+        statement_md="Walk a tree.",
     )
 
     items, total = await repo.list_all(page=1, page_size=10, query="zzzzzzzzzz")

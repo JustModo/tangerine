@@ -10,7 +10,7 @@ nothing. So the contract is that a stream ALWAYS ends with either `event: done` 
 
 import json
 import logging
-from typing import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
 
 logger = logging.getLogger(__name__)
 

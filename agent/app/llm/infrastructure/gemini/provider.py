@@ -1,4 +1,5 @@
-from typing import AsyncIterator, TypeVar
+from collections.abc import AsyncIterator
+from typing import TypeVar
 
 from pydantic import BaseModel
 

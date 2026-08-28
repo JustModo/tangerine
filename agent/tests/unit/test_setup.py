@@ -9,8 +9,8 @@ from app.shared.config import get_settings
 from app.shared.database import run_migrations
 from app.shared.secrets import (
     GEMINI_API_KEY,
-    get_gemini_api_key,
     gemini_key_status,
+    get_gemini_api_key,
     set_gemini_api_key,
 )
 

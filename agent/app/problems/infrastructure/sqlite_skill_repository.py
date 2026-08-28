@@ -1,6 +1,5 @@
 import uuid
 
-
 from app.shared.config import get_settings
 from app.shared.database import connect
 
@@ -29,6 +28,11 @@ class SqliteSkillRepository:
         async with connect(self._database_path) as db:
             cursor = await db.execute("SELECT id, name FROM skills")
             return [(row[0], row[1]) for row in await cursor.fetchall()]
+
+    async def names(self) -> dict[str, str]:
+        """Every skill id to its name, in one query. `skills` is a tiny near-static table,
+        so a caller naming a page's worth of them should read it once, not once per row."""
+        return dict(await self.list_all())
 
     async def get_name(self, skill_id: str) -> str | None:
         async with connect(self._database_path) as db:

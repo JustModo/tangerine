@@ -30,7 +30,8 @@ class SqliteUserSkillStateRepository:
                 "INSERT INTO user_skill_state (user_id, skill_id, mastery_score, streak, last_seen_at) "
                 "VALUES (?, ?, ?, ?, ?) "
                 "ON CONFLICT(user_id, skill_id) DO UPDATE SET "
-                "mastery_score=excluded.mastery_score, streak=excluded.streak, last_seen_at=excluded.last_seen_at",
+                "mastery_score=excluded.mastery_score, streak=excluded.streak, "
+                "last_seen_at=excluded.last_seen_at",
                 (
                     state.user_id,
                     state.skill_id,
@@ -43,9 +44,7 @@ class SqliteUserSkillStateRepository:
 
     async def list_for_user(self, user_id: str) -> list[UserSkillState]:
         async with connect(self._database_path) as db:
-            cursor = await db.execute(
-                "SELECT * FROM user_skill_state WHERE user_id = ?", (user_id,)
-            )
+            cursor = await db.execute("SELECT * FROM user_skill_state WHERE user_id = ?", (user_id,))
             rows = await cursor.fetchall()
             return [
                 UserSkillState(

@@ -81,7 +81,7 @@ def mismatch_failure(
     """The reference ran fine but disagrees with an answer the statement itself claims."""
     disagreeing = [
         (example, result)
-        for example, result in zip(examples, results)
+        for example, result in zip(examples, results, strict=False)
         if normalise_output(result.actual_output) != normalise_output(example.output)
     ]
     return ValidationFailure(

@@ -5,7 +5,8 @@ wrapped in a semantic cache. Only the prompt differs, so the attempt bookkeeping
 cache dance live here rather than four times over.
 """
 
-from typing import Callable, TypeVar
+from collections.abc import Callable
+from typing import TypeVar
 
 from pydantic import BaseModel
 
@@ -34,7 +35,7 @@ def rejection_note(error: str | None) -> str:
     )
 
 
-async def attempt(
+async def attempt[T: BaseModel](
     provider: LLMProvider,
     state: dict,
     system_prompt: str,
@@ -71,7 +72,7 @@ async def run_graph(graph, state: dict, what: str):
     return final["result"]
 
 
-async def cached_generate(
+async def cached_generate[T: BaseModel](
     cache: SqliteLLMCache | None,
     key_parts: list[str] | None,
     response_model: type[T],

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -59,10 +59,11 @@ async def get_progress(user_id: str) -> Progress:
     problem_repository = SqliteProblemRepository()
 
     states = await mastery_repository.list_for_user(user_id)
+    skill_names = await skill_repository.names()
     skills = [
         SkillProgress(
             skill_id=state.skill_id,
-            skill_name=await skill_repository.get_name(state.skill_id) or state.skill_id,
+            skill_name=skill_names.get(state.skill_id) or state.skill_id,
             mastery_score=state.mastery_score,
             streak=state.streak,
             last_seen_at=state.last_seen_at,
@@ -73,13 +74,15 @@ async def get_progress(user_id: str) -> Progress:
 
     sessions = await SqliteProblemSessionRepository().list_for_user(user_id)
     completed = [s for s in sessions if s.status == ProblemSessionStatus.COMPLETED]
-    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    week_ago = datetime.now(UTC) - timedelta(days=7)
 
+    flagged_sessions = [s for s in sessions if s.flagged]
+    flagged_problems = await problem_repository.get_many(
+        [s.problem_id for s in flagged_sessions]
+    )
     flagged = []
-    for session in sessions:
-        if not session.flagged:
-            continue
-        problem = await problem_repository.get(session.problem_id)
+    for session in flagged_sessions:
+        problem = flagged_problems.get(session.problem_id)
         if problem is None:
             continue
         flagged.append(

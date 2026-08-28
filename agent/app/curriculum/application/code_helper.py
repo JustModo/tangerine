@@ -1,7 +1,7 @@
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 from app.curriculum.domain.problem_chat import ProblemChatMessage
 from app.curriculum.domain.problem_session_repository import ProblemSessionRepository
@@ -63,7 +63,7 @@ class CodeHelperService:
             for message in await self._session_repository.list_chat_messages(problem_session_id)
         ][-MAX_HISTORY_TURNS:]
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         user_message = ProblemChatMessage(
             id=str(uuid.uuid4()),
             problem_session_id=problem_session_id,
@@ -122,7 +122,7 @@ class CodeHelperService:
             problem_session_id=problem_session_id,
             role="assistant",
             content=reply_text,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         await self._session_repository.add_chat_message(reply)
         yield {"type": "done", "message_id": reply.id, "content": reply_text}
