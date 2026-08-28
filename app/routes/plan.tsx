@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { MetaFunction } from "react-router";
-import { useNavigate, useParams } from "react-router";
+import { useLoaderData, useNavigate } from "react-router";
 import { CheckCircle2, Lock, MessageSquare, Play, RefreshCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
@@ -47,27 +47,18 @@ export const meta: MetaFunction = () => [
   { name: "description", content: "Your DSA course, step by step. Read the notes, then solve the problem for each step." },
 ];
 
+export async function clientLoader({ params }: { params: { id?: string } }) {
+  return apiJson<LessonPlan>(`/api/learning-plans/${params.id}`);
+}
+
 export default function PlanScreen() {
-  const { id } = useParams();
-  const [plan, setPlan] = useState<LessonPlan | null>(null);
+  const plan = useLoaderData<typeof clientLoader>();
+  const id = plan.id;
   const [busy, setBusy] = useState(false);
   const [revisitingNodeId, setRevisitingNodeId] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const navigate = useNavigate();
   const { showError, setBusyMessage } = useStatus();
-
-  async function load() {
-    try {
-      setPlan(await apiJson<LessonPlan>(`/api/learning-plans/${id}`));
-    } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Failed to load plan");
-    }
-  }
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
 
   // nodeId is the step whose Play was pressed. Without it the server serves the first
   // unfinished step instead, so pressing Play on one row could open a different one.
@@ -108,7 +99,6 @@ export default function PlanScreen() {
   }
 
   async function deleteSession() {
-    if (!plan) return;
     setBusyMessage("Deleting session...");
     try {
       await apiJson(`/api/sessions/${plan.session_id}`, { method: "DELETE" });
@@ -119,8 +109,6 @@ export default function PlanScreen() {
       setBusyMessage(null);
     }
   }
-
-  if (!plan) return null;
 
   return (
     <div className="flex-1 flex flex-col min-h-0 w-full">

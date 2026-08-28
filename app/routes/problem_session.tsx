@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { MetaFunction } from "react-router";
-import { useNavigate, useParams } from "react-router";
+import { useLoaderData, useNavigate } from "react-router";
 import { Check } from "lucide-react";
 import { CodeWorkbench } from "@/components/code-workbench/CodeWorkbench";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
-import { useStatus } from "~/lib/status";
 import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
 import type { AttemptMetrics, EvaluationResult, ProblemDetail, TestResult } from "~/lib/types";
 
@@ -19,34 +18,22 @@ interface ProblemSessionData {
   flagged: boolean;
 }
 
+export async function clientLoader({ params }: { params: { id?: string } }) {
+  const session = await apiJson<ProblemSessionData>(`/api/problem-sessions/${params.id}`);
+  const problem = await apiJson<ProblemDetail>(`/api/problems/${session.problem_id}`);
+  return { session, problem };
+}
+
 export const meta: MetaFunction = () => [
   { title: "Problem · Tangerine" },
   { name: "description", content: "Solve the problem, run it against the examples, and submit for hidden tests." },
 ];
 
 export default function ProblemSessionScreen() {
-  const { id } = useParams();
-  const [session, setSession] = useState<ProblemSessionData | null>(null);
-  const [problem, setProblem] = useState<ProblemDetail | null>(null);
-  const [solved, setSolved] = useState(false);
+  const { session, problem } = useLoaderData<typeof clientLoader>();
+  const id = session.id;
+  const [solved, setSolved] = useState(session.status === "COMPLETED");
   const navigate = useNavigate();
-  const { showError } = useStatus();
-
-  async function load() {
-    try {
-      const sessionData = await apiJson<ProblemSessionData>(`/api/problem-sessions/${id}`);
-      setSession(sessionData);
-      setSolved(sessionData.status === "COMPLETED");
-      setProblem(await apiJson<ProblemDetail>(`/api/problems/${sessionData.problem_id}`));
-    } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Failed to load problem session");
-    }
-  }
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
 
   async function autosave(code: string) {
     try {
@@ -84,8 +71,6 @@ export default function ProblemSessionScreen() {
       body: JSON.stringify({ source_code: code, metrics }),
     });
   }
-
-  if (!session || !problem) return null;
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">

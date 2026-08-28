@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { MetaFunction } from "react-router";
-import { Link, useNavigate } from "react-router";
+import { Link, useLoaderData, useNavigate } from "react-router";
 import { BarChart3, Download, DownloadCloud, ListTree, MessageSquare, RefreshCw, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -31,6 +31,27 @@ export const meta: MetaFunction = () => [
 const OUTDATED_CACHE_KEY = "tangerine:outdated-check";
 const OUTDATED_CACHE_TTL_MS = 60 * 60 * 1000; // recheck GitHub at most once an hour
 
+export async function clientLoader() {
+  const sessions = await apiJson<SessionSummary[]>("/api/sessions");
+  // One lookup per session to know whether it already has a plan - a session with a plan
+  // should lead with "continue learning", not "continue chat".
+  const entries = await Promise.all(
+    sessions.map(async (session) => {
+      try {
+        const plans = await apiJson<LessonPlanSummary[]>(
+          `/api/learning-plans?session_id=${session.id}`,
+        );
+        // The API returns newest-first, so the active plan is simply the first one.
+        return [session.id, plans[0]] as const;
+      } catch {
+        return [session.id, undefined] as const;
+      }
+    }),
+  );
+  return { sessions, plansBySession: Object.fromEntries(entries) };
+}
+
+
 async function checkOutdated(): Promise<boolean> {
   try {
     const cached = localStorage.getItem(OUTDATED_CACHE_KEY);
@@ -53,45 +74,14 @@ async function checkOutdated(): Promise<boolean> {
 }
 
 export default function Home() {
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [plansBySession, setPlansBySession] = useState<Record<string, LessonPlanSummary | undefined>>({});
-  const [loading, setLoading] = useState(true);
+  const { sessions, plansBySession } = useLoaderData<typeof clientLoader>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [outdated, setOutdated] = useState(false);
   const navigate = useNavigate();
   const { showError, setBusyMessage } = useStatus();
 
-  async function loadSessions() {
-    try {
-      const data = await apiJson<SessionSummary[]>("/api/sessions");
-      setSessions(data);
-      // One lookup per session to know whether it already has a plan - a session with a
-      // plan should lead with "continue learning", not "continue chat".
-      const entries = await Promise.all(
-        data.map(async (session) => {
-          try {
-            const plans = await apiJson<LessonPlanSummary[]>(
-              `/api/learning-plans?session_id=${session.id}`,
-            );
-            // The API returns newest-first, so the active plan is simply the first one.
-            return [session.id, plans[0]] as const;
-          } catch {
-            return [session.id, undefined] as const;
-          }
-        }),
-      );
-      setPlansBySession(Object.fromEntries(entries));
-    } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Failed to load sessions");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    loadSessions();
     checkOutdated().then(setOutdated);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function startNewSession() {
@@ -174,7 +164,7 @@ export default function Home() {
       <ScrollArea className="flex-1 min-h-0 px-10">
         <div className="max-w-3xl mx-auto w-full flex flex-col pb-16">
           <div className="flex flex-col divide-y divide-white/5">
-            {!loading && sessions.length === 0 && (
+            {sessions.length === 0 && (
               <EmptyState>No sessions yet. Start one above.</EmptyState>
             )}
             {sessions.map((session) => {

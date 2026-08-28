@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { MetaFunction } from "react-router";
-import { useNavigate } from "react-router";
+import { useLoaderData, useNavigate } from "react-router";
 import { Check, Flag, Flame, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/PageHeader";
@@ -75,8 +75,13 @@ export const meta: MetaFunction = () => [
   { name: "description", content: "What you have practised, what you are weak in, and which skills are due for revision." },
 ];
 
+export async function clientLoader() {
+  const user = await apiJson<{ id: string }>("/api/users/me");
+  return apiJson<Progress>(`/api/users/${user.id}/progress`);
+}
+
 export default function ProgressScreen() {
-  const [progress, setProgress] = useState<Progress | null>(null);
+  const progress = useLoaderData<typeof clientLoader>();
   const [skillsPage, setSkillsPage] = useState(1);
   const navigate = useNavigate();
   const { showError, setBusyMessage } = useStatus();
@@ -86,15 +91,6 @@ export default function ProgressScreen() {
   const [problemsPage, setProblemsPage] = useState(1);
   const [problems, setProblems] = useState<ProblemsPage | null>(null);
   const [openingProblemId, setOpeningProblemId] = useState<string | null>(null);
-
-  async function load() {
-    try {
-      const user = await apiJson<{ id: string }>("/api/users/me");
-      setProgress(await apiJson<Progress>(`/api/users/${user.id}/progress`));
-    } catch (err) {
-      showError(err instanceof ApiError ? err.message : "Failed to load your progress");
-    }
-  }
 
   async function loadProblems(page: number, q: string, language: string) {
     try {
@@ -106,11 +102,6 @@ export default function ProgressScreen() {
       showError(err instanceof ApiError ? err.message : "Failed to load problems");
     }
   }
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Debounced search: a fresh query always restarts pagination at page 1.
   useEffect(() => {
@@ -175,8 +166,6 @@ export default function ProgressScreen() {
       setBusyMessage(null);
     }
   }
-
-  if (!progress) return null;
 
   const hasRecord = progress.skills.length > 0;
   const skillsTotalPages = Math.max(1, Math.ceil(progress.skills.length / SKILLS_PAGE_SIZE));
