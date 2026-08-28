@@ -289,8 +289,6 @@ _COACHING_LIBRARY = (
     "ask which before building it.\n"
 )
 
-COACHING_PROMPT = _COACHING_RECOMMEND + _COACHING_ONE_NODE + "\n" + _COACHING_LIBRARY
-
 
 def coaching_prompt(has_record: bool = True, has_library: bool = True) -> str:
     """The coaching rules that match the tools this session was actually offered.

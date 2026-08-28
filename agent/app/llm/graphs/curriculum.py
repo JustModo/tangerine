@@ -3,13 +3,11 @@ from typing import TypedDict
 from langgraph.graph import END, StateGraph
 
 from app.llm.domain.provider import LLMProvider
-from app.llm.domain.requests import StructuredGenerationRequest
-from app.llm.infrastructure.cache import SqliteLLMCache, cache_key
+from app.llm.infrastructure.cache import SqliteLLMCache
+from app.llm.graphs.shared import attempt, cached_generate, route, run_graph
 from app.llm.infrastructure.gemini.mapping import SchemaValidationError
 from app.llm.prompts.curriculum import CURRICULUM_SYSTEM_PROMPT, curriculum_user_prompt
 from app.llm.schemas.curriculum import GeneratedCurriculum
-
-MAX_ATTEMPTS = 3
 
 
 class CurriculumGraphState(TypedDict):
@@ -18,6 +16,7 @@ class CurriculumGraphState(TypedDict):
     level: str
     step_count: int | None
     target_problem: str | None
+    known_skills: list[str]
     result: GeneratedCurriculum | None
     error: str | None
     attempts: int
@@ -25,26 +24,14 @@ class CurriculumGraphState(TypedDict):
 
 def build_curriculum_graph(provider: LLMProvider):
     async def generate(state: CurriculumGraphState) -> CurriculumGraphState:
-        request = StructuredGenerationRequest(
-            system_prompt=CURRICULUM_SYSTEM_PROMPT,
-            user_prompt=curriculum_user_prompt(
+        return await attempt(provider, state, CURRICULUM_SYSTEM_PROMPT, curriculum_user_prompt(
                 state["topic"],
                 state["language"],
                 state["level"],
                 state["step_count"],
                 state["target_problem"],
-            ),
-        )
-        try:
-            result = await provider.generate_structured(request, GeneratedCurriculum)
-            return {**state, "result": result, "error": None}
-        except SchemaValidationError as exc:
-            return {**state, "error": str(exc), "attempts": state["attempts"] + 1}
-
-    def route(state: CurriculumGraphState) -> str:
-        if state["result"] is not None or state["attempts"] >= MAX_ATTEMPTS:
-            return "done"
-        return "retry"
+                state["known_skills"],
+            ), GeneratedCurriculum)
 
     graph = StateGraph(CurriculumGraphState)
     graph.add_node("generate", generate)
@@ -64,42 +51,25 @@ async def generate_curriculum(
     known_skills: list[str] | None = None,
 ) -> GeneratedCurriculum:
     # Same request always warrants the same curriculum — a safe, valuable cache candidate,
-    # unlike per-submission coaching feedback.
-    # A pasted target problem makes the curriculum one-of-a-kind, so it is never cached; an
-    # explicit step count is part of the identity of the result, so it joins the key. So do
-    # the skills the learner has already mastered: without them a returning learner gets the
-    # same plan as a total beginner, forever.
-    key = (
-        cache_key(
-            "curriculum", topic, language, level, str(step_count), *sorted(known_skills or [])
-        )
-        if cache is not None and not target_problem
-        else None
+    # unlike per-submission coaching feedback. A pasted target problem makes it
+    # one-of-a-kind, so it is never cached; step count and the mastered skills both shape
+    # the plan, so both join the key.
+    return await cached_generate(
+        cache,
+        None
+        if target_problem
+        else ["curriculum", topic, language, level, str(step_count), *sorted(known_skills or [])],
+        GeneratedCurriculum,
+        lambda: run_graph(
+            build_curriculum_graph(provider),
+            {
+                "topic": topic,
+                "language": language,
+                "level": level,
+                "step_count": step_count,
+                "target_problem": target_problem,
+                "known_skills": sorted(known_skills or []),
+            },
+            "Curriculum generation",
+        ),
     )
-    if cache is not None and key is not None:
-        cached = await cache.get(key)
-        if cached is not None:
-            return GeneratedCurriculum.model_validate_json(cached)
-
-    graph = build_curriculum_graph(provider)
-    final_state = await graph.ainvoke(
-        {
-            "topic": topic,
-            "language": language,
-            "level": level,
-            "step_count": step_count,
-            "target_problem": target_problem,
-            "result": None,
-            "error": None,
-            "attempts": 0,
-        }
-    )
-    if final_state["result"] is None:
-        raise SchemaValidationError(
-            f"Curriculum generation failed after {MAX_ATTEMPTS} attempts: {final_state['error']}"
-        )
-
-    if cache is not None and key is not None:
-        await cache.set(key, final_state["result"].model_dump_json())
-
-    return final_state["result"]

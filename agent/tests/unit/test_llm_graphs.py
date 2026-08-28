@@ -47,3 +47,37 @@ async def test_generate_problem_returns_structured_result() -> None:
     result = await generate_problem(provider, "prefix-sum", "python", "easy")
 
     assert result.title == "Static Range Sum"
+
+
+async def test_a_retry_tells_the_model_why_it_was_rejected() -> None:
+    """A blind retry re-sends a byte-identical prompt and relies purely on sampling."""
+    good = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)])
+    provider = FakeLLMProvider(
+        structured_responses=[SchemaValidationError("nodes: field required"), good]
+    )
+
+    await generate_curriculum(provider, "prefix sums", "python", "beginner")
+
+    retry_prompt = provider.last_structured_request.user_prompt
+    assert "REJECTED" in retry_prompt
+    assert "nodes: field required" in retry_prompt
+
+
+async def test_the_first_attempt_carries_no_rejection_note() -> None:
+    good = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)])
+    provider = FakeLLMProvider(structured_responses=[good])
+
+    await generate_curriculum(provider, "prefix sums", "python", "beginner")
+
+    assert "REJECTED" not in provider.last_structured_request.user_prompt
+
+
+async def test_mastered_skills_reach_the_prompt() -> None:
+    good = GeneratedCurriculum(nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)])
+    provider = FakeLLMProvider(structured_responses=[good])
+
+    await generate_curriculum(
+        provider, "arrays", "python", "beginner", known_skills=["two pointers"]
+    )
+
+    assert "two pointers" in provider.last_structured_request.user_prompt

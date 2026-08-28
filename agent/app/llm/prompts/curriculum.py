@@ -47,8 +47,15 @@ def curriculum_user_prompt(
     level: str,
     step_count: int | None = None,
     target_problem: str | None = None,
+    known_skills: list[str] | None = None,
 ) -> str:
     prompt = f"Topic: {topic}\nLanguage: {language}\nLevel: {level}"
+    if known_skills:
+        listed = ", ".join(known_skills)
+        prompt += (
+            "\n\nThe learner has already mastered these skills — do not spend a step "
+            f"re-teaching one unless the topic genuinely demands it: {listed}"
+        )
     if step_count is not None:
         prompt += f"\nThe learner explicitly asked for exactly {step_count} step(s)."
     if target_problem:

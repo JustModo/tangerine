@@ -5,6 +5,12 @@ from pydantic import BaseModel
 from app.llm.domain.requests import ChatChunk, ChatStreamRequest, StructuredGenerationRequest
 from app.llm.infrastructure.gemini.client import GeminiClient
 from app.llm.infrastructure.gemini.mapping import parse_structured_response
+from app.llm.infrastructure.gemini.retry import (
+    MAX_ATTEMPTS,
+    backoff_delay,
+    is_retryable,
+    with_retry,
+)
 from app.shared.config import get_settings
 from app.shared.secrets import get_gemini_api_key
 
@@ -31,20 +37,37 @@ class GeminiProvider:
     async def generate_structured(
         self, request: StructuredGenerationRequest, response_model: type[T]
     ) -> T:
-        raw = await (await self._get_client()).generate_json(
-            model=request.model or self._default_model,
-            system_prompt=request.system_prompt,
-            user_prompt=request.user_prompt,
-            response_schema=response_model.model_json_schema(),
+        client = await self._get_client()
+        raw = await with_retry(
+            lambda: client.generate_json(
+                model=request.model or self._default_model,
+                system_prompt=request.system_prompt,
+                user_prompt=request.user_prompt,
+                response_schema=response_model.model_json_schema(),
+            ),
+            "generate_json",
         )
         return parse_structured_response(raw, response_model)  # type: ignore[return-value]
 
     async def stream_chat(self, request: ChatStreamRequest) -> AsyncIterator[ChatChunk]:
-        async for chunk in (await self._get_client()).stream_chat(
-            model=request.model or self._default_model,
-            system_prompt=request.system_prompt,
-            history=request.history,
-            message=request.message,
-            tools=request.tools,
-        ):
-            yield chunk
+        """Retries only while nothing has been emitted yet. A rate limit or an overloaded
+        backend rejects the request before the first token, which is the case worth
+        retrying; once text is out, restarting would repeat it to the user."""
+        client = await self._get_client()
+        for attempt in range(MAX_ATTEMPTS):
+            started = False
+            try:
+                async for chunk in client.stream_chat(
+                    model=request.model or self._default_model,
+                    system_prompt=request.system_prompt,
+                    history=request.history,
+                    message=request.message,
+                    tools=request.tools,
+                ):
+                    started = True
+                    yield chunk
+                return
+            except Exception as exc:
+                if started or not is_retryable(exc) or attempt == MAX_ATTEMPTS - 1:
+                    raise
+                await backoff_delay(attempt, exc, "stream_chat")

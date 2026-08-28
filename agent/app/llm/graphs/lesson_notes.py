@@ -3,8 +3,8 @@ from typing import TypedDict
 from langgraph.graph import END, StateGraph
 
 from app.llm.domain.provider import LLMProvider
-from app.llm.domain.requests import StructuredGenerationRequest
-from app.llm.infrastructure.cache import SqliteLLMCache, cache_key
+from app.llm.infrastructure.cache import SqliteLLMCache
+from app.llm.graphs.shared import attempt, cached_generate, route, run_graph
 from app.llm.infrastructure.gemini.mapping import SchemaValidationError
 from app.llm.prompts.lesson_notes import (
     LESSON_NOTES_SYSTEM_PROMPT,
@@ -12,8 +12,6 @@ from app.llm.prompts.lesson_notes import (
     lesson_notes_user_prompt,
 )
 from app.llm.schemas.lesson_notes import GeneratedLessonNotes
-
-MAX_ATTEMPTS = 3
 
 
 class LessonNotesGraphState(TypedDict):
@@ -31,9 +29,7 @@ class LessonNotesGraphState(TypedDict):
 
 def build_lesson_notes_graph(provider: LLMProvider):
     async def generate(state: LessonNotesGraphState) -> LessonNotesGraphState:
-        request = StructuredGenerationRequest(
-            system_prompt=LESSON_NOTES_SYSTEM_PROMPT,
-            user_prompt=lesson_notes_user_prompt(
+        return await attempt(provider, state, LESSON_NOTES_SYSTEM_PROMPT, lesson_notes_user_prompt(
                 state["skill"],
                 state["language"],
                 state["level"],
@@ -41,18 +37,7 @@ def build_lesson_notes_graph(provider: LLMProvider):
                 statement_md=state["statement_md"],
                 tags=state["tags"],
                 reference_solution=state["reference_solution"],
-            ),
-        )
-        try:
-            result = await provider.generate_structured(request, GeneratedLessonNotes)
-            return {**state, "result": result, "error": None}
-        except SchemaValidationError as exc:
-            return {**state, "error": str(exc), "attempts": state["attempts"] + 1}
-
-    def route(state: LessonNotesGraphState) -> str:
-        if state["result"] is not None or state["attempts"] >= MAX_ATTEMPTS:
-            return "done"
-        return "retry"
+            ), GeneratedLessonNotes)
 
     graph = StateGraph(LessonNotesGraphState)
     graph.add_node("generate", generate)
@@ -78,41 +63,22 @@ async def generate_lesson_notes(
     # against this problem's solution is not reusable for the next problem on the same
     # skill. Without a problem it falls back to the shared per-skill lesson. The version
     # segment is the cache's only invalidation lever.
-    key = (
-        cache_key(
-            "lesson_notes", LESSON_NOTES_VERSION, problem_id or skill, language, level
-        )
-        if cache is not None
-        else None
+    return await cached_generate(
+        cache,
+        ["lesson_notes", LESSON_NOTES_VERSION, problem_id or skill, language, level],
+        GeneratedLessonNotes,
+        lambda: run_graph(
+            build_lesson_notes_graph(provider),
+            {
+                "skill": skill,
+                "language": language,
+                "level": level,
+                "problem_title": problem_title,
+                "statement_md": statement_md,
+                "tags": tags,
+                "reference_solution": reference_solution,
+            },
+            "Lesson notes generation",
+        ),
+        refresh=refresh,
     )
-    # refresh skips the READ, not the write: a regenerate replaces the cached entry rather
-    # than bypassing it forever.
-    if cache is not None and key is not None and not refresh:
-        cached = await cache.get(key)
-        if cached is not None:
-            return GeneratedLessonNotes.model_validate_json(cached)
-
-    graph = build_lesson_notes_graph(provider)
-    final_state = await graph.ainvoke(
-        {
-            "skill": skill,
-            "language": language,
-            "level": level,
-            "problem_title": problem_title,
-            "statement_md": statement_md,
-            "tags": tags,
-            "reference_solution": reference_solution,
-            "result": None,
-            "error": None,
-            "attempts": 0,
-        }
-    )
-    if final_state["result"] is None:
-        raise SchemaValidationError(
-            f"Lesson notes generation failed after {MAX_ATTEMPTS} attempts: {final_state['error']}"
-        )
-
-    if cache is not None and key is not None:
-        await cache.set(key, final_state["result"].model_dump_json())
-
-    return final_state["result"]
