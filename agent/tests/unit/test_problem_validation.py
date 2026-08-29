@@ -129,6 +129,8 @@ async def test_generate_and_validate_marks_invalid_when_reference_solution_error
             _generated_problem(),
             ProblemPatch(reference_user_code="def solve(nums): return sum(nums)"),
             _generated_problem(),
+            # The regenerated candidate now gets a repair of its own; empty = no change.
+            ProblemPatch(),
         ]
     )
     executor = FakeCodeExecutor(
@@ -154,6 +156,7 @@ async def test_generate_and_validate_marks_invalid_when_reference_solution_print
             _generated_problem(),
             ProblemPatch(post_code="print(solve(nums))"),
             _generated_problem(),
+            ProblemPatch(),
         ]
     )
     executor = FakeCodeExecutor(
@@ -177,6 +180,7 @@ async def test_reference_disagreeing_with_a_stated_example_is_rejected(db_path: 
             # Repair still disagrees with example.
             ProblemPatch(reference_user_code="def solve(nums): return sum(nums) + 1"),
             _generated_problem(),
+            ProblemPatch(),
         ]
     )
     executor = FakeCodeExecutor(
@@ -402,6 +406,7 @@ async def test_a_problem_with_no_usable_hidden_test_is_rejected(db_path: str) ->
             blank_hidden_tests(),
             ProblemPatch(hidden_tests=["", "  "]),
             blank_hidden_tests(),
+            ProblemPatch(),
         ]
     )
     executor = FakeCodeExecutor(
@@ -514,3 +519,78 @@ async def test_an_unusable_repair_falls_through_to_a_fresh_generation(db_path: s
 
     assert stages == ["generating", "validating", "patching", "regenerating", "validating"]
     assert problem is not None and problem.status == ProblemStatus.AVAILABLE
+
+
+def _cycle_problem() -> GeneratedProblem:
+    """A topological sort: the cycle case legitimately prints an empty line. This shape is
+    why every generated topological-sort problem was rejected — see the test below."""
+    return GeneratedProblem(
+        title="Course Dependency Resolution Order",
+        statement_md="Return the lexicographically smallest valid course order.",
+        difficulty="medium",
+        skills=["topological-sort"],
+        pre_code="n = int(input())",
+        user_code="def solve(n): pass",
+        post_code='print(" ".join(map(str, solve(n))))',
+        reference_user_code="def solve(n): return list(range(n))",
+        examples=[GeneratedExample(input="2", output="0 1")],
+        hidden_tests=["0", "3", "1"],
+        constraints="1 <= n <= 10^5",
+        input_format="n: int, the number of courses.",
+        output_format="Returns the order as list[int]; printed space-separated.",
+    )
+
+
+async def test_an_empty_answer_on_some_inputs_is_a_real_answer(db_path: str) -> None:
+    """A blank line means "no valid ordering exists", which the authoring prompt explicitly
+    tells the generator to print. Treating it as a broken reference rejected every correct
+    topological-sort problem: 12 consecutive INVALID rows with nothing wrong with them."""
+    repo = SqliteProblemRepository(db_path)
+    llm = FakeLLMProvider(structured_responses=[_cycle_problem()])
+    executor = FakeCodeExecutor(
+        [
+            TestResult(id="0", status=ExecutionStatus.PASSED, input="2", actual_output="0 1\n"),
+            # The cycle case: a real answer that happens to print nothing.
+            TestResult(id="1", status=ExecutionStatus.PASSED, input="0", actual_output="\n"),
+            TestResult(id="2", status=ExecutionStatus.PASSED, input="3", actual_output="0 1 2\n"),
+            TestResult(id="3", status=ExecutionStatus.PASSED, input="1", actual_output="0\n"),
+        ]
+    )
+    service = ProblemValidationService(repo, llm, executor, SqliteSkillRepository(db_path))
+
+    problem = await service.generate_and_validate("topological-sort", Language.PYTHON, "medium")
+
+    assert problem is not None
+    assert problem.status == ProblemStatus.AVAILABLE
+    # The blank answer is graded like any other, not silently dropped.
+    version = await repo.get_latest_version(problem.id)
+    assert version is not None
+    assert len(version.tests) == 4
+    assert version.tests[1].output_hash == hash_output("\n")
+
+
+async def test_a_reference_that_prints_nothing_on_every_input_is_still_rejected(
+    db_path: str,
+) -> None:
+    """The protection the empty-output check existed for: blank on everything means the
+    harness never printed, so any do-nothing submission would match the hashes."""
+    repo = SqliteProblemRepository(db_path)
+    llm = FakeLLMProvider(
+        structured_responses=[
+            _cycle_problem(),
+            ProblemPatch(post_code="pass"),
+            _cycle_problem(),
+            ProblemPatch(),
+        ]
+    )
+    executor = FakeCodeExecutor(
+        [
+            TestResult(id=str(i), status=ExecutionStatus.PASSED, input=value, actual_output="")
+            for i, value in enumerate(["2", "0", "3", "1"])
+        ]
+    )
+    service = ProblemValidationService(repo, llm, executor, SqliteSkillRepository(db_path))
+
+    problem = await service.generate_and_validate("topological-sort", Language.PYTHON, "medium")
+
+    assert problem is None

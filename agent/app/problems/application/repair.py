@@ -51,19 +51,35 @@ def no_tests_failure(examples: list, hidden_tests: list[str]) -> ValidationFailu
     )
 
 
-def runtime_failure(results: list[TestResult], expected_count: int) -> ValidationFailure:
-    """The reference solution crashed, timed out, printed nothing, or never finished."""
+def runtime_failure(
+    results: list[TestResult], expected_count: int, all_empty: bool = False
+) -> ValidationFailure:
+    """The reference solution crashed, timed out, never finished, or printed nothing on
+    every single input.
+
+    all_empty is reported separately because it points somewhere else entirely: nothing
+    crashed, so the defect is that post_code never prints or pre_code parsed the wrong
+    tokens. Sending it down the generic "it crashed" path made the repair hunt for an
+    exception that does not exist."""
     if len(results) != expected_count:
         return ValidationFailure(
             "runtime",
             f"The sandbox returned {len(results)} results for {expected_count} inputs — "
             "the program did not run to completion on all of them.",
         )
+    if all_empty:
+        return ValidationFailure(
+            "runtime",
+            f"The reference ran without crashing on all {expected_count} inputs and printed "
+            "NOTHING on every one of them. Printing a blank line for a no-answer case is "
+            "fine, but blank on every input means the program never printed a real answer: "
+            "post_code does not print, or pre_code consumed the wrong tokens so the "
+            "function never received its arguments. Fix the harness, not the algorithm.",
+        )
     broken = [
         result
         for result in results
         if result.status in (ExecutionStatus.ERROR, ExecutionStatus.TIMEOUT)
-        or not (result.actual_output or "").strip()
     ]
     return ValidationFailure(
         "runtime",

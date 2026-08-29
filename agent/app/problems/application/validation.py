@@ -77,11 +77,12 @@ class ProblemValidationService:
         """Generate, prove it out against the real sandbox, and — when it fails — repair it
         with the failure in hand before falling back to starting over.
 
-        The budget is deliberately the shape of this method rather than a counter: one
-        generation, one targeted repair, one fresh generation. A repair is far cheaper than
-        a regeneration and fixes the common failures (a signature mismatch, a parse that
-        eats the wrong tokens, an example output the reference disagrees with), so it goes
-        first; starting over is the escape hatch for when the whole approach is wrong.
+        The budget is deliberately the shape of this method rather than a counter: two
+        candidates, each getting one targeted repair before it is abandoned. A repair is far
+        cheaper than a regeneration and fixes the common failures (a signature mismatch, a
+        parse that eats the wrong tokens, an example output the reference disagrees with),
+        so it goes first; starting over is the escape hatch for when the whole approach is
+        wrong.
 
         When source_problem is given, the learner pasted that question in and the LLM adapts
         it rather than inventing one. Neither the repair nor the fresh generation may change
@@ -121,26 +122,11 @@ class ProblemValidationService:
         if duplicate_of is not None:
             return duplicate_of
 
-        stage("validating")
-        problem, failure = await self._validate(
-            generated, _conceptual_id(generated.title), skill, language, difficulty
+        problem = await self._validate_or_repair(
+            generated, skill, language, difficulty, source_problem, stage
         )
         if problem is not None:
             return problem
-
-        # Repair attempt with failure context (old blind retry didn't have this).
-        stage("patching")
-        patch = await patch_problem(
-            self._llm_provider, generated, failure.kind, failure.detail, language.value
-        )
-        patched = apply_patch(generated, patch, source_problem)
-        if patched is not generated:
-            stage("revalidating")
-            problem, _ = await self._validate(
-                patched, _conceptual_id(patched.title), skill, language, difficulty
-            )
-            if problem is not None:
-                return problem
 
         # Regenerate without cache (replaying rejected cached answer would loop).
         stage("regenerating")
@@ -157,9 +143,42 @@ class ProblemValidationService:
         if duplicate_of is not None:
             return duplicate_of
 
+        return await self._validate_or_repair(
+            generated, skill, language, difficulty, source_problem, stage
+        )
+
+    async def _validate_or_repair(
+        self,
+        generated: GeneratedProblem,
+        skill: str,
+        language: Language,
+        difficulty: str,
+        source_problem: str | None,
+        stage: Callable[[str], None],
+    ) -> Problem | None:
+        """Validate one candidate, and on failure spend a single targeted repair on it.
+
+        Every candidate gets its repair, the regenerated one included: it used to get a
+        bare validate and no second chance, which threw away the cheapest fix available at
+        exactly the point the budget was nearly spent."""
         stage("validating")
-        problem, _ = await self._validate(
+        problem, failure = await self._validate(
             generated, _conceptual_id(generated.title), skill, language, difficulty
+        )
+        if problem is not None:
+            return problem
+
+        stage("patching")
+        patch = await patch_problem(
+            self._llm_provider, generated, failure.kind, failure.detail, language.value
+        )
+        patched = apply_patch(generated, patch, source_problem)
+        if patched is generated:
+            return None
+
+        stage("revalidating")
+        problem, _ = await self._validate(
+            patched, _conceptual_id(patched.title), skill, language, difficulty
         )
         return problem
 
@@ -225,14 +244,12 @@ class ProblemValidationService:
         )
         results = [result async for result in self._executor.execute(request)]
 
-        # Catch empty outputs (broken reference solution or all-passing submission).
-        broken = len(results) != len(graded_inputs) or any(
-            r.status in (ExecutionStatus.ERROR, ExecutionStatus.TIMEOUT)
-            or not (r.actual_output or "").strip()
-            for r in results
-        )
-        if broken:
-            return await self._mark_invalid(problem, runtime_failure(results, len(graded_inputs)))
+        crashed = any(r.status in (ExecutionStatus.ERROR, ExecutionStatus.TIMEOUT) for r in results)
+        all_empty = all(not (r.actual_output or "").strip() for r in results)
+        if len(results) != len(graded_inputs) or crashed or all_empty:
+            return await self._mark_invalid(
+                problem, runtime_failure(results, len(graded_inputs), all_empty=all_empty)
+            )
 
         # The correctness check: the reference must match the statement's examples.
         if any(

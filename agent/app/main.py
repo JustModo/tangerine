@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -32,6 +33,11 @@ GIT_SHA_FILE = Path(__file__).resolve().parent.parent / "GIT_SHA"
 
 def _git_sha() -> str:
     return GIT_SHA_FILE.read_text().strip() if GIT_SHA_FILE.is_file() else "unknown"
+
+
+logging.basicConfig(
+    level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s", force=True
+)
 
 
 @asynccontextmanager
