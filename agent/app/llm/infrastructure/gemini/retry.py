@@ -10,6 +10,7 @@ import asyncio
 import logging
 import random
 
+import httpx
 from google.genai import errors
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,10 @@ RETRYABLE_CODES = frozenset({429, 500, 502, 503, 504})
 
 
 def is_retryable(exc: BaseException) -> bool:
+    # httpx.TransportError covers DNS failures, dropped connections, timeouts — the network
+    # never even reached Gemini, so it's the same "try again" case as a 5xx from Gemini itself.
+    if isinstance(exc, httpx.TransportError):
+        return True
     return isinstance(exc, errors.APIError) and getattr(exc, "code", None) in RETRYABLE_CODES
 
 
@@ -34,7 +39,7 @@ async def backoff_delay(attempt: int, exc: BaseException, what: str) -> None:
     logger.warning(
         "%s failed with %s, retrying in %.1fs (attempt %d/%d)",
         what,
-        getattr(exc, "code", "?"),
+        getattr(exc, "code", None) or type(exc).__name__,
         delay,
         attempt + 1,
         MAX_ATTEMPTS,

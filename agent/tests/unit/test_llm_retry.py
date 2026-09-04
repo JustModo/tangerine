@@ -1,3 +1,4 @@
+import httpx
 import pytest
 from google.genai import errors
 
@@ -22,6 +23,12 @@ def test_permanent_api_errors_are_not_retryable(code: int) -> None:
 
 def test_a_schema_failure_is_not_a_transport_failure() -> None:
     assert not retry.is_retryable(ValueError("not an APIError"))
+
+
+def test_network_failures_are_retryable() -> None:
+    """A DNS lookup failure or dropped connection never reaches Gemini at all — it's the
+    same "try again" case as a 5xx, not a permanent failure like a bad key."""
+    assert retry.is_retryable(httpx.ConnectError("Temporary failure in name resolution"))
 
 
 async def test_with_retry_recovers_from_a_rate_limit(monkeypatch) -> None:
