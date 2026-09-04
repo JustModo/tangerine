@@ -15,10 +15,12 @@ from app.llm.schemas.problem import GeneratedExample, GeneratedProblem, ProblemP
 # stress-sized blob, and the model needs its shape rather than all of it.
 _CLIP = 200
 _CLIP_ERROR = 300
+# Compiler diagnostics get more room: they are the whole fix, and only ever sent once.
+_CLIP_COMPILE = 1500
 # Two failing cases is enough to show a pattern; more just costs tokens for the same fix.
 _MAX_REPORTED_CASES = 2
 
-FailureKind = Literal["no_tests", "runtime", "mismatch"]
+FailureKind = Literal["no_tests", "runtime", "mismatch", "compile"]
 
 
 @dataclass(frozen=True)
@@ -51,16 +53,22 @@ def no_tests_failure(examples: list, hidden_tests: list[str]) -> ValidationFailu
     )
 
 
-def runtime_failure(
+def execution_failure(
     results: list[TestResult], expected_count: int, all_empty: bool = False
 ) -> ValidationFailure:
-    """The reference solution crashed, timed out, never finished, or printed nothing on
-    every single input.
+    """Why the reference produced no usable output — the one classifier for every such
+    case, so the caller never has to know which it is looking at.
 
-    all_empty is reported separately because it points somewhere else entirely: nothing
-    crashed, so the defect is that post_code never prints or pre_code parsed the wrong
-    tokens. Sending it down the generic "it crashed" path made the repair hunt for an
-    exception that does not exist."""
+    Each kind points somewhere different: compile means it never ran and the compiler names
+    the line; all_empty means nothing crashed but post_code never prints or pre_code ate the
+    wrong tokens; the rest is a real crash or timeout."""
+    # One diagnostic, copied onto every test case by the sandbox — report it once.
+    if any(result.compile_failed for result in results):
+        error = next((result.error for result in results if result.error), None)
+        return ValidationFailure(
+            "compile",
+            _clip(error or "The compiler rejected the program.", _CLIP_COMPILE),
+        )
     if len(results) != expected_count:
         return ValidationFailure(
             "runtime",

@@ -9,10 +9,10 @@ from app.llm.graphs.shared import attempt, cached_generate, route, run_graph
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.mapping import SchemaValidationError
 from app.llm.prompts.problem import (
-    PATCH_SYSTEM_PROMPT,
-    PROBLEM_SYSTEM_PROMPT,
     adapt_problem_user_prompt,
     patch_problem_user_prompt,
+    patch_system_prompt,
+    problem_system_prompt,
     problem_user_prompt,
 )
 from app.llm.schemas.problem import GeneratedProblem, ProblemPatch
@@ -33,7 +33,7 @@ class ProblemGraphState(TypedDict):
 
 def build_problem_graph(provider: LLMProvider):
     async def generate(state: ProblemGraphState) -> ProblemGraphState:
-        return await attempt(provider, state, PROBLEM_SYSTEM_PROMPT, (
+        return await attempt(provider, state, problem_system_prompt(state["language"]), (
                 adapt_problem_user_prompt(state["source_problem"], state["language"])
                 if state["source_problem"]
                 else problem_user_prompt(
@@ -94,25 +94,11 @@ async def patch_problem(
     No graph, no retry, no cache: a patch is a single cheap call that either helps or
     doesn't, and its caller already has a fresh regeneration lined up behind it. Caching
     would be actively wrong — the key would be the same broken problem every time."""
-    needs_statement = kind == "mismatch"
     request = StructuredGenerationRequest(
-        # The repair subset of the generation prompt — same blocks, so the rules a patch
-        # must honour cannot drift from the ones that produced the problem, without paying
-        # for the authoring rules (title, hints, tags, stress test) it cannot act on.
-        system_prompt=PATCH_SYSTEM_PROMPT,
-        user_prompt=patch_problem_user_prompt(
-            kind=kind,
-            detail=detail,
-            language=language,
-            pre_code=generated.pre_code,
-            reference_user_code=generated.reference_user_code,
-            post_code=generated.post_code,
-            examples=generated.examples,
-            hidden_tests=generated.hidden_tests,
-            statement_md=generated.statement_md if needs_statement else None,
-            # Stub only relevant for no_tests repairs (format must match).
-            user_code=generated.user_code if kind == "no_tests" else None,
-        ),
+        # The repair subset of the generation prompt, so the rules a patch must honour
+        # cannot drift from the ones that produced the problem.
+        system_prompt=patch_system_prompt(language),
+        user_prompt=patch_problem_user_prompt(kind, detail, language, generated),
     )
     try:
         return await provider.generate_structured(request, ProblemPatch)

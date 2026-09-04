@@ -38,6 +38,7 @@ class TestResult(BaseModel):
     status_description: str | None = None
     stdout_truncated: bool = False
     stderr_truncated: bool = False
+    compile_failed: bool = False
 
 
 def parse_runtime_ms(value: str | None) -> float | None:

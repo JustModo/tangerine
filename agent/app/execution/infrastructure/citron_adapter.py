@@ -20,6 +20,9 @@ _INFRA_FAILURE_STATUS = {
     13: ExecutionStatus.ERROR,  # Internal Error
 }
 
+# The one id above worth telling apart downstream: a compiler names the failing line.
+_COMPILATION_ERROR_STATUS = 6
+
 
 def _error_detail(
     status: ExecutionStatus, stderr: str | None, message: str | None, status_description: str | None
@@ -80,6 +83,7 @@ class CitronAdapter:
                     status=ExecutionStatus.ERROR,
                     input=test_case.input,
                     error=error_message,
+                    compile_failed=True,
                 )
             return
 
@@ -127,4 +131,5 @@ class CitronAdapter:
                 status_description=status_description,
                 stdout_truncated=bool(tc_result.get("stdout_truncated")),
                 stderr_truncated=bool(tc_result.get("stderr_truncated")),
+                compile_failed=status_id == _COMPILATION_ERROR_STATUS,
             )

@@ -1,3 +1,6 @@
+from app.llm.schemas.problem import GeneratedProblem
+from app.shared.code_assembly import annotated_program
+
 # Split into blocks so the repair call can take the subset it actually needs. A patch
 # cannot return a title, hints, tags or a stress test (see ProblemPatch), so the rules for
 # writing those are dead weight on every repair — and repairs are budgeted at up to two
@@ -23,25 +26,20 @@ _CODE_SHAPE = (
     "validation, reference_user_code) + \"\\n\\n\" + post_code into ONE source file and runs "
     "it as-is — no test harness, no injected imports, nothing else added. Your fragments "
     "must be independently-valid text that only becomes one coherent, compiling program "
-    "once concatenated in exactly that order.\n\n"
+    "once concatenated in exactly that order. The LANGUAGE SHAPE section below is the exact "
+    "form your four fragments must take for the language you were asked for — follow it "
+    "literally, and never borrow another language's shape.\n\n"
 
     "WHAT GOES WHERE:\n"
     "- pre_code: everything that must appear BEFORE the learner's function — imports/"
-    "includes, any struct/typedef declarations. In Python ONLY, pre_code also reads stdin "
-    "and parses it into top-level variables (Python allows free top-level statements). In "
-    "C, C++, and Java, pre_code must NOT read stdin — those languages have no free "
-    "top-level statements, so parsing happens inside main() in post_code instead.\n"
-    "- user_code: ONLY the function (or, for Java, ONLY the static method) the learner "
-    "implements. Nothing else — no stdin reads, no prints, no other declarations. Give it "
-    "a stub body (Python `pass` / a dummy `return 0`; Java/C/C++ a `// TODO` comment plus "
-    "a dummy return) that runs without crashing but need not be correct. The signature "
-    "MUST be fully typed: in python annotate every parameter AND the return type "
-    "(`def solve(n: int, grid: list[list[int]]) -> list[int]:`), preferring builtin "
-    "generics (`list`, `dict`, `tuple`, `X | None`) over `typing` imports — if a `typing` "
-    "name is genuinely needed, pre_code carries the import. In c/cpp/java use the precise "
-    "type (`vector<int>`, `int[]`, `TreeNode*`), never a stringly-typed stand-in. This is "
-    "the learner's ONLY view of the shapes involved: user_code is the one fragment they "
-    "are shown, so an unannotated parameter is a guess they have to make.\n"
+    "includes, any struct/typedef declarations, and the stdin parsing if (and only if) your "
+    "LANGUAGE SHAPE puts it there.\n"
+    "- user_code: ONLY the single function the learner implements. Nothing else — no stdin "
+    "reads, no prints, no other declarations. Give it a stub body (a `// TODO`/`pass` plus a "
+    "dummy return) that COMPILES and runs without crashing but need not be correct. The "
+    "signature MUST use precise, fully declared types, never a stringly-typed stand-in. This "
+    "is the learner's ONLY view of the shapes involved: user_code is the one fragment they "
+    "are shown, so a vague parameter type is a guess they have to make.\n"
     "- STRUCTURE COMMENT: if any parameter or the return value is a non-trivial structure "
     "(tree node, linked-list node, graph node, custom struct), user_code opens with a "
     "minimal comment directly above the signature restating that definition exactly as "
@@ -51,10 +49,8 @@ _CODE_SHAPE = (
     "reference_user_code. The type itself is DECLARED in pre_code, and pre_code/post_code "
     "are solely responsible for building it from stdin and serialising the answer back to "
     "text — never user_code.\n"
-    "- post_code: everything that runs AFTER the learner's function. In Python: call the "
-    "function with the exact variables pre_code already parsed, then print the result. In "
-    "C, C++, and Java: a COMPLETE main (or main method) that reads stdin, calls the "
-    "function, and prints the result.\n"
+    "- post_code: everything that runs AFTER the learner's function — it calls the function "
+    "and prints the result, plus the stdin parsing if your LANGUAGE SHAPE puts it there.\n"
     "- reference_user_code: the exact same signature as user_code (identical function/"
     "method name, identical parameter names, order, and types, identical return type) but "
     "with the correct working solution instead of the stub. Used only to validate the "
@@ -72,20 +68,14 @@ _CODE_SHAPE = (
     "— but when that's the plan, do not pass a redundant `n` OR document it in input_format "
     "either; input_format only ever lists actual function parameters (see below).\n"
     "3. RETURN THE NATURAL TYPE, FORMAT IN post_code. The function returns the answer as a "
-    "real typed value — a collection answer returns a collection (`list[int]`, "
-    "`vector<int>`, `int[]`), a yes/no answer returns a bool, a count returns an int. NEVER "
-    "return a pre-formatted string standing in for a collection (returning `\"1 2 3\"` "
-    "instead of `[1, 2, 3]` makes the learner's job string formatting), and never return a "
-    "collection to express a scalar. ALL text formatting lives in post_code: python "
-    "`print(\" \".join(map(str, result)))` for a list — never a bare `print(result)`, which "
-    "prints `[1, 2]` and contradicts your own example outputs; cpp a loop over the vector; "
-    "java String.join or a loop; c a printf loop. Booleans and no-answer print in one "
-    "language-independent form: python `print(\"true\" if result else \"false\")`, cpp "
-    "`cout << (result ? \"true\" : \"false\") << endl;`, c "
-    "`printf(\"%s\\n\", result ? \"true\" : \"false\");`, java `System.out.println(result)` "
-    "(already lowercase); no-answer-exists prints `-1` or an empty line, whichever your "
-    "examples state. post_code still prints EXACTLY one thing, and its printed form must "
-    "match your example outputs character-for-character.\n"
+    "real typed value in your language's natural collection/bool/int type — never a "
+    "pre-formatted string standing in for a collection (returning `\"1 2 3\"` instead of a "
+    "list makes the learner's job string formatting), and never a collection to express a "
+    "scalar. ALL text formatting lives in post_code, in the exact form your LANGUAGE SHAPE "
+    "gives. Booleans print as lowercase `true`/`false` in every language; no-answer-exists "
+    "prints `-1` or an empty line, whichever your examples state. post_code prints EXACTLY "
+    "one thing, and its printed form must match your example outputs character-for-"
+    "character.\n"
     "4. Never put parsing logic in user_code/reference_user_code and never put solution "
     "logic in pre_code or post_code — the split is strict.\n"
     "5. EXACTLY ONE CORRECT OUTPUT PER INPUT. The learner is graded by comparing their "
@@ -99,107 +89,228 @@ _CODE_SHAPE = (
     "answers. A topological order, a set of paths, a grouping and a subsequence all need "
     "this. Your reference must then implement that exact rule, not merely happen to "
     "produce one acceptable answer.\n\n"
-
-    "PER-LANGUAGE SHAPE:\n"
-    "- python: pre_code is top-level stdin reads (e.g. "
-    "`nums = list(map(int, input().split()))`). user_code/reference_user_code is one "
-    "fully annotated `def solve(...) -> <type>:`. post_code is `result = solve(...)` then "
-    "the print that matches the return type (`print(result)` for a scalar, "
-    "`print(\" \".join(map(str, result)))` for a list).\n"
-    "- c: pre_code is `#include` lines plus any struct/typedef, nothing left open. "
-    "user_code is one complete function, e.g. `int solve(int a, int b) { ... }`. post_code "
-    "is a complete `int main(void) { <scanf the inputs>; printf(\"%d\\n\", solve(...)); "
-    "return 0; }`.\n"
-    "- cpp: same as c but `#include <iostream>` / `using namespace std;` in pre_code, "
-    "`cin >>` in post_code's `int main()`, and `cout << solve(...) << endl;`.\n"
-    "- java: pre_code ends with an UNCLOSED `public class Main {` (imports like "
-    "`import java.util.Scanner;` above it). user_code is exactly one complete "
-    "`static <type> solve(...) { ... }` method (its own matched braces). post_code starts "
-    "with `public static void main(String[] args) { ... }` that uses Scanner to read "
-    "stdin, calls solve(...), prints the result, and ends with the final `}` that closes "
-    "the class opened in pre_code.\n\n"
 )
 
-_WORKED_EXAMPLES = (
-    "WORKED EXAMPLE (python) — problem: read two integers from one line, return their sum:\n"
-    "pre_code: `a, b = map(int, input().split())`\n"
-    "user_code: `def solve(a: int, b: int) -> int:\\n    # TODO: implement\\n    return 0`\n"
-    "post_code: `print(solve(a, b))`\n"
-    "reference_user_code: `def solve(a: int, b: int) -> int:\\n    return a + b`\n"
-    "Concatenated and run against stdin `2 3`, this prints `5`.\n\n"
+# The only language-specific text in this file, and the only thing that changes when a
+# language is added: one entry per Language value, each carrying that language's fragment
+# shape, its printing idiom, and one worked example aimed at what actually breaks in it.
+# Exactly ONE entry is sent per call, so a C generation no longer pays for Python's rules.
+_LANGUAGE_BLOCKS: dict[str, str] = {
+    "python": (
+        "LANGUAGE SHAPE (python):\n"
+        "- pre_code: imports and any class declarations, then top-level stdin reads into "
+        "named variables (`nums = list(map(int, input().split()))`) — Python is the one "
+        "language here that allows free top-level statements, so the parsing lives here.\n"
+        "- user_code: one `def solve(...) -> <type>:` with EVERY parameter and the return "
+        "annotated, preferring builtin generics (`list`, `dict`, `tuple`, `X | None`) over "
+        "`typing` imports — if a `typing` name is genuinely needed, pre_code imports it.\n"
+        "- post_code: `result = solve(...)` called with the exact variables pre_code parsed, "
+        "then the print matching the return type: `print(result)` for a scalar, "
+        "`print(\" \".join(map(str, result)))` for a list (a bare `print(result)` on a list "
+        "prints `[1, 2]` and contradicts your own examples), "
+        "`print(\"true\" if result else \"false\")` for a bool.\n\n"
 
-    "WORKED EXAMPLE (java) — same problem:\n"
-    "pre_code:\n"
-    "```\n"
-    "import java.util.Scanner;\n\n"
-    "public class Main {\n"
-    "```\n"
-    "user_code:\n"
-    "```\n"
-    "    static int solve(int a, int b) {\n"
-    "        // TODO: implement\n"
-    "        return 0;\n"
-    "    }\n"
-    "```\n"
-    "post_code:\n"
-    "```\n"
-    "    public static void main(String[] args) {\n"
-    "        Scanner scanner = new Scanner(System.in);\n"
-    "        int a = scanner.nextInt();\n"
-    "        int b = scanner.nextInt();\n"
-    "        System.out.println(solve(a, b));\n"
-    "    }\n"
-    "}\n"
-    "```\n"
-    "Concatenated, this is one valid Main.java that compiles and, against stdin `2 3`, "
-    "prints `5`.\n\n"
+        "WORKED EXAMPLE (python) — a binary tree given as a level-order line where `-1` "
+        "marks a missing child, return its inorder traversal. Note the typed signature, the "
+        "structure comment, the LIST return, and post_code doing the formatting:\n"
+        "pre_code:\n"
+        "```\n"
+        "from collections import deque\n\n"
+        "class TreeNode:\n"
+        "    def __init__(self, val=0, left=None, right=None):\n"
+        "        self.val = val\n"
+        "        self.left = left\n"
+        "        self.right = right\n\n"
+        "values = list(map(int, input().split()))\n"
+        "root = None\n"
+        "if values and values[0] != -1:\n"
+        "    root = TreeNode(values[0])\n"
+        "    queue = deque([root])\n"
+        "    i = 1\n"
+        "    while queue and i < len(values):\n"
+        "        node = queue.popleft()\n"
+        "        if i < len(values) and values[i] != -1:\n"
+        "            node.left = TreeNode(values[i])\n"
+        "            queue.append(node.left)\n"
+        "        i += 1\n"
+        "        if i < len(values) and values[i] != -1:\n"
+        "            node.right = TreeNode(values[i])\n"
+        "            queue.append(node.right)\n"
+        "        i += 1\n"
+        "```\n"
+        "user_code:\n"
+        "```\n"
+        "# Definition for a binary tree node.\n"
+        "# class TreeNode:\n"
+        "#     def __init__(self, val=0, left=None, right=None):\n"
+        "#         self.val = val\n"
+        "#         self.left = left\n"
+        "#         self.right = right\n"
+        "def solve(root: TreeNode | None) -> list[int]:\n"
+        "    # TODO: implement\n"
+        "    return []\n"
+        "```\n"
+        "post_code: `print(\" \".join(map(str, solve(root))))`\n"
+        "reference_user_code: same comment and same signature, with the traversal filled in "
+        "and still returning a `list[int]` — the join stays in post_code.\n"
+        "Against stdin `2 1 3`, this prints `1 2 3`.\n\n"
+    ),
+    "cpp": (
+        "LANGUAGE SHAPE (cpp):\n"
+        "- pre_code: the `#include` lines you need, `using namespace std;`, and any struct "
+        "declarations. NO stdin reads — C++ has no free top-level statements, so all parsing "
+        "happens inside main() in post_code.\n"
+        "- user_code: one complete function with precise types (`vector<int>`, `TreeNode*`), "
+        "taking collections by const reference.\n"
+        "- post_code: a COMPLETE `int main() { ... }` that reads stdin with `cin >>`, calls "
+        "solve, prints, and returns 0. Print a vector with a space-separated loop, a bool as "
+        "`cout << (result ? \"true\" : \"false\") << endl;`.\n\n"
 
-    "WORKED EXAMPLE (python) — a structure problem: given a binary tree as a level-order "
-    "line where `-1` marks a missing child, return its inorder traversal. Note the typed "
-    "signature, the structure comment, the LIST return, and post_code doing the "
-    "formatting:\n"
-    "pre_code:\n"
-    "```\n"
-    "from collections import deque\n\n"
-    "class TreeNode:\n"
-    "    def __init__(self, val=0, left=None, right=None):\n"
-    "        self.val = val\n"
-    "        self.left = left\n"
-    "        self.right = right\n\n"
-    "values = list(map(int, input().split()))\n"
-    "root = None\n"
-    "if values and values[0] != -1:\n"
-    "    root = TreeNode(values[0])\n"
-    "    queue = deque([root])\n"
-    "    i = 1\n"
-    "    while queue and i < len(values):\n"
-    "        node = queue.popleft()\n"
-    "        if i < len(values) and values[i] != -1:\n"
-    "            node.left = TreeNode(values[i])\n"
-    "            queue.append(node.left)\n"
-    "        i += 1\n"
-    "        if i < len(values) and values[i] != -1:\n"
-    "            node.right = TreeNode(values[i])\n"
-    "            queue.append(node.right)\n"
-    "        i += 1\n"
-    "```\n"
-    "user_code:\n"
-    "```\n"
-    "# Definition for a binary tree node.\n"
-    "# class TreeNode:\n"
-    "#     def __init__(self, val=0, left=None, right=None):\n"
-    "#         self.val = val\n"
-    "#         self.left = left\n"
-    "#         self.right = right\n"
-    "def solve(root: TreeNode | None) -> list[int]:\n"
-    "    # TODO: implement\n"
-    "    return []\n"
-    "```\n"
-    "post_code: `print(\" \".join(map(str, solve(root))))`\n"
-    "reference_user_code: same comment and same signature, with the traversal filled in "
-    "and still returning a `list[int]` — the join stays in post_code.\n"
-    "Against stdin `2 1 3`, this prints `1 2 3`.\n\n"
-)
+        "WORKED EXAMPLE (cpp) — read n, then n integers, return the running prefix sums. "
+        "Note that main() does ALL the parsing and ALL the formatting:\n"
+        "pre_code:\n"
+        "```\n"
+        "#include <iostream>\n"
+        "#include <vector>\n"
+        "using namespace std;\n"
+        "```\n"
+        "user_code:\n"
+        "```\n"
+        "vector<int> solve(const vector<int>& nums) {\n"
+        "    // TODO: implement\n"
+        "    return {};\n"
+        "}\n"
+        "```\n"
+        "post_code:\n"
+        "```\n"
+        "int main() {\n"
+        "    int n;\n"
+        "    cin >> n;\n"
+        "    vector<int> nums(n);\n"
+        "    for (int i = 0; i < n; i++) cin >> nums[i];\n"
+        "    vector<int> result = solve(nums);\n"
+        "    for (size_t i = 0; i < result.size(); i++) {\n"
+        "        if (i > 0) cout << ' ';\n"
+        "        cout << result[i];\n"
+        "    }\n"
+        "    cout << endl;\n"
+        "    return 0;\n"
+        "}\n"
+        "```\n"
+        "reference_user_code: the same signature with the sums filled in.\n"
+        "Against stdin `3\\n1 2 3` this prints `1 3 6`. `n` is read only to size the vector "
+        "and is NOT a parameter, so it is not a line in input_format either.\n\n"
+    ),
+    "java": (
+        "LANGUAGE SHAPE (java):\n"
+        "- pre_code: imports (`import java.util.Scanner;`), then an UNCLOSED "
+        "`public class Main {`. Any helper class is declared as a `static` nested class "
+        "inside it. NO stdin reads — parsing happens inside main() in post_code.\n"
+        "- user_code: exactly one complete `static <type> solve(...) { ... }` method with its "
+        "own matched braces and precise types (`int[]`, `List<Integer>`, `TreeNode`).\n"
+        "- post_code: `public static void main(String[] args) { ... }` that reads stdin with "
+        "Scanner, calls solve, prints, and then the FINAL `}` that closes the class pre_code "
+        "opened — forget it and nothing compiles. Print an int[] with a StringBuilder loop, a "
+        "boolean with `System.out.println(result)` (already lowercase).\n\n"
+
+        "WORKED EXAMPLE (java) — read n, then n integers, return the running prefix sums. "
+        "Note the unclosed class in pre_code and the closing brace at the end of post_code:\n"
+        "pre_code:\n"
+        "```\n"
+        "import java.util.Scanner;\n\n"
+        "public class Main {\n"
+        "```\n"
+        "user_code:\n"
+        "```\n"
+        "    static int[] solve(int[] nums) {\n"
+        "        // TODO: implement\n"
+        "        return new int[0];\n"
+        "    }\n"
+        "```\n"
+        "post_code:\n"
+        "```\n"
+        "    public static void main(String[] args) {\n"
+        "        Scanner scanner = new Scanner(System.in);\n"
+        "        int n = scanner.nextInt();\n"
+        "        int[] nums = new int[n];\n"
+        "        for (int i = 0; i < n; i++) nums[i] = scanner.nextInt();\n"
+        "        int[] result = solve(nums);\n"
+        "        StringBuilder sb = new StringBuilder();\n"
+        "        for (int i = 0; i < result.length; i++) {\n"
+        "            if (i > 0) sb.append(' ');\n"
+        "            sb.append(result[i]);\n"
+        "        }\n"
+        "        System.out.println(sb.toString());\n"
+        "    }\n"
+        "}\n"
+        "```\n"
+        "reference_user_code: the same signature with the sums filled in.\n"
+        "Concatenated this is one valid Main.java; against stdin `3\\n1 2 3` it prints "
+        "`1 3 6`. `n` is read only to size the array and is NOT a parameter, so it is not a "
+        "line in input_format either.\n\n"
+    ),
+    "c": (
+        "LANGUAGE SHAPE (c):\n"
+        "- pre_code: the `#include` lines you need plus any struct/typedef, nothing left "
+        "open. NO stdin reads — parsing happens inside main() in post_code.\n"
+        "- user_code: one complete function with precise types.\n"
+        "- COLLECTION ANSWERS: C cannot safely return an array, so when the answer is a "
+        "collection there is exactly ONE permitted idiom — a caller-allocated out-array plus "
+        "an int return giving how many values were written: "
+        "`int solve(const int* nums, int n, int* out)`. post_code allocates `out` large "
+        "enough, calls solve, and prints exactly the returned count of values. NEVER malloc "
+        "inside solve and return the pointer, never use a global, never report the length "
+        "through another pointer parameter. Because the function genuinely needs the length, "
+        "`n` IS a real parameter here and DOES belong in input_format.\n"
+        "- post_code: a COMPLETE `int main(void) { ... }` that scanfs the input, calls solve, "
+        "prints, and returns 0. Print a bool as "
+        "`printf(\"%s\\\\n\", result ? \"true\" : \"false\");`.\n\n"
+
+        "WORKED EXAMPLE (c) — read n, then n integers, return the running prefix sums. Note "
+        "the out-array idiom and the count return:\n"
+        "pre_code:\n"
+        "```\n"
+        "#include <stdio.h>\n"
+        "#include <stdlib.h>\n"
+        "```\n"
+        "user_code:\n"
+        "```\n"
+        "int solve(const int* nums, int n, int* out) {\n"
+        "    // TODO: implement\n"
+        "    return 0;\n"
+        "}\n"
+        "```\n"
+        "post_code:\n"
+        "```\n"
+        "int main(void) {\n"
+        "    int n;\n"
+        "    if (scanf(\"%d\", &n) != 1) return 0;\n"
+        "    int* nums = malloc(n * sizeof(int));\n"
+        "    for (int i = 0; i < n; i++) scanf(\"%d\", &nums[i]);\n"
+        "    int* out = malloc(n * sizeof(int));\n"
+        "    int count = solve(nums, n, out);\n"
+        "    for (int i = 0; i < count; i++) {\n"
+        "        if (i > 0) printf(\" \");\n"
+        "        printf(\"%d\", out[i]);\n"
+        "    }\n"
+        "    printf(\"\\\\n\");\n"
+        "    free(nums);\n"
+        "    free(out);\n"
+        "    return 0;\n"
+        "}\n"
+        "```\n"
+        "reference_user_code: the same signature, writing the sums into `out` and returning "
+        "`n`.\n"
+        "Against stdin `3\\n1 2 3` this prints `1 3 6`.\n\n"
+    ),
+}
+
+
+def _language_block(language: str) -> str:
+    """The shape and worked example for one language. A language with no entry yet (a new
+    Language value added before its block is written) falls back to all of them rather than
+    to nothing — verbose, but the model still sees a valid shape to copy."""
+    return _LANGUAGE_BLOCKS.get(language) or "".join(_LANGUAGE_BLOCKS.values())
 
 # Everything here describes a field ProblemPatch cannot return, so repairs skip it.
 _AUTHORING_EXTRAS = (
@@ -254,28 +365,38 @@ _INPUT_RULES = (
     "input would leave a read with nothing to consume, fix the input, not the harness."
 )
 
-PROBLEM_SYSTEM_PROMPT = (
-    _PROBLEM_INTRO
-    + _EXAMPLE_FORMAT
-    + _CODE_SHAPE
-    + _WORKED_EXAMPLES
-    + _AUTHORING_EXTRAS
-    + _HIDDEN_TESTS
-    + _INPUT_RULES
-)
+def problem_system_prompt(language: str) -> str:
+    """Only the target language's shape and worked example ride along. Sending all four —
+    as this did — spent most of the code budget on languages the call cannot produce, and
+    left no room for a worked example of the case that actually fails (a collection or a
+    structure in c/cpp/java)."""
+    return (
+        _PROBLEM_INTRO
+        + _EXAMPLE_FORMAT
+        + _CODE_SHAPE
+        + _language_block(language)
+        + _AUTHORING_EXTRAS
+        + _HIDDEN_TESTS
+        + _INPUT_RULES
+    )
 
-# What a repair actually needs: how the fragments fit together, and the rules covering the
-# fields ProblemPatch can return (code, examples, hidden_tests, statement). It is NOT
-# writing a new problem, so the authoring intro, the worked examples and the
-# hints/tags/stress-test rules are all left out.
-PATCH_SYSTEM_PROMPT = (
-    "You repair one DSA practice problem that failed automated validation. You are not "
-    "writing a new problem — the question stays exactly as it is.\n\n"
-    + _EXAMPLE_FORMAT
-    + _CODE_SHAPE
-    + _HIDDEN_TESTS
-    + _INPUT_RULES
-)
+
+def patch_system_prompt(language: str) -> str:
+    """What a repair actually needs: how the fragments fit together, the language's own
+    shape, and the rules covering the fields ProblemPatch can return (code, examples,
+    hidden_tests, statement). It is NOT writing a new problem, so the authoring intro and
+    the hints/tags/stress-test rules are left out. The worked example stays — for a compile
+    failure it is the single most useful thing in the prompt, being a concatenation known
+    to build."""
+    return (
+        "You repair one DSA practice problem that failed automated validation. You are not "
+        "writing a new problem — the question stays exactly as it is.\n\n"
+        + _EXAMPLE_FORMAT
+        + _CODE_SHAPE
+        + _language_block(language)
+        + _HIDDEN_TESTS
+        + _INPUT_RULES
+    )
 
 
 def problem_user_prompt(
@@ -311,55 +432,71 @@ _PATCH_RULES = (
 )
 
 
-def patch_problem_user_prompt(
-    kind: str,
-    detail: str,
-    language: str,
-    pre_code: str,
-    reference_user_code: str,
-    post_code: str,
-    examples: list,
-    hidden_tests: list[str],
-    statement_md: str | None = None,
-    user_code: str | None = None,
-) -> str:
-    """A repair prompt for a problem that already failed the sandbox. Deliberately carries
-    the minimum that can explain the failure: the harness, the tests, and what actually
-    happened. Everything the failure can't be about (title, hints, tags, constraints,
-    skills) is left out — this call exists to be cheap enough to always be worth making."""
-    diagnosis = {
-        "runtime": "Running your reference solution against these inputs FAILED — it "
-        "crashed, timed out, or printed nothing. Almost always the harness and the "
-        "reference disagree (a signature mismatch, a parse that consumes the wrong number "
-        "of tokens, a missing import) rather than the algorithm being wrong.",
-        "mismatch": "Your reference solution RAN, but its output disagrees with the "
-        "answer your own statement claims for that example. Decide which one is wrong and "
-        "fix that one: either the reference computes the wrong thing, or the example's "
-        "stated output is wrong.",
-        "no_tests": "The problem has no usable grading inputs — the examples or the "
-        "hidden tests came back blank. Every input is fed to the program as stdin exactly "
-        "as written, so a blank one makes the reference crash on its own test case. Write "
-        "real inputs in the same stdin format your harness parses.",
-    }[kind]
+# One entry per FailureKind (app.problems.application.repair), and the only place a failure
+# kind is described. test_problem_prompts asserts the two stay in step.
+_DIAGNOSIS: dict[str, str] = {
+    "compile": "Your fragments do NOT compile, so nothing ran at all. The compiler's own "
+    "output is below, and its line numbers refer to the numbered program that follows it — "
+    "the single file your four fragments concatenate into. Find the named line, see which "
+    "fragment it falls in, and fix that fragment. For java that is usually the class brace "
+    "(pre_code opens `public class Main {` and post_code must close it); for c/cpp a missing "
+    "include or a type that does not match the call in main().",
+    "runtime": "Running your reference solution against these inputs FAILED — it "
+    "crashed, timed out, or printed nothing. Almost always the harness and the "
+    "reference disagree (a signature mismatch, a parse that consumes the wrong number "
+    "of tokens, a missing import) rather than the algorithm being wrong.",
+    "mismatch": "Your reference solution RAN, but its output disagrees with the "
+    "answer your own statement claims for that example. Decide which one is wrong and "
+    "fix that one: either the reference computes the wrong thing, or the example's "
+    "stated output is wrong.",
+    "no_tests": "The problem has no usable grading inputs — the examples or the "
+    "hidden tests came back blank. Every input is fed to the program as stdin exactly "
+    "as written, so a blank one makes the reference crash on its own test case. Write "
+    "real inputs in the same stdin format your harness parses.",
+}
 
+
+def patch_problem_user_prompt(
+    kind: str, detail: str, language: str, problem: GeneratedProblem
+) -> str:
+    """A repair prompt for a problem that already failed the sandbox. Carries the minimum
+    that can explain the failure: the harness, the tests, and what actually happened.
+
+    Which sections a kind needs is decided HERE and nowhere else, so the caller passes the
+    whole problem and never reasons about it."""
     sections = [
         f"Language: {language}",
-        f"THIS PROBLEM FAILED VALIDATION.\n{diagnosis}",
+        f"THIS PROBLEM FAILED VALIDATION.\n{_DIAGNOSIS[kind]}",
         f"WHAT HAPPENED:\n{detail}",
     ]
-    if statement_md is not None:
-        sections.append(f"statement_md:\n{statement_md}")
-    sections.append(f"pre_code:\n{pre_code}")
-    if user_code is not None:
-        sections.append(f"user_code:\n{user_code}")
-    sections.append(f"reference_user_code:\n{reference_user_code}")
-    sections.append(f"post_code:\n{post_code}")
+
+    # Only a mismatch disagrees with the statement, so only it needs the statement.
+    if kind == "mismatch":
+        sections.append(f"statement_md:\n{problem.statement_md}")
+
+    if kind == "compile":
+        # One numbered file, so the compiler's line numbers resolve.
+        sections.append(
+            "THE PROGRAM THE COMPILER SAW (pre_code + reference_user_code + post_code):\n"
+            + annotated_program(
+                problem.pre_code, problem.reference_user_code, problem.post_code
+            )
+        )
+    else:
+        sections.append(f"pre_code:\n{problem.pre_code}")
+        # The stub matters only when the fix is about the stdin format it is written against.
+        if kind == "no_tests":
+            sections.append(f"user_code:\n{problem.user_code}")
+        sections.append(f"reference_user_code:\n{problem.reference_user_code}")
+        sections.append(f"post_code:\n{problem.post_code}")
+
     sections.append(
         "examples:\n"
-        + "\n".join(f"- input={ex.input!r} output={ex.output!r}" for ex in examples)
+        + "\n".join(f"- input={ex.input!r} output={ex.output!r}" for ex in problem.examples)
     )
     sections.append(
-        "hidden_tests (inputs only):\n" + "\n".join(f"- {value!r}" for value in hidden_tests)
+        "hidden_tests (inputs only):\n"
+        + "\n".join(f"- {value!r}" for value in problem.hidden_tests)
     )
     sections.append(_PATCH_RULES)
     return "\n\n".join(sections)

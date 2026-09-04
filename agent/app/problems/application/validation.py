@@ -13,10 +13,10 @@ from app.llm.schemas.problem import GeneratedProblem
 from app.problems.application.repair import (
     ValidationFailure,
     apply_patch,
+    execution_failure,
     mismatch_failure,
     no_tests_failure,
     normalise_output,
-    runtime_failure,
 )
 from app.problems.domain.models import (
     Problem,
@@ -248,7 +248,7 @@ class ProblemValidationService:
         all_empty = all(not (r.actual_output or "").strip() for r in results)
         if len(results) != len(graded_inputs) or crashed or all_empty:
             return await self._mark_invalid(
-                problem, runtime_failure(results, len(graded_inputs), all_empty=all_empty)
+                problem, execution_failure(results, len(graded_inputs), all_empty=all_empty)
             )
 
         # The correctness check: the reference must match the statement's examples.
