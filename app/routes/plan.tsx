@@ -147,6 +147,10 @@ export default function PlanScreen() {
               const isDone = node.status === "DONE";
               const isLocked = node.status === "LOCKED";
               const isActionable = node.status === "AVAILABLE" || node.status === "IN_PROGRESS";
+              // The skill is the step's identity and must not move once the lesson lands;
+              // the generated title goes underneath instead of replacing it.
+              const title = node.skill_name || node.problem_title || node.id;
+              const subtitle = node.problem_title === title ? null : node.problem_title;
               return (
                 <div key={node.id} className="relative">
                   <div className={cn("relative flex items-center gap-4 py-3", isDone && "opacity-40")}>
@@ -186,9 +190,16 @@ export default function PlanScreen() {
                     </span>
                   )}
                   <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
-                    <span className="text-sm font-bold uppercase tracking-wide truncate">
-                      {node.sequence_index + 1}. {node.problem_title || node.skill_name || node.id}
-                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold uppercase tracking-wide truncate">
+                        {node.sequence_index + 1}. {title}
+                      </p>
+                      {subtitle && (
+                        <p className="text-zinc-500 text-[10px] uppercase tracking-widest truncate">
+                          {subtitle}
+                        </p>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2 flex-none">
                       {node.difficulty && (
                         <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 border border-white/10 px-2 py-1">
