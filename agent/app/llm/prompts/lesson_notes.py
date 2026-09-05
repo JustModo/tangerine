@@ -1,7 +1,8 @@
-# Bump LESSON_NOTES_VERSION whenever LESSON_NOTES_SYSTEM_PROMPT changes — SqliteLLMCache
-# keys on caller-supplied semantics, not prompt content, so previously cached notes are
-# not invalidated by editing the prompt alone.
-LESSON_NOTES_VERSION = "v12"
+# Bump LESSON_NOTES_VERSION whenever LESSON_NOTES_SYSTEM_PROMPT or GeneratedLessonNotes
+# changes — SqliteLLMCache keys on caller-supplied semantics, not prompt content, so
+# previously cached notes are not invalidated by editing either alone. A tightened schema
+# is the more urgent of the two: an entry written before it no longer parses on read.
+LESSON_NOTES_VERSION = "v13"
 
 LESSON_NOTES_SYSTEM_PROMPT = (
     "You are a DSA coach teaching the concepts a learner needs to solve a problem they are "

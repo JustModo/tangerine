@@ -6,7 +6,7 @@ import pytest
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
 from app.shared.database import MIGRATIONS_DIR
-from tests.fakes import FakeLLMProvider
+from tests.fakes import FakeLLMProvider, fake_lesson_notes
 
 
 def _apply_migrations(db_path: str) -> None:
@@ -42,12 +42,8 @@ async def test_llm_cache_avoids_a_second_generation_call(db_path: str) -> None:
 
 async def test_lesson_notes_cache_avoids_a_second_llm_call(db_path: str) -> None:
     from app.llm.graphs.lesson_notes import generate_lesson_notes
-    from app.llm.schemas.lesson_notes import GeneratedLessonNotes, LessonNoteStep
-
     cache = SqliteLLMCache(db_path)
-    notes = GeneratedLessonNotes(
-        steps=[LessonNoteStep(title="The core idea", body_md="Keep a running total.")]
-    )
+    notes = fake_lesson_notes("The core idea")
     # only ONE response queued — a second real call would raise AssertionError. This is the
     # token-efficiency guarantee: a skill's notes are written once, ever.
     provider = FakeLLMProvider(structured_responses=[notes])

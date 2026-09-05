@@ -36,6 +36,7 @@ def get_service() -> SessionService:
         mastery_repository=SqliteUserSkillStateRepository(),
         problem_session_repository=SqliteProblemSessionRepository(),
         problem_repository=SqliteProblemRepository(),
+        executor=CitronAdapter(),
     )
     library_service = ProblemLibraryService(
         SqliteProblemRepository(),

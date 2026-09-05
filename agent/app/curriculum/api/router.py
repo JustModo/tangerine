@@ -9,6 +9,7 @@ from app.curriculum.infrastructure.sqlite_problem_session_repository import (
     SqliteProblemSessionRepository,
 )
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
+from app.execution.infrastructure.citron_adapter import CitronAdapter
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.llm.schemas.lesson_notes import GeneratedLessonNotes
@@ -30,6 +31,7 @@ def get_service() -> CurriculumService:
         mastery_repository=SqliteUserSkillStateRepository(),
         problem_session_repository=SqliteProblemSessionRepository(),
         problem_repository=SqliteProblemRepository(),
+        executor=CitronAdapter(),
     )
 
 

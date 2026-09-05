@@ -5,7 +5,7 @@ wrapped in a semantic cache. Only the prompt differs, so the attempt bookkeeping
 cache dance live here rather than four times over.
 """
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -29,9 +29,10 @@ def rejection_note(error: str | None) -> str:
     if not error:
         return ""
     return (
-        "\n\nYour previous response was REJECTED and could not be parsed:\n"
+        "\n\nYour previous response was REJECTED:\n"
         f"{error}\n"
-        "Return valid JSON matching the schema exactly. Do not repeat that mistake."
+        "Fix exactly that and return valid JSON matching the schema. Do not repeat the "
+        "mistake."
     )
 
 
@@ -76,7 +77,7 @@ async def cached_generate[T: BaseModel](
     cache: SqliteLLMCache | None,
     key_parts: list[str] | None,
     response_model: type[T],
-    run: Callable[[], object],
+    run: Callable[[], Awaitable[T]],
     refresh: bool = False,
 ) -> T:
     """Wraps a graph run in the semantic cache. `key_parts` of None means this result is

@@ -10,7 +10,6 @@ from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepo
 from app.llm.domain.requests import ChatChunk, ToolCallResult
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
-from app.llm.schemas.lesson_notes import GeneratedLessonNotes, LessonNoteStep
 from app.llm.schemas.plan_edit import RevisedCurriculum, RevisedStep
 from app.mastery.domain.models import UserSkillState
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
@@ -24,7 +23,7 @@ from app.shared.database import MIGRATIONS_DIR
 from app.shared.errors import NotFoundError
 from app.shared.types import Language
 from app.users.infrastructure.sqlite_repository import SqliteUserRepository
-from tests.fakes import FakeLLMProvider
+from tests.fakes import FakeLLMProvider, fake_lesson_notes
 
 
 def _apply_migrations(db_path: str) -> None:
@@ -774,9 +773,7 @@ async def test_lesson_notes_use_the_plans_language_and_level_and_cache(db_path: 
     generated = GeneratedCurriculum(
         nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)],
     )
-    notes = GeneratedLessonNotes(
-        steps=[LessonNoteStep(title="The core idea", body_md="Keep a running total.")]
-    )
+    notes = fake_lesson_notes("The core idea")
     # One curriculum response + exactly one notes response: a second notes generation would
     # raise AssertionError, so the repeat call below proves the cache served it.
     llm = FakeLLMProvider(structured_responses=[generated, notes])
@@ -802,12 +799,8 @@ async def test_lesson_notes_refresh_bypasses_the_cache_read_but_still_writes(db_
     generated = GeneratedCurriculum(
         nodes=[GeneratedCurriculumNode(skill="prefix-sum", difficulty=1)],
     )
-    original = GeneratedLessonNotes(
-        steps=[LessonNoteStep(title="First lesson", body_md="Keep a running total.")]
-    )
-    rewritten = GeneratedLessonNotes(
-        steps=[LessonNoteStep(title="Second lesson", body_md="Precompute the prefixes.")]
-    )
+    original = fake_lesson_notes("First lesson")
+    rewritten = fake_lesson_notes("Second lesson")
     # Exactly two lesson responses queued: a third generation would raise AssertionError,
     # so the final call below proves the refresh result was written back to the cache.
     llm = FakeLLMProvider(structured_responses=[generated, original, rewritten])

@@ -1,9 +1,12 @@
 import uuid
 from datetime import UTC, datetime
+from functools import partial
 
+from app.curriculum.application.lesson_verification import verify_lesson_code
 from app.curriculum.domain.models import LessonNode, LessonNodeStatus, LessonPlan
 from app.curriculum.domain.problem_session_repository import ProblemSessionRepository
 from app.curriculum.domain.repository import LessonPlanRepository
+from app.execution.domain.executor import CodeExecutor
 from app.llm.domain.provider import LLMProvider
 from app.llm.graphs.curriculum import generate_curriculum
 from app.llm.graphs.lesson_notes import generate_lesson_notes
@@ -42,6 +45,7 @@ class CurriculumService:
         mastery_repository: UserSkillStateRepository | None = None,
         problem_session_repository: ProblemSessionRepository | None = None,
         problem_repository=None,
+        executor: CodeExecutor | None = None,
     ) -> None:
         self._repository = repository
         self._llm_provider = llm_provider
@@ -50,6 +54,9 @@ class CurriculumService:
         self._mastery_repository = mastery_repository
         self._problem_session_repository = problem_session_repository
         self._problem_repository = problem_repository
+        # Without one, a lesson's code blocks are served on trust — which is what every
+        # caller did before there was anywhere to run them.
+        self._executor = executor
 
     async def create_draft(
         self,
@@ -496,6 +503,7 @@ class CurriculumService:
             tags=problem.tags if problem else None,
             statement_md=version.statement_md if version else None,
             reference_solution=version.reference_solution if version else None,
+            verifier=partial(verify_lesson_code, self._executor) if self._executor else None,
         )
 
     async def list_for_session(self, session_id: str) -> list[LessonPlan]:

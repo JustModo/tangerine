@@ -2,6 +2,21 @@ from pydantic import BaseModel
 
 from app.execution.domain.models import ExecutionRequest, TestResult
 from app.llm.domain.requests import ChatStreamRequest, StructuredGenerationRequest
+from app.llm.schemas.lesson_notes import MIN_STEPS, GeneratedLessonNotes, LessonNoteStep
+
+_LESSON_PROSE = (
+    "You want the running total as it grows, so print it inside the loop where every "
+    "change is visible instead of waiting for the one answer at the end."
+)
+
+
+def fake_lesson_notes(first_title: str) -> GeneratedLessonNotes:
+    """Notes that satisfy the schema's own step count and prose budget, so a test asserting
+    on the lesson it queued is not really asserting on the fixture being long enough."""
+    titles = [first_title] + [f"Then this {index}" for index in range(MIN_STEPS - 1)]
+    return GeneratedLessonNotes(
+        steps=[LessonNoteStep(title=title, body_md=_LESSON_PROSE) for title in titles]
+    )
 
 
 class FakeLLMProvider:
