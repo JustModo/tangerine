@@ -56,8 +56,8 @@ class ProblemSessionService:
         node_id serves THAT step. Without it the first unfinished step wins, which is right
         for a bare "continue" but wrong when the learner pressed play on a specific row —
         they got whatever was earliest instead of what they clicked."""
-        stage = on_stage or (lambda _: None)
-        stage("selecting")
+        if on_stage:
+            on_stage("selecting")
 
         plan = await self._plan_repository.get(plan_id)
         if plan is None:
@@ -71,8 +71,8 @@ class ProblemSessionService:
                 raise NotFoundError("That step is still locked — finish the ones before it.")
         else:
             node = next((n for n in plan.nodes if n.status != LessonNodeStatus.DONE), None)
-        if node is None:
-            raise NotFoundError(f"Lesson plan {plan_id} has no remaining nodes")
+            if node is None:
+                raise NotFoundError(f"Lesson plan {plan_id} has no remaining nodes")
 
         existing = await self._session_repository.get_by_node(node.id)
         if existing is not None:

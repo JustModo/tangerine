@@ -1,11 +1,20 @@
 from app.mastery.domain.models import UserSkillState
-from app.shared.config import get_settings
 from app.shared.database import connect
+
+
+def _state(row) -> UserSkillState:
+    return UserSkillState(
+        user_id=row["user_id"],
+        skill_id=row["skill_id"],
+        mastery_score=row["mastery_score"],
+        streak=row["streak"],
+        last_seen_at=row["last_seen_at"],
+    )
 
 
 class SqliteUserSkillStateRepository:
     def __init__(self, database_path: str | None = None) -> None:
-        self._database_path = database_path or get_settings().database_path
+        self._database_path = database_path
 
     async def get(self, user_id: str, skill_id: str) -> UserSkillState | None:
         async with connect(self._database_path) as db:
@@ -16,13 +25,7 @@ class SqliteUserSkillStateRepository:
             row = await cursor.fetchone()
             if row is None:
                 return None
-            return UserSkillState(
-                user_id=row["user_id"],
-                skill_id=row["skill_id"],
-                mastery_score=row["mastery_score"],
-                streak=row["streak"],
-                last_seen_at=row["last_seen_at"],
-            )
+            return _state(row)
 
     async def save(self, state: UserSkillState) -> None:
         async with connect(self._database_path) as db:
@@ -46,13 +49,4 @@ class SqliteUserSkillStateRepository:
         async with connect(self._database_path) as db:
             cursor = await db.execute("SELECT * FROM user_skill_state WHERE user_id = ?", (user_id,))
             rows = await cursor.fetchall()
-            return [
-                UserSkillState(
-                    user_id=row["user_id"],
-                    skill_id=row["skill_id"],
-                    mastery_score=row["mastery_score"],
-                    streak=row["streak"],
-                    last_seen_at=row["last_seen_at"],
-                )
-                for row in rows
-            ]
+            return [_state(row) for row in rows]

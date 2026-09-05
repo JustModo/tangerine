@@ -41,7 +41,6 @@ async def _seed(db_path: str) -> str:
     await problems.save(
         Problem(
             id="p1",
-            conceptual_id="sum-list",
             title="Sum List",
             language=Language.PYTHON,
             difficulty="easy",

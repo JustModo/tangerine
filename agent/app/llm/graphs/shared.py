@@ -8,6 +8,7 @@ cache dance live here rather than four times over.
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
+from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
 
 from app.llm.domain.provider import LLMProvider
@@ -17,7 +18,7 @@ from app.llm.infrastructure.gemini.mapping import SchemaValidationError
 
 T = TypeVar("T", bound=BaseModel)
 
-MAX_ATTEMPTS = 3
+MAX_SCHEMA_ATTEMPTS = 3
 
 
 def rejection_note(error: str | None) -> str:
@@ -47,7 +48,7 @@ async def attempt[T: BaseModel](
     than raised so the graph can route to a retry that knows what went wrong."""
     request = StructuredGenerationRequest(
         system_prompt=system_prompt,
-        user_prompt=user_prompt + rejection_note(state.get("error")),
+        user_prompt=user_prompt + rejection_note(state["error"]),
     )
     try:
         result = await provider.generate_structured(request, response_model)
@@ -56,8 +57,18 @@ async def attempt[T: BaseModel](
         return {**state, "error": str(exc), "attempts": state["attempts"] + 1}
 
 
+def compile_retry_graph(state_type, generate):
+    """The wiring every single-node graph repeated: generate, retry on a schema rejection,
+    stop when route says done."""
+    graph = StateGraph(state_type)
+    graph.add_node("generate", generate)
+    graph.set_entry_point("generate")
+    graph.add_conditional_edges("generate", route, {"retry": "generate", "done": END})
+    return graph.compile()
+
+
 def route(state: dict) -> str:
-    if state["result"] is not None or state["attempts"] >= MAX_ATTEMPTS:
+    if state["result"] is not None or state["attempts"] >= MAX_SCHEMA_ATTEMPTS:
         return "done"
     return "retry"
 
@@ -68,7 +79,7 @@ async def run_graph(graph, state: dict, what: str):
     final = await graph.ainvoke({**state, "result": None, "error": None, "attempts": 0})
     if final["result"] is None:
         raise SchemaValidationError(
-            f"{what} failed after {MAX_ATTEMPTS} attempts: {final['error']}"
+            f"{what} failed after {MAX_SCHEMA_ATTEMPTS} attempts: {final['error']}"
         )
     return final["result"]
 

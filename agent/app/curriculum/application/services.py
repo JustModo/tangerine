@@ -149,7 +149,7 @@ class CurriculumService:
         if nodes:
             await self._repository.save_nodes(self._ensure_startable(nodes))
 
-        return await self._repository.get(plan.id) or plan
+        return await self._reloaded(plan.id, plan)
 
     async def create_practice_plan(
         self, session_id: str, problem_ids: list[str], topic: str = "Revision"
@@ -203,7 +203,7 @@ class CurriculumService:
         ]
         await self._repository.save_nodes(self._ensure_startable(nodes))
 
-        return await self._repository.get(plan.id) or plan
+        return await self._reloaded(plan.id, plan)
 
     async def _known_skills(self, user_id: str | None) -> set[str]:
         """Normalised names of skills this learner has already demonstrated. Compared by
@@ -314,7 +314,7 @@ class CurriculumService:
                 problem.model_copy(update={"status": ProblemStatus.INVALID})
             )
         await self._invalidate_unsubmitted([target.id])
-        return await self._repository.get(plan_id) or plan
+        return await self._reloaded(plan_id, plan)
 
     def _resolve_step(self, plan: LessonPlan, step: str) -> LessonNode:
         """A step named either by its 1-indexed position (as shown in the plan UI) or its
@@ -338,12 +338,19 @@ class CurriculumService:
         change (add/remove/reorder a step, or an LLM-driven rework) must leave the plan in a
         state the learner can actually continue from, never all-locked."""
         ordered = [node.model_copy(update={"sequence_index": index}) for index, node in enumerate(nodes)]
-        for index, node in enumerate(ordered):
-            if node.status != LessonNodeStatus.DONE:
-                if node.status == LessonNodeStatus.LOCKED:
-                    ordered[index] = node.model_copy(update={"status": LessonNodeStatus.AVAILABLE})
-                break
+        first = next(
+            (i for i, node in enumerate(ordered) if node.status != LessonNodeStatus.DONE), None
+        )
+        if first is not None and ordered[first].status == LessonNodeStatus.LOCKED:
+            ordered[first] = ordered[first].model_copy(
+                update={"status": LessonNodeStatus.AVAILABLE}
+            )
         return ordered
+
+    async def _reloaded(self, plan_id: str, fallback: LessonPlan) -> LessonPlan:
+        """Re-reads a plan a mutator just wrote, so the caller gets the joined skill_name
+        and problem_title the in-memory copy has never carried."""
+        return await self._repository.get(plan_id) or fallback
 
     async def _require_plan(self, plan_id: str) -> LessonPlan:
         plan = await self._repository.get(plan_id)
@@ -365,7 +372,7 @@ class CurriculumService:
         ]
         await self._repository.replace_nodes(plan.id, nodes)
         await self._invalidate_unsubmitted([target.id])
-        return await self._repository.get(plan_id) or plan
+        return await self._reloaded(plan_id, plan)
 
     async def add_step(
         self, plan_id: str, skill: str, difficulty: str | None = None, position: int | None = None
@@ -391,7 +398,7 @@ class CurriculumService:
         insert_at = len(nodes) if position is None else max(0, min(position - 1, len(nodes)))
         nodes.insert(insert_at, new_node)
         await self._repository.replace_nodes(plan.id, self._ensure_startable(nodes))
-        return await self._repository.get(plan_id) or plan
+        return await self._reloaded(plan_id, plan)
 
     async def add_problem_step(self, plan_id: str, problem_id: str) -> LessonPlan:
         """Appends a step that serves one problem the learner ALREADY has — how an existing
@@ -425,7 +432,7 @@ class CurriculumService:
             created_at=datetime.now(UTC),
         )
         await self._repository.replace_nodes(plan.id, self._ensure_startable([*plan.nodes, new_node]))
-        return await self._repository.get(plan_id) or plan
+        return await self._reloaded(plan_id, plan)
 
     async def remove_step(self, plan_id: str, step: str) -> LessonPlan:
         """Drops one step. Refuses to remove a completed one — matching the rest of this
@@ -437,7 +444,7 @@ class CurriculumService:
             raise NotFoundError("Can't remove a completed step")
         nodes = [node for node in plan.nodes if node.id != target.id]
         await self._repository.replace_nodes(plan.id, self._ensure_startable(nodes))
-        return await self._repository.get(plan_id) or plan
+        return await self._reloaded(plan_id, plan)
 
     async def reorder_step(self, plan_id: str, step: str, to_position: int) -> LessonPlan:
         """Moves one step to a new position. The step's own problem is still exactly as
@@ -449,7 +456,7 @@ class CurriculumService:
         insert_at = max(0, min(to_position - 1, len(nodes)))
         nodes.insert(insert_at, target)
         await self._repository.replace_nodes(plan.id, self._ensure_startable(nodes))
-        return await self._repository.get(plan_id) or plan
+        return await self._reloaded(plan_id, plan)
 
     async def edit_plan(self, plan_id: str, instruction: str) -> LessonPlan:
         """Applies a free-text revision ("add a step on hash maps", "make step 3 harder",
@@ -527,7 +534,7 @@ class CurriculumService:
 
         await self._repository.replace_nodes(plan.id, self._ensure_startable(nodes))
         await self._invalidate_unsubmitted(redifficultied_ids)
-        return await self._repository.get(plan.id) or plan
+        return await self._reloaded(plan.id, plan)
 
     async def get_node_notes(self, node_id: str, refresh: bool = False) -> GeneratedLessonNotes:
         """Lesson for the problem the node is serving, generated on request and cached

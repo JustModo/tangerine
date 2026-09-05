@@ -27,8 +27,8 @@ def db_path(tmp_path: Path) -> str:
     seed_lesson_node(path, "node-1")
     conn = sqlite3.connect(path)
     conn.execute(
-        "INSERT INTO problems (id, conceptual_id, title, language, difficulty) "
-        "VALUES ('p1', 'c1', 'T', 'python', 'easy')"
+        "INSERT INTO problems (id, title, language, difficulty) "
+        "VALUES ('p1', 'T', 'python', 'easy')"
     )
     conn.commit()
     conn.close()

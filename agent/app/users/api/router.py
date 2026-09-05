@@ -1,19 +1,18 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.curriculum.domain.problem_session import ProblemSessionStatus
 from app.curriculum.infrastructure.sqlite_problem_session_repository import (
     SqliteProblemSessionRepository,
 )
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
+from app.problems.application.library import compute_stats
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.revision.application.services import RevisionService
 from app.revision.domain.models import RevisionCandidate
-from app.users.domain.models import User
-from app.users.infrastructure.sqlite_repository import SqliteUserRepository
+from app.users.domain.models import LOCAL_USER_ID, User
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -49,7 +48,7 @@ class Progress(BaseModel):
 
 @router.get("/me")
 async def get_current_user() -> User:
-    return await SqliteUserRepository().ensure_default_user()
+    return User(id=LOCAL_USER_ID)
 
 
 @router.get("/{user_id}/progress")
@@ -73,8 +72,7 @@ async def get_progress(user_id: str) -> Progress:
     skills.sort(key=lambda s: s.mastery_score, reverse=True)
 
     sessions = await SqliteProblemSessionRepository().list_for_user(user_id)
-    completed = [s for s in sessions if s.status == ProblemSessionStatus.COMPLETED]
-    week_ago = datetime.now(UTC) - timedelta(days=7)
+    stats = compute_stats(sessions, states)
 
     flagged_sessions = [s for s in sessions if s.flagged]
     flagged_problems = await problem_repository.get_many(
@@ -98,9 +96,9 @@ async def get_progress(user_id: str) -> Progress:
 
     return Progress(
         skills=skills,
-        best_streak=max((state.streak for state in states), default=0),
-        solved_total=len(completed),
-        solved_this_week=sum(1 for s in completed if s.updated_at >= week_ago),
+        best_streak=stats.best_streak,
+        solved_total=stats.solved_total,
+        solved_this_week=stats.solved_this_week,
         revision_queue=await RevisionService(mastery_repository, skill_repository)
         .get_revision_queue(user_id),
         flagged=flagged,

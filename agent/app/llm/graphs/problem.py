@@ -1,11 +1,9 @@
 import logging
 from typing import TypedDict
 
-from langgraph.graph import END, StateGraph
-
 from app.llm.domain.provider import LLMProvider
 from app.llm.domain.requests import StructuredGenerationRequest
-from app.llm.graphs.shared import attempt, cached_generate, route, run_graph
+from app.llm.graphs.shared import attempt, cached_generate, compile_retry_graph, run_graph
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.mapping import SchemaValidationError
 from app.llm.prompts.problem import (
@@ -44,11 +42,7 @@ def build_problem_graph(provider: LLMProvider):
                 )
             ), GeneratedProblem)
 
-    graph = StateGraph(ProblemGraphState)
-    graph.add_node("generate", generate)
-    graph.set_entry_point("generate")
-    graph.add_conditional_edges("generate", route, {"retry": "generate", "done": END})
-    return graph.compile()
+    return compile_retry_graph(ProblemGraphState, generate)
 
 
 async def generate_problem(

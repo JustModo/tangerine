@@ -10,6 +10,7 @@ from typing import Literal
 
 from app.execution.domain.models import ExecutionStatus, TestResult
 from app.llm.schemas.problem import GeneratedExample, GeneratedProblem, ProblemPatch
+from app.shared.hashing import comparable_output
 
 # How much of any one value reaches the repair prompt. A failing stdin or stdout can be a
 # stress-sized blob, and the model needs its shape rather than all of it.
@@ -31,12 +32,6 @@ class ValidationFailure:
 
     kind: FailureKind
     detail: str
-
-
-def normalise_output(value: str | None) -> str:
-    """Sandbox stdout vs. a statement's example output: trailing whitespace and line
-    endings differ constantly and mean nothing."""
-    return "\n".join(line.rstrip() for line in (value or "").strip().splitlines())
 
 
 def _clip(value: str | None, limit: int = _CLIP) -> str:
@@ -106,7 +101,7 @@ def mismatch_failure(
     disagreeing = [
         (example, result)
         for example, result in zip(examples, results, strict=False)
-        if normalise_output(result.actual_output) != normalise_output(example.output)
+        if comparable_output(result.actual_output) != comparable_output(example.output)
     ]
     return ValidationFailure(
         "mismatch",

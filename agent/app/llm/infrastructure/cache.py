@@ -1,6 +1,5 @@
 import hashlib
 
-from app.shared.config import get_settings
 from app.shared.database import connect
 
 MAX_ENTRIES = 5000
@@ -17,7 +16,7 @@ class SqliteLLMCache:
     which is not deterministic and must not be replayed to a different learner."""
 
     def __init__(self, database_path: str | None = None) -> None:
-        self._database_path = database_path or get_settings().database_path
+        self._database_path = database_path
 
     async def get(self, key: str) -> str | None:
         async with connect(self._database_path) as db:

@@ -72,6 +72,19 @@ def _matches_scope(session: ProblemSession | None, scope: Scope) -> bool:
     return True
 
 
+def compute_stats(sessions: list[ProblemSession], states) -> LibraryStats:
+    """Shared with the progress endpoint, which has already fetched both lists for its own
+    reasons — passing them in keeps one definition of "solved this week" without paying for
+    the same two queries twice."""
+    completed = [s for s in sessions if s.status == ProblemSessionStatus.COMPLETED]
+    week_ago = datetime.now(UTC) - timedelta(days=7)
+    return LibraryStats(
+        solved_total=len(completed),
+        solved_this_week=sum(1 for s in completed if s.updated_at >= week_ago),
+        best_streak=max((state.streak for state in states), default=0),
+    )
+
+
 class ProblemLibraryService:
     def __init__(
         self,
@@ -161,20 +174,8 @@ class ProblemLibraryService:
     async def stats(self, user_id: str) -> LibraryStats:
         """The numbers the progress screen shows, for a coach that until now could only
         talk about skills and never about how much work the learner had actually done."""
-        sessions = await self._sessions.list_for_user(user_id)
-        completed = [s for s in sessions if s.status == ProblemSessionStatus.COMPLETED]
-        week_ago = datetime.now(UTC) - timedelta(days=7)
-
-        best_streak = 0
-        if self._mastery is not None:
-            states = await self._mastery.list_for_user(user_id)
-            best_streak = max((state.streak for state in states), default=0)
-
-        return LibraryStats(
-            solved_total=len(completed),
-            solved_this_week=sum(1 for s in completed if s.updated_at >= week_ago),
-            best_streak=best_streak,
-        )
+        states = [] if self._mastery is None else await self._mastery.list_for_user(user_id)
+        return compute_stats(await self._sessions.list_for_user(user_id), states)
 
     async def _resolve_skill(self, name: str) -> str | None:
         """A skill the user named in prose to its id. Fuzzy, because they say "graphs" for

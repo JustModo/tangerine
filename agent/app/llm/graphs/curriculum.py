@@ -1,9 +1,7 @@
 from typing import TypedDict
 
-from langgraph.graph import END, StateGraph
-
 from app.llm.domain.provider import LLMProvider
-from app.llm.graphs.shared import attempt, cached_generate, route, run_graph
+from app.llm.graphs.shared import attempt, cached_generate, compile_retry_graph, run_graph
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.prompts.curriculum import CURRICULUM_SYSTEM_PROMPT, curriculum_user_prompt
 from app.llm.schemas.curriculum import GeneratedCurriculum
@@ -32,11 +30,7 @@ def build_curriculum_graph(provider: LLMProvider):
                 state["known_skills"],
             ), GeneratedCurriculum)
 
-    graph = StateGraph(CurriculumGraphState)
-    graph.add_node("generate", generate)
-    graph.set_entry_point("generate")
-    graph.add_conditional_edges("generate", route, {"retry": "generate", "done": END})
-    return graph.compile()
+    return compile_retry_graph(CurriculumGraphState, generate)
 
 
 async def generate_curriculum(

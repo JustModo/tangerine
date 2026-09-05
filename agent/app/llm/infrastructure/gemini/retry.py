@@ -15,7 +15,7 @@ from google.genai import errors
 
 logger = logging.getLogger(__name__)
 
-MAX_ATTEMPTS = 3
+MAX_TRANSPORT_ATTEMPTS = 3
 BASE_DELAY_SECONDS = 1.0
 
 # 429 rate limit, 500/502/503/504 backend trouble. Every other code — a bad key, a malformed
@@ -28,7 +28,7 @@ def is_retryable(exc: BaseException) -> bool:
     # never even reached Gemini, so it's the same "try again" case as a 5xx from Gemini itself.
     if isinstance(exc, httpx.TransportError):
         return True
-    return isinstance(exc, errors.APIError) and getattr(exc, "code", None) in RETRYABLE_CODES
+    return isinstance(exc, errors.APIError) and exc.code in RETRYABLE_CODES
 
 
 async def backoff_delay(attempt: int, exc: BaseException, what: str) -> None:
@@ -42,17 +42,17 @@ async def backoff_delay(attempt: int, exc: BaseException, what: str) -> None:
         getattr(exc, "code", None) or type(exc).__name__,
         delay,
         attempt + 1,
-        MAX_ATTEMPTS,
+        MAX_TRANSPORT_ATTEMPTS,
     )
     await asyncio.sleep(delay)
 
 
 async def with_retry(call, what: str):
     """Runs `call()`, retrying transient API failures with exponential backoff."""
-    for attempt in range(MAX_ATTEMPTS):
+    for attempt in range(MAX_TRANSPORT_ATTEMPTS):
         try:
             return await call()
         except Exception as exc:
-            if not is_retryable(exc) or attempt == MAX_ATTEMPTS - 1:
+            if not is_retryable(exc) or attempt == MAX_TRANSPORT_ATTEMPTS - 1:
                 raise
             await backoff_delay(attempt, exc, what)

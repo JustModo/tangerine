@@ -17,15 +17,17 @@ from app.llm.prompts.chat import (
     SET_PROBLEM_FLAG_TOOL,
     SUPPORTED_LANGUAGES,
     chat_system_prompt,
+)
+from app.revision.application.services import RevisionService
+from app.sessions.application import plan_edits
+from app.sessions.application.tool_registry import ToolContext, ToolSpec
+from app.sessions.application.tool_results import (
     library_context,
     library_memo,
     mastery_context,
     plan_context,
     step_problem_context,
 )
-from app.revision.application.services import RevisionService
-from app.sessions.application import plan_edits
-from app.sessions.application.tool_registry import ToolContext, ToolSpec
 from app.sessions.domain.models import ChatMessage, ChatRole, LearningSession, SessionStatus
 from app.sessions.domain.repository import SessionRepository
 from app.shared.errors import AgentError, ConflictError, NotFoundError
@@ -140,16 +142,8 @@ class SessionService:
             return
 
         # The plan itself, not a bool: get_learning_plan answers out of it, so the lookup
-        # this turn already ran is the whole cost. list_for_session is newest-first.
-        active_plan = None
-        if self._curriculum_service is not None:
-            try:
-                plans = await self._curriculum_service.list_for_session(session_id)
-                active_plan = plans[0] if plans else None
-            except Exception:
-                logger.warning(
-                    "Failed to check for an existing plan for session %s", session_id, exc_info=True
-                )
+        # this turn already ran is the whole cost.
+        active_plan = await self._active_plan(session_id)
 
         # Not caught here: app/shared/sse.py logs it and emits a terminal
         # error frame. Swallowing it used to close the stream cleanly with no reply, which
@@ -197,6 +191,17 @@ class SessionService:
         )
         reply = await self._persist_assistant_reply(session_id, reply_text)
         yield {"type": "done", "message_id": reply.id, "content": reply_text}
+
+    async def _active_plan(self, session_id: str) -> LessonPlan | None:
+        """The session's current plan. list_for_session is newest-first, so [0] is active."""
+        if self._curriculum_service is None:
+            return None
+        try:
+            plans = await self._curriculum_service.list_for_session(session_id)
+        except Exception:
+            logger.warning("Plan lookup failed for session %s", session_id, exc_info=True)
+            return None
+        return plans[0] if plans else None
 
     async def _system_prompt(self, active_plan: LessonPlan | None, user_id: str | None) -> str:
         """The same conditions _tools_for gates the tools on, so the prompt never explains
@@ -283,21 +288,11 @@ class SessionService:
         return Language(default) if default != "ask" else None
 
     async def _handle_generate_plan(self, call: ToolContext) -> AsyncIterator[dict]:
-        session_id, args, history, user_message, active_plan, user_id, depth, note_id = (
-            call.session_id,
-            call.args,
-            call.history,
-            call.message,
-            call.active_plan,
-            call.user_id,
-            call.depth,
-            call.note_id,
-        )
         # Enforced here, not just in the prompt: a plan in a language the learner never
         # chose — or one the sandbox cannot run — is worse than no plan, and
         # asking-while-also-building reads as a contradiction. Nothing is persisted and no
         # "Generating..." note is shown.
-        requested_language = (args.get("language") or "").strip().lower()
+        requested_language = (call.args.get("language") or "").strip().lower()
         language = await self._resolve_language(requested_language)
         if language is None:
             supported = ", ".join(SUPPORTED_LANGUAGES)
@@ -318,44 +313,38 @@ class SessionService:
                     "short question, and do not imply anything was built."
                 )
                 fallback = f"Which language would you like to practise in? I support {supported}."
-            async for event in self._stream_tool_followup(
-                session_id,
-                history,
-                user_message,
-                active_plan,
-                "generate_learning_plan",
-                summary,
-                fallback,
-                None,
-                depth=depth,
-            ):
+            async for event in self._refuse(call, "generate_learning_plan", summary, fallback):
                 yield event
             return
 
-        label = "Updating your learning plan..." if active_plan else "Generating a learning plan..."
-        event = await self._announce(session_id, label, note_id)
+        label = (
+            "Updating your learning plan..." if call.active_plan else "Generating a learning plan..."
+        )
+        event = await self._announce(call.session_id, label, call.note_id)
         note_id = event["message_id"]
         yield event
 
-        topic = args.get("topic") or "this topic"
-        level = args.get("level") or "beginner"
-        step_count = args.get("step_count")
-        target_problem = args.get("target_problem") or None
+        topic = call.args.get("topic") or "this topic"
+        level = call.args.get("level") or "beginner"
+        step_count = call.args.get("step_count")
+        target_problem = call.args.get("target_problem") or None
 
         plan = None
         if self._curriculum_service is not None:
             try:
                 plan = await self._curriculum_service.create_draft(
-                    session_id,
+                    call.session_id,
                     topic,
                     language,
                     level,
                     step_count=int(step_count) if step_count else None,
                     target_problem=target_problem,
-                    user_id=user_id,
+                    user_id=call.user_id,
                 )
             except Exception:
-                logger.warning("Plan generation failed for session %s", session_id, exc_info=True)
+                logger.warning(
+                    "Plan generation failed for session %s", call.session_id, exc_info=True
+                )
 
         if plan is not None:
             # Steps that start DONE were skipped because the learner has already proven the
@@ -376,106 +365,102 @@ class SessionService:
             if plan is not None
             else "Something went wrong generating the plan — want to try again?"
         )
-        async for event in self._stream_tool_followup(
-            session_id,
-            history,
-            user_message,
-            active_plan,
+        async for event in self._followup(
+            call,
             "generate_learning_plan",
             result_summary,
             fallback,
             plan.id if plan is not None else None,
-            depth=depth,
             note_id=note_id,
         ):
             yield event
 
-    def _refuse(
-        self, session_id, history, user_message, tool_name, summary, fallback, depth, active_plan
-    ):
-        """A tool call that never ran, and why. The summary is what the model reads."""
+    def _followup(
+        self,
+        call: ToolContext,
+        tool_name: str,
+        result_summary: str,
+        fallback_text: str,
+        plan_id: str | None = None,
+        *,
+        active_plan: LessonPlan | None = None,
+        instruction: str | None = None,
+        memo: str | None = None,
+        note_id: str | None = None,
+    ) -> AsyncIterator[dict]:
+        """_stream_tool_followup for a handler that already holds a ToolContext.
+
+        Every call site passed the same five values straight off `call`, which buried the
+        two or three arguments that actually differ between tools."""
+        extra = {} if instruction is None else {"instruction": instruction}
         return self._stream_tool_followup(
-            session_id,
-            history,
-            user_message,
-            active_plan,
+            call.session_id,
+            call.history,
+            call.message,
+            call.active_plan if active_plan is None else active_plan,
+            call.user_id,
             tool_name,
-            summary,
-            fallback,
-            None,
-            depth=depth,
+            result_summary,
+            fallback_text,
+            plan_id,
+            memo=memo,
+            depth=call.depth,
+            note_id=call.note_id if note_id is None else note_id,
+            **extra,
         )
+
+    def _refuse(
+        self, call: ToolContext, tool_name: str, summary: str, fallback: str
+    ) -> AsyncIterator[dict]:
+        """A tool call that never ran, and why. The summary is what the model reads."""
+        return self._followup(call, tool_name, summary, fallback)
 
     async def _handle_edit_plan(self, call: ToolContext) -> AsyncIterator[dict]:
         """Single entry point for every kind of plan edit — the operation named in `args`
         picks a deterministic, targeted CurriculumService method (no LLM call, no other
         step touched) for everything except "rework", the only operation that still calls
         revise_curriculum for a genuinely broad, unstructured change."""
-        session_id, args, history, user_message, depth, note_id = (
-            call.session_id,
-            call.args,
-            call.history,
-            call.message,
-            call.depth,
-            call.note_id,
-        )
-        operation = args.get("operation") or "rework"
+        operation = call.args.get("operation") or "rework"
 
-        plan_id = None
-        if self._curriculum_service is not None:
-            try:
-                # list_for_session is newest-first, so [0] is the session's active plan.
-                plans = await self._curriculum_service.list_for_session(session_id)
-                plan_id = plans[0].id if plans else None
-            except Exception:
-                logger.warning("Failed to look up the active plan for session %s", session_id, exc_info=True)
-
-        if plan_id is None:
+        active_plan = await self._active_plan(call.session_id)
+        if active_plan is None:
             async for event in self._refuse(
-                session_id,
-                history,
-                user_message,
+                call,
                 "edit_learning_plan",
                 "NOT RUN — there is no plan for this session to edit. Tell the user "
                 "something went wrong and they can try again.",
                 "I couldn't find a plan to edit — want to try again?",
-                depth,
-                call.active_plan,
             ):
                 yield event
             return
 
-        outcome = plan_edits.build(operation, args, plan_id, self._curriculum_service, user_message)
+        outcome = plan_edits.build(
+            operation, call.args, active_plan.id, self._curriculum_service, call.message
+        )
         if isinstance(outcome, plan_edits.Refusal):
             async for event in self._refuse(
-                session_id,
-                history,
-                user_message,
-                "edit_learning_plan",
-                outcome.summary,
-                outcome.fallback,
-                depth,
-                call.active_plan,
+                call, "edit_learning_plan", outcome.summary, outcome.fallback
             ):
                 yield event
             return
-        label, action, done_text = outcome.label, outcome.action, outcome.done_text
 
-        event = await self._announce(session_id, label, note_id)
+        event = await self._announce(call.session_id, outcome.label, call.note_id)
         note_id = event["message_id"]
         yield event
 
         plan = None
         not_run: AgentError | None = None
         try:
-            plan = await action()
+            plan = await outcome.action()
         except (NotFoundError, ConflictError) as exc:
             not_run = exc
         except Exception:
-            logger.warning("Plan edit (%s) failed for session %s", operation, session_id, exc_info=True)
+            logger.warning(
+                "Plan edit (%s) failed for session %s", operation, call.session_id, exc_info=True
+            )
 
         if plan is not None:
-            result_summary = done_text(plan)
+            result_summary = outcome.done_text(plan)
             fallback = "Updated your plan — open it with the corner button to see the changes."
         elif not_run is not None:
             result_summary = (
@@ -487,16 +472,13 @@ class SessionService:
             result_summary = "Plan edit failed — tell the user something went wrong and they can try again."
             fallback = "Something went wrong updating the plan — want to try again?"
 
-        async for event in self._stream_tool_followup(
-            session_id,
-            history,
-            user_message,
-            plan if plan is not None else call.active_plan,
+        async for event in self._followup(
+            call,
             "edit_learning_plan",
             result_summary,
             fallback,
             plan.id if plan is not None else None,
-            depth=depth,
+            active_plan=plan if plan is not None else active_plan,
             note_id=note_id,
         ):
             yield event
@@ -525,15 +507,11 @@ class SessionService:
             except Exception:
                 logger.warning("Step lookup failed for %s", call.session_id, exc_info=True)
 
-        async for event in self._stream_tool_followup(
-            call.session_id,
-            call.history,
-            call.message,
-            call.active_plan,
+        async for event in self._followup(
+            call,
             "get_learning_plan",
             summary,
             "I couldn't read your plan just then — want me to try again?",
-            None,
             instruction=(
                 "Answer their question from this and nothing else. Use the step numbers "
                 "and names exactly as given, and never describe a step, a question or a "
@@ -541,21 +519,13 @@ class SessionService:
             ),
             # Carried so a follow-up ('and step 6?') needs no second call.
             memo=summary,
-            depth=call.depth,
         ):
             yield event
 
     async def _handle_practice_record(self, call: ToolContext) -> AsyncIterator[dict]:
         """Read-only lookup. The label is transient — unlike the tools that change
         something, nothing is persisted, so it leaves no line in the transcript."""
-        session_id, user_id, history, user_message, active_plan, depth = (
-            call.session_id,
-            call.user_id,
-            call.history,
-            call.message,
-            call.active_plan,
-            call.depth,
-        )
+        user_id = call.user_id
         yield {"type": "tool_start", "label": "Checking your progress..."}
 
         candidates = []
@@ -579,11 +549,8 @@ class SessionService:
             except Exception:
                 logger.warning("Failed to load totals for %s", user_id, exc_info=True)
 
-        async for event in self._stream_tool_followup(
-            session_id,
-            history,
-            user_message,
-            active_plan,
+        async for event in self._followup(
+            call,
             "get_practice_record",
             record,
             (
@@ -592,29 +559,19 @@ class SessionService:
                 else "You haven't finished any practice problems yet, so I've nothing to go on. "
                 "What would you like to work on?"
             ),
-            None,
             instruction=(
                 "Answer their question from it: name the two or three topics worth their time, "
                 "a few words on why each, then ask if they want a plan for one. Use the skill "
                 "names exactly as given and do not invent any. Do not read the scores out as "
                 "numbers."
             ),
-            depth=depth,
         ):
             yield event
 
     async def _handle_find_problems(self, call: ToolContext) -> AsyncIterator[dict]:
         """Read-only lookup over the learner's own problems. Transient label, nothing
         persisted — same shape as _handle_practice_record."""
-        session_id, args, history, user_message, active_plan, user_id, depth = (
-            call.session_id,
-            call.args,
-            call.history,
-            call.message,
-            call.active_plan,
-            call.user_id,
-            call.depth,
-        )
+        args, user_id = call.args, call.user_id
         yield {"type": "tool_start", "label": "Looking through your problems..."}
 
         scope = (args.get("scope") or "all").strip().lower()
@@ -632,11 +589,8 @@ class SessionService:
             except Exception:
                 logger.warning("Problem lookup failed for %s", user_id, exc_info=True)
 
-        async for event in self._stream_tool_followup(
-            session_id,
-            history,
-            user_message,
-            active_plan,
+        async for event in self._followup(
+            call,
             "find_problems",
             library_context(entries, scope, stats),
             (
@@ -644,7 +598,6 @@ class SessionService:
                 if entries
                 else "I couldn't find anything matching that. Want me to make you a new one?"
             ),
-            None,
             instruction=(
                 "Answer their question from this list. Name problems by TITLE and never "
                 "read an id out loud. Do not mention any problem that is not on the list, "
@@ -654,55 +607,40 @@ class SessionService:
             # Needed for a follow-up "yes": the prose above keeps ids quiet, so
             # without this the next turn has titles and nothing to act on.
             memo=library_memo(entries),
-            depth=depth,
         ):
             yield event
 
     async def _handle_create_practice_plan(self, call: ToolContext) -> AsyncIterator[dict]:
         """A plan whose steps are problems the learner already has. Costs no LLM call and
         no sandbox run — every step reopens its bound problem directly."""
-        session_id, args, history, user_message, active_plan, depth, note_id = (
-            call.session_id,
-            call.args,
-            call.history,
-            call.message,
-            call.active_plan,
-            call.depth,
-            call.note_id,
-        )
-        problem_ids = [str(value) for value in (args.get("problem_ids") or []) if value]
-        topic = (args.get("topic") or "Revision").strip() or "Revision"
+        problem_ids = [str(value) for value in (call.args.get("problem_ids") or []) if value]
+        topic = (call.args.get("topic") or "Revision").strip() or "Revision"
 
         if not problem_ids:
-            async for event in self._stream_tool_followup(
-                session_id,
-                history,
-                user_message,
-                active_plan,
+            async for event in self._refuse(
+                call,
                 "create_practice_plan",
                 "NOT RUN — no problems were given, so no plan was built. Ask which problems they want in it.",
                 "Which problems should I put in it?",
-                None,
-                depth=depth,
             ):
                 yield event
             return
 
         label = f"Building a plan from {len(problem_ids)} problem(s)..."
-        event = await self._announce(session_id, label, note_id)
+        event = await self._announce(call.session_id, label, call.note_id)
         note_id = event["message_id"]
         yield event
 
         plan = None
+        not_run: NotFoundError | None = None
         try:
-            plan = await self._curriculum_service.create_practice_plan(session_id, problem_ids, topic)
+            plan = await self._curriculum_service.create_practice_plan(
+                call.session_id, problem_ids, topic
+            )
         except NotFoundError as exc:
-            summary = f"NOT RUN — {exc} Tell the user and offer to find the problems again."
-            fallback = "I couldn't build that plan — want me to look up those problems again?"
+            not_run = exc
         except Exception:
-            logger.warning("Practice plan failed for session %s", session_id, exc_info=True)
-            summary = "Plan build failed — tell the user something went wrong."
-            fallback = "Something went wrong building that plan — want me to try again?"
+            logger.warning("Practice plan failed for session %s", call.session_id, exc_info=True)
 
         if plan is not None:
             summary = (
@@ -710,33 +648,27 @@ class SessionService:
                 "Each step reopens that exact problem. " + plan_edits.plan_step_summary(plan)
             )
             fallback = f"Built you a {len(plan.nodes)}-step plan from those problems."
+        elif not_run is not None:
+            summary = f"NOT RUN — {not_run} Tell the user and offer to find the problems again."
+            fallback = "I couldn't build that plan — want me to look up those problems again?"
+        else:
+            summary = "Plan build failed — tell the user something went wrong."
+            fallback = "Something went wrong building that plan — want me to try again?"
 
-        async for event in self._stream_tool_followup(
-            session_id,
-            history,
-            user_message,
-            active_plan,
+        async for event in self._followup(
+            call,
             "create_practice_plan",
             summary,
             fallback,
             plan.id if plan is not None else None,
-            depth=depth,
             note_id=note_id,
         ):
             yield event
 
     async def _handle_set_problem_flag(self, call: ToolContext) -> AsyncIterator[dict]:
-        session_id, args, history, user_message, active_plan, user_id, depth = (
-            call.session_id,
-            call.args,
-            call.history,
-            call.message,
-            call.active_plan,
-            call.user_id,
-            call.depth,
-        )
-        problem_id = (args.get("problem_id") or "").strip()
-        flagged = bool(args.get("flagged"))
+        user_id = call.user_id
+        problem_id = (call.args.get("problem_id") or "").strip()
+        flagged = bool(call.args.get("flagged"))
         yield {
             "type": "tool_start",
             "label": "Flagging that problem..." if flagged else "Clearing that flag...",
@@ -756,16 +688,11 @@ class SessionService:
             if ok
             else "NOT RUN — the flag could not be changed. Tell the user plainly."
         )
-        async for event in self._stream_tool_followup(
-            session_id,
-            history,
-            user_message,
-            active_plan,
+        async for event in self._followup(
+            call,
             "set_problem_flag",
             summary,
             f"{verb} it for you." if ok else "I couldn't change that flag — want me to try again?",
-            None,
-            depth=depth,
         ):
             yield event
 
@@ -775,6 +702,7 @@ class SessionService:
         history: list[ChatTurn],
         user_message: str,
         active_plan: LessonPlan | None,
+        user_id: str | None,
         tool_name: str,
         result_summary: str,
         fallback_text: str,
@@ -797,28 +725,19 @@ class SessionService:
         they asked for."""
         may_chain = depth + 1 < MAX_TOOL_CHAIN
         chained_context = f"{user_message}\n\n[{tool_name} tool result]\n{result_summary}"
-        # Resolved even when we cannot chain: it decides which coaching blocks the system
-        # prompt carries, and letting it fall to None on the last call of a turn would
-        # quietly hand that call a different prompt than the rest of the turn.
-        session = await self._repository.get(session_id)
-        chain_user_id = session.user_id if session is not None else None
         chain_plan = active_plan
-        if may_chain and self._curriculum_service is not None:
+        if may_chain:
             # Unconditional, not just when there was no plan: the tool that just ran may have
             # created the plan the next one edits, or edited the one a chained
             # get_learning_plan is about to read back. Either way the copy from the top of
             # the turn is stale.
-            try:
-                plans = await self._curriculum_service.list_for_session(session_id)
-                chain_plan = plans[0] if plans else None
-            except Exception:
-                logger.warning("Plan re-check failed for %s", session_id, exc_info=True)
+            chain_plan = await self._active_plan(session_id)
 
         follow_up_request = ChatStreamRequest(
             # chain_plan, not active_plan: a tool may have just created the plan, and
             # calling it absent while offering edit_learning_plan alongside is both wrong
             # and a needless second variant of an otherwise identical, cacheable prompt.
-            system_prompt=await self._system_prompt(chain_plan, chain_user_id),
+            system_prompt=await self._system_prompt(chain_plan, user_id),
             history=history + [ChatTurn(role="user", content=user_message)],
             message=(
                 f"[{tool_name} tool result] {result_summary}\n\n"
@@ -831,7 +750,7 @@ class SessionService:
                     else "Do not call any tool, and never output JSON, a function call, or code — only prose."
                 )
             ),
-            tools=(self._tools_for(chain_plan, chain_user_id) if may_chain else []),
+            tools=(self._tools_for(chain_plan, user_id) if may_chain else []),
         )
         # The model sometimes answers a tool result by echoing another tool call as raw
         # JSON. Nothing is streamed until the text is known not to be one, so a blob can
@@ -855,7 +774,7 @@ class SessionService:
                     history,
                     chained_context,
                     chain_plan,
-                    chain_user_id,
+                    user_id,
                     depth + 1,
                     note_id,
                 )

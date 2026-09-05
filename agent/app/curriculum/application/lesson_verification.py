@@ -10,7 +10,7 @@ import asyncio
 from app.execution.domain.executor import CodeExecutor
 from app.execution.domain.models import ExecutionRequest, ExecutionStatus, TestCase
 from app.llm.schemas.lesson_notes import GeneratedLessonNotes
-from app.problems.application.repair import normalise_output
+from app.shared.hashing import comparable_output
 from app.shared.markdown import FENCE
 from app.shared.types import Language
 
@@ -67,7 +67,7 @@ async def verify_lesson_code(
         *(_printed(executor, Language(language), code) for _, code, _ in checks)
     )
     for (title, _, claimed), actual in zip(checks, printed, strict=True):
-        if actual is None or normalise_output(actual) == normalise_output(claimed):
+        if actual is None or comparable_output(actual) == comparable_output(claimed):
             continue
         return (
             f"The code in step {title!r} does not print what its Output block claims. "

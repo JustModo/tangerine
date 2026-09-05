@@ -1,9 +1,7 @@
 from typing import TypedDict
 
-from langgraph.graph import END, StateGraph
-
 from app.llm.domain.provider import LLMProvider
-from app.llm.graphs.shared import attempt, route, run_graph
+from app.llm.graphs.shared import attempt, compile_retry_graph, run_graph
 from app.llm.prompts.plan_edit import PLAN_EDIT_SYSTEM_PROMPT, plan_edit_user_prompt
 from app.llm.schemas.plan_edit import RevisedCurriculum
 
@@ -29,11 +27,7 @@ def build_plan_edit_graph(provider: LLMProvider):
                 state["instruction"],
             ), RevisedCurriculum)
 
-    graph = StateGraph(PlanEditGraphState)
-    graph.add_node("generate", generate)
-    graph.set_entry_point("generate")
-    graph.add_conditional_edges("generate", route, {"retry": "generate", "done": END})
-    return graph.compile()
+    return compile_retry_graph(PlanEditGraphState, generate)
 
 
 async def revise_curriculum(

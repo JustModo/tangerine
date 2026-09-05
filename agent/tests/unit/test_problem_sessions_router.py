@@ -27,7 +27,7 @@ async def test_start_for_problem_endpoint_creates_and_resumes(db_path: str) -> N
     await SqliteUserRepository(db_path).ensure_default_user()
     await SqliteProblemRepository(db_path).save(
         Problem(
-            id="p1", conceptual_id="c1", title="Two Sum", language=Language.PYTHON,
+            id="p1", title="Two Sum", language=Language.PYTHON,
             difficulty="easy", status=ProblemStatus.AVAILABLE, created_at=datetime.now(UTC),
         )
     )

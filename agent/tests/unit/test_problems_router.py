@@ -33,7 +33,6 @@ async def _seed(db_path: str, problem_id: str, language: Language = Language.PYT
     await SqliteProblemRepository(db_path).save(
         Problem(
             id=problem_id,
-            conceptual_id=f"c-{problem_id}",
             title="Two Sum",
             language=language,
             difficulty="easy",

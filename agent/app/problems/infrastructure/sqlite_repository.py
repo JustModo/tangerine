@@ -10,19 +10,32 @@ from app.problems.domain.models import (
     ProblemTest,
     ProblemVersion,
 )
-from app.shared.config import get_settings
 from app.shared.database import connect
+from app.shared.errors import ConflictError
 from app.shared.fuzzy import match_score
 from app.shared.types import Language
 
 SIMILAR_TITLE_THRESHOLD = 0.6
 
 
+def _problem(row, skill_ids: list[str]) -> Problem:
+    return Problem(
+        id=row["id"],
+        title=row["title"],
+        language=row["language"],
+        difficulty=row["difficulty"],
+        status=row["status"],
+        skill_ids=skill_ids,
+        tags=json.loads(row["tags_json"] or "[]"),
+        created_at=row["created_at"],
+    )
+
+
 class SqliteProblemRepository:
     """ProblemRepository backed by SQLite. Implements app.problems.domain.repository.ProblemRepository."""
 
     def __init__(self, database_path: str | None = None) -> None:
-        self._database_path = database_path or get_settings().database_path
+        self._database_path = database_path
 
     async def get(self, problem_id: str) -> Problem | None:
         async with connect(self._database_path) as db:
@@ -47,20 +60,7 @@ class SqliteProblemRepository:
             for skill_row in await cursor.fetchall():
                 skills.setdefault(skill_row["problem_id"], []).append(skill_row["skill_id"])
 
-        return {
-            row["id"]: Problem(
-                id=row["id"],
-                conceptual_id=row["conceptual_id"],
-                title=row["title"],
-                language=row["language"],
-                difficulty=row["difficulty"],
-                status=row["status"],
-                skill_ids=skills.get(row["id"], []),
-                tags=json.loads(row["tags_json"] or "[]"),
-                created_at=row["created_at"],
-            )
-            for row in rows
-        }
+        return {row["id"]: _problem(row, skills.get(row["id"], [])) for row in rows}
 
     async def find_suitable(self, criteria: ProblemCriteria) -> Problem | None:
         query = "SELECT DISTINCT p.* FROM problems p"
@@ -188,7 +188,7 @@ class SqliteProblemRepository:
             return [row[0] for row in await cursor.fetchall()]
 
     async def save(self, problem: Problem) -> None:
-        """Upserts. The ON CONFLICT list is the whitelist of mutable fields: conceptual_id,
+        """Upserts. The ON CONFLICT list is the whitelist of mutable fields:
         created_at and language are set once and never rewritten."""
         async with connect(self._database_path) as db:
             # language is immutable: the stored versions' code, tests and output hashes are
@@ -197,22 +197,21 @@ class SqliteProblemRepository:
             cursor = await db.execute("SELECT language FROM problems WHERE id = ?", (problem.id,))
             row = await cursor.fetchone()
             if row is not None and row[0] != problem.language.value:
-                raise ValueError(
+                raise ConflictError(
                     f"Problem {problem.id} is stored as {row[0]}; a problem's language "
                     f"cannot be changed to {problem.language.value}. Generate a new problem "
                     "for the other language instead."
                 )
 
             await db.execute(
-                "INSERT INTO problems (id, conceptual_id, title, language, difficulty, "
+                "INSERT INTO problems (id, title, language, difficulty, "
                 "status, tags_json, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET "
                 "title=excluded.title, difficulty=excluded.difficulty, status=excluded.status, "
                 "tags_json=excluded.tags_json",
                 (
                     problem.id,
-                    problem.conceptual_id,
                     problem.title,
                     problem.language.value,
                     problem.difficulty,
@@ -323,14 +322,4 @@ class SqliteProblemRepository:
     async def _hydrate(self, db: aiosqlite.Connection, row: aiosqlite.Row) -> Problem:
         cursor = await db.execute("SELECT skill_id FROM problem_skills WHERE problem_id = ?", (row["id"],))
         skill_rows = await cursor.fetchall()
-        return Problem(
-            id=row["id"],
-            conceptual_id=row["conceptual_id"],
-            title=row["title"],
-            language=row["language"],
-            difficulty=row["difficulty"],
-            status=row["status"],
-            skill_ids=[r["skill_id"] for r in skill_rows],
-            tags=json.loads(row["tags_json"] or "[]"),
-            created_at=row["created_at"],
-        )
+        return _problem(row, [r["skill_id"] for r in skill_rows])

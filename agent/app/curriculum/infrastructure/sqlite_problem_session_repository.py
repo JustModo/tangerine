@@ -2,13 +2,12 @@ import aiosqlite
 
 from app.curriculum.domain.problem_chat import ProblemChatMessage
 from app.curriculum.domain.problem_session import ProblemSession
-from app.shared.config import get_settings
 from app.shared.database import connect
 
 
 class SqliteProblemSessionRepository:
     def __init__(self, database_path: str | None = None) -> None:
-        self._database_path = database_path or get_settings().database_path
+        self._database_path = database_path
 
     async def save(self, session: ProblemSession) -> None:
         async with connect(self._database_path) as db:

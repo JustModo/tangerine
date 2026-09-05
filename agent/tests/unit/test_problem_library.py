@@ -55,7 +55,6 @@ async def _make_problem(
     skill_id = await SqliteSkillRepository(db_path).ensure_skill(skill)
     problem = Problem(
         id=str(uuid.uuid4()),
-        conceptual_id=str(uuid.uuid4()),
         title=title,
         language=language,
         difficulty="easy",
@@ -567,7 +566,7 @@ async def test_a_problems_language_cannot_be_changed_after_it_is_stored(db_path:
     no rather than silently drop the change — a save that quietly doesn't save is worse."""
     problem = await _make_problem(db_path, "Arithmetic Mean")
 
-    with pytest.raises(ValueError, match="cannot be changed"):
+    with pytest.raises(ConflictError, match="cannot be changed"):
         await SqliteProblemRepository(db_path).save(
             problem.model_copy(update={"language": Language.JAVA})
         )

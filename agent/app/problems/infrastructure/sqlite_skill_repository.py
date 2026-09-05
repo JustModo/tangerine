@@ -1,12 +1,11 @@
 import uuid
 
-from app.shared.config import get_settings
 from app.shared.database import connect
 
 
 class SqliteSkillRepository:
     def __init__(self, database_path: str | None = None) -> None:
-        self._database_path = database_path or get_settings().database_path
+        self._database_path = database_path
 
     async def ensure_skill(self, name: str) -> str:
         """Find-or-create a skill by name, returning its id. Normalised because the UNIQUE

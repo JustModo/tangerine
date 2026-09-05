@@ -9,15 +9,8 @@ from app.shared.types import Language
 class ProblemStatus(StrEnum):
     GENERATED = "GENERATED"
     VALIDATING = "VALIDATING"
-    VALID = "VALID"
     AVAILABLE = "AVAILABLE"
     INVALID = "INVALID"
-
-
-class Skill(BaseModel):
-    id: str
-    name: str
-    description: str | None = None
 
 
 class ProblemExample(BaseModel):
@@ -65,7 +58,6 @@ class ProblemVersion(BaseModel):
 
 class Problem(BaseModel):
     id: str
-    conceptual_id: str
     title: str
     language: Language
     difficulty: str

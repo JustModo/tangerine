@@ -9,7 +9,6 @@ from app.curriculum.domain.models import LessonNode, LessonNodeStatus, LessonPla
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
 from app.llm.domain.requests import ChatChunk, ToolCallResult
 from app.llm.infrastructure.cache import SqliteLLMCache
-from app.llm.prompts.chat import plan_context, step_problem_context
 from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
 from app.llm.schemas.plan_edit import RevisedCurriculum, RevisedStep
 from app.mastery.domain.models import UserSkillState
@@ -18,6 +17,7 @@ from app.problems.domain.models import Problem, ProblemExample, ProblemStatus, P
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.revision.domain.models import RevisionCandidate
 from app.sessions.application.services import SessionService
+from app.sessions.application.tool_results import plan_context, step_problem_context
 from app.sessions.domain.models import ChatRole
 from app.sessions.infrastructure.sqlite_repository import SqliteSessionRepository
 from app.shared.config import get_settings
@@ -1146,7 +1146,6 @@ def test_step_problem_context_shows_the_statement_and_every_example() -> None:
     node = _plan_with_steps(1).nodes[0]
     problem = Problem(
         id="p1",
-        conceptual_id="c1",
         title="Longest Mountain Peak Subsequence",
         language=Language.PYTHON,
         difficulty="medium",

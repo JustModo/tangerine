@@ -6,7 +6,6 @@ from app.shared.types import Language
 
 
 class ExecutionStatus(StrEnum):
-    PENDING = "PENDING"
     PASSED = "PASSED"
     FAILED = "FAILED"
     ERROR = "ERROR"

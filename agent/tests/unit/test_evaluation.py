@@ -25,7 +25,6 @@ async def _seed_problem(db_path: str) -> str:
     repo = SqliteProblemRepository(db_path)
     problem = Problem(
         id="p1",
-        conceptual_id="sum-list",
         title="Sum List",
         language=Language.PYTHON,
         difficulty="easy",

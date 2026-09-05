@@ -34,7 +34,7 @@ async def test_a_bank_hit_streams_a_stage_then_the_session(db_path: str) -> None
     seed_lesson_node(db_path, "node-1")
     await SqliteProblemRepository(db_path).save(
         Problem(
-            id="p1", conceptual_id="c1", title="Bank Problem", language=Language.PYTHON,
+            id="p1", title="Bank Problem", language=Language.PYTHON,
             difficulty="easy", status=ProblemStatus.AVAILABLE, skill_ids=["skill-1"],
             created_at=datetime.now(UTC),
         )

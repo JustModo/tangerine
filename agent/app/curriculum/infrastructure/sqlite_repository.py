@@ -1,7 +1,6 @@
 import aiosqlite
 
 from app.curriculum.domain.models import LessonNode, LessonNodeStatus, LessonPlan
-from app.shared.config import get_settings
 from app.shared.database import connect
 
 _UPSERT_NODE_SQL = (
@@ -57,7 +56,7 @@ def _node_params(node: LessonNode) -> tuple:
 
 class SqliteLessonPlanRepository:
     def __init__(self, database_path: str | None = None) -> None:
-        self._database_path = database_path or get_settings().database_path
+        self._database_path = database_path
 
     async def save(self, plan: LessonPlan) -> None:
         async with connect(self._database_path) as db:

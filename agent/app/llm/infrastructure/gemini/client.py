@@ -76,13 +76,13 @@ class GeminiClient:
             if not chunk.candidates or not chunk.candidates[0].content:
                 continue
             for part in chunk.candidates[0].content.parts or []:
-                if getattr(part, "function_call", None) is not None:
+                if part.function_call is not None:
                     yield ChatChunk(
                         tool_call=ToolCallResult(
                             name=part.function_call.name, args=dict(part.function_call.args or {})
                         )
                     )
-                elif getattr(part, "text", None):
+                elif part.text:
                     yield ChatChunk(text_delta=part.text)
         log_usage("stream_chat", model, len(system_prompt), usage)
         yield ChatChunk(done=True)

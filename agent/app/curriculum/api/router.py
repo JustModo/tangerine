@@ -1,20 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.curriculum.api.deps import get_problem_session_service
 from app.curriculum.application.problem_sessions import ProblemSessionService
 from app.curriculum.application.services import CurriculumService
 from app.curriculum.domain.models import LessonPlan
-from app.curriculum.infrastructure.sqlite_problem_session_repository import (
-    SqliteProblemSessionRepository,
-)
-from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
-from app.execution.infrastructure.citron_adapter import CitronAdapter
-from app.llm.infrastructure.cache import SqliteLLMCache
-from app.llm.infrastructure.gemini.provider import GeminiProvider
+from app.deps import get_curriculum_service, get_problem_session_service
 from app.llm.schemas.lesson_notes import GeneratedLessonNotes
-from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
-from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.errors import NotFoundError
 from app.shared.progress import stage_stream
 from app.shared.sse import sse_stream
@@ -23,18 +14,7 @@ from app.users.domain.models import LOCAL_USER_ID
 router = APIRouter(prefix="/learning-plans", tags=["curriculum"])
 
 
-def get_service() -> CurriculumService:
-    return CurriculumService(
-        SqliteLessonPlanRepository(),
-        GeminiProvider(),
-        llm_cache=SqliteLLMCache(),
-        mastery_repository=SqliteUserSkillStateRepository(),
-        problem_session_repository=SqliteProblemSessionRepository(),
-        problem_repository=SqliteProblemRepository(),
-        executor=CitronAdapter(),
-    )
-
-
+get_service = get_curriculum_service
 
 
 @router.get("")

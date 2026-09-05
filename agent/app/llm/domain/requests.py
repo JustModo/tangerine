@@ -6,7 +6,6 @@ from pydantic import BaseModel
 class StructuredGenerationRequest(BaseModel):
     system_prompt: str
     user_prompt: str
-    model: str | None = None  # falls back to Settings.llm_model when unset
 
 
 class ToolDeclaration(BaseModel):
@@ -25,7 +24,6 @@ class ChatStreamRequest(BaseModel):
     history: list[ChatTurn] = []
     message: str
     tools: list[ToolDeclaration] = []
-    model: str | None = None
 
 
 class ToolCallResult(BaseModel):

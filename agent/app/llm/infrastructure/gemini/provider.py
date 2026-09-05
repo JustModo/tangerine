@@ -7,7 +7,7 @@ from app.llm.domain.requests import ChatChunk, ChatStreamRequest, StructuredGene
 from app.llm.infrastructure.gemini.client import GeminiClient
 from app.llm.infrastructure.gemini.mapping import parse_structured_response
 from app.llm.infrastructure.gemini.retry import (
-    MAX_ATTEMPTS,
+    MAX_TRANSPORT_ATTEMPTS,
     backoff_delay,
     is_retryable,
     with_retry,
@@ -41,7 +41,7 @@ class GeminiProvider:
         client = await self._get_client()
         raw = await with_retry(
             lambda: client.generate_json(
-                model=request.model or self._default_model,
+                model=self._default_model,
                 system_prompt=request.system_prompt,
                 user_prompt=request.user_prompt,
                 response_schema=response_model.model_json_schema(),
@@ -55,11 +55,11 @@ class GeminiProvider:
         backend rejects the request before the first token, which is the case worth
         retrying; once text is out, restarting would repeat it to the user."""
         client = await self._get_client()
-        for attempt in range(MAX_ATTEMPTS):
+        for attempt in range(MAX_TRANSPORT_ATTEMPTS):
             started = False
             try:
                 async for chunk in client.stream_chat(
-                    model=request.model or self._default_model,
+                    model=self._default_model,
                     system_prompt=request.system_prompt,
                     history=request.history,
                     message=request.message,
@@ -69,6 +69,6 @@ class GeminiProvider:
                     yield chunk
                 return
             except Exception as exc:
-                if started or not is_retryable(exc) or attempt == MAX_ATTEMPTS - 1:
+                if started or not is_retryable(exc) or attempt == MAX_TRANSPORT_ATTEMPTS - 1:
                     raise
                 await backoff_delay(attempt, exc, "stream_chat")

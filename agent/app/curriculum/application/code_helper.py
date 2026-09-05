@@ -60,7 +60,7 @@ class CodeHelperService:
         # re-sends the full statement, the learner's whole file and the last test run.
         history = [
             ChatTurn(role=message.role, content=message.content)
-            for message in await self._session_repository.list_chat_messages(problem_session_id)
+            for message in await self.list_messages(problem_session_id)
         ][-MAX_HISTORY_TURNS:]
 
         now = datetime.now(UTC)

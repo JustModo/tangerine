@@ -1,13 +1,12 @@
 import aiosqlite
 
 from app.sessions.domain.models import ChatMessage, LearningSession
-from app.shared.config import get_settings
 from app.shared.database import connect
 
 
 class SqliteSessionRepository:
     def __init__(self, database_path: str | None = None) -> None:
-        self._database_path = database_path or get_settings().database_path
+        self._database_path = database_path
 
     async def create(self, session: LearningSession) -> None:
         async with connect(self._database_path) as db:

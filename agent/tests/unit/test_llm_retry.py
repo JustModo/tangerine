@@ -55,7 +55,7 @@ async def test_with_retry_gives_up_after_max_attempts(monkeypatch) -> None:
 
     with pytest.raises(errors.APIError):
         await retry.with_retry(always_429, "test")
-    assert len(calls) == retry.MAX_ATTEMPTS
+    assert len(calls) == retry.MAX_TRANSPORT_ATTEMPTS
 
 
 async def test_with_retry_does_not_retry_a_permanent_failure(monkeypatch) -> None:

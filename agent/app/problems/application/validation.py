@@ -8,7 +8,7 @@ from app.execution.domain.models import ExecutionRequest, ExecutionStatus, parse
 from app.execution.domain.models import TestCase as ExecutionTestCase
 from app.llm.domain.provider import LLMProvider
 from app.llm.graphs.problem import generate_problem, patch_problem
-from app.llm.infrastructure.cache import SqliteLLMCache, cache_key
+from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.schemas.problem import GeneratedProblem
 from app.problems.application.repair import (
     ValidationFailure,
@@ -16,7 +16,6 @@ from app.problems.application.repair import (
     execution_failure,
     mismatch_failure,
     no_tests_failure,
-    normalise_output,
 )
 from app.problems.domain.models import (
     Problem,
@@ -28,7 +27,7 @@ from app.problems.domain.models import (
 from app.problems.domain.repository import ProblemRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.shared.code_assembly import assemble_program
-from app.shared.hashing import hash_output
+from app.shared.hashing import comparable_output, hash_output
 from app.shared.types import Language
 
 logger = logging.getLogger(__name__)
@@ -36,12 +35,6 @@ logger = logging.getLogger(__name__)
 # Most recent titles to tell the generator not to repeat. Enough to keep consecutive
 # problems on a skill feeling different, without the list growing forever.
 MAX_AVOID_TITLES = 8
-
-
-def _conceptual_id(title: str) -> str:
-    """Identity of the QUESTION rather than of the row. Two generations for one skill
-    routinely land on the same classic problem with the same title."""
-    return cache_key("conceptual", " ".join(title.lower().split()))
 
 
 class ProblemValidationService:
@@ -105,47 +98,35 @@ class ProblemValidationService:
         # ProblemSelectionService.find_suitable; this list is only a nudge for variety.
         avoid_titles = avoid_titles[-MAX_AVOID_TITLES:]
 
-        stage("generating")
-        generated = await generate_problem(
-            self._llm_provider,
-            skill,
-            language.value,
-            difficulty,
-            cache=self._llm_cache,
-            source_problem=source_problem,
-            avoid_titles=avoid_titles,
-        )
+        generated = None
+        for attempt in range(2):
+            # The second pass regenerates without the cache: replaying a rejected cached
+            # answer would loop, and the rejected title joins the avoid list.
+            stage("generating" if attempt == 0 else "regenerating")
+            generated = await generate_problem(
+                self._llm_provider,
+                skill,
+                language.value,
+                difficulty,
+                cache=self._llm_cache if attempt == 0 else None,
+                source_problem=source_problem,
+                avoid_titles=avoid_titles if attempt == 0 else avoid_titles + [generated.title],
+            )
 
-        # A question the bank already has is served from the bank: already validated, not
-        # yet seen by this learner, and no further LLM call.
-        duplicate_of = await self._find_duplicate(generated, source_problem, language, exclude_problem_ids)
-        if duplicate_of is not None:
-            return duplicate_of
+            # A question the bank already has is served from the bank: already validated, not
+            # yet seen by this learner, and no further LLM call.
+            duplicate_of = await self._find_duplicate(
+                generated, source_problem, language, exclude_problem_ids
+            )
+            if duplicate_of is not None:
+                return duplicate_of
 
-        problem = await self._validate_or_repair(
-            generated, skill, language, difficulty, source_problem, stage
-        )
-        if problem is not None:
-            return problem
-
-        # Regenerate without cache (replaying rejected cached answer would loop).
-        stage("regenerating")
-        generated = await generate_problem(
-            self._llm_provider,
-            skill,
-            language.value,
-            difficulty,
-            cache=None,
-            source_problem=source_problem,
-            avoid_titles=avoid_titles + [generated.title],
-        )
-        duplicate_of = await self._find_duplicate(generated, source_problem, language, exclude_problem_ids)
-        if duplicate_of is not None:
-            return duplicate_of
-
-        return await self._validate_or_repair(
-            generated, skill, language, difficulty, source_problem, stage
-        )
+            problem = await self._validate_or_repair(
+                generated, skill, language, difficulty, source_problem, stage
+            )
+            if problem is not None:
+                return problem
+        return None
 
     async def _validate_or_repair(
         self,
@@ -162,25 +143,21 @@ class ProblemValidationService:
         bare validate and no second chance, which threw away the cheapest fix available at
         exactly the point the budget was nearly spent."""
         stage("validating")
-        problem, failure = await self._validate(
-            generated, _conceptual_id(generated.title), skill, language, difficulty
-        )
-        if problem is not None:
-            return problem
+        result = await self._validate(generated, skill, language, difficulty)
+        if isinstance(result, Problem):
+            return result
 
         stage("patching")
         patch = await patch_problem(
-            self._llm_provider, generated, failure.kind, failure.detail, language.value
+            self._llm_provider, generated, result.kind, result.detail, language.value
         )
         patched = apply_patch(generated, patch, source_problem)
         if patched is generated:
             return None
 
         stage("revalidating")
-        problem, _ = await self._validate(
-            patched, _conceptual_id(patched.title), skill, language, difficulty
-        )
-        return problem
+        repaired = await self._validate(patched, skill, language, difficulty)
+        return repaired if isinstance(repaired, Problem) else None
 
     async def _find_duplicate(
         self,
@@ -199,19 +176,17 @@ class ProblemValidationService:
     async def _validate(
         self,
         generated: GeneratedProblem,
-        conceptual_id: str,
         skill: str,
         language: Language,
         difficulty: str,
-    ) -> tuple[Problem, None] | tuple[None, ValidationFailure]:
-        """Returns the approved problem, or None paired with why it was rejected. The
-        failure is the input to the repair attempt, so every rejection has to carry one."""
+    ) -> Problem | ValidationFailure:
+        """Returns the approved problem, or why it was rejected. The failure is the input to
+        the repair attempt, so every rejection has to carry one."""
         skill_ids = [
             await self._skill_repository.ensure_skill(name) for name in (generated.skills or [skill])
         ]
         problem = Problem(
             id=str(uuid.uuid4()),
-            conceptual_id=conceptual_id,
             title=generated.title,
             language=language,
             difficulty=difficulty,
@@ -253,7 +228,7 @@ class ProblemValidationService:
 
         # The correctness check: the reference must match the statement's examples.
         if any(
-            normalise_output(result.actual_output) != normalise_output(example.output)
+            comparable_output(result.actual_output) != comparable_output(example.output)
             for example, result in zip(examples, results, strict=False)
         ):
             return await self._mark_invalid(problem, mismatch_failure(examples, results))
@@ -299,7 +274,7 @@ class ProblemValidationService:
 
         approved = problem.model_copy(update={"status": ProblemStatus.AVAILABLE})
         await self._repository.save(approved)
-        return approved, None
+        return approved
 
     async def _measure_stress(
         self, language: Language, reference_program: str, stress_test: str | None
@@ -325,8 +300,8 @@ class ProblemValidationService:
 
     async def _mark_invalid(
         self, problem: Problem, failure: ValidationFailure
-    ) -> tuple[None, ValidationFailure]:
+    ) -> ValidationFailure:
         invalid = problem.model_copy(update={"status": ProblemStatus.INVALID})
         await self._repository.save(invalid)
         logger.info("Problem %r rejected (%s): %s", problem.title, failure.kind, failure.detail)
-        return None, failure
+        return failure

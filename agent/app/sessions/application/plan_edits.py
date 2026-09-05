@@ -214,8 +214,6 @@ def build(operation: str, args: dict, plan_id: str, curriculum, user_message: st
     had fixed a question. An unnamed operation still reworks: that is a broad request, not
     a wrong one.
     """
-    if not operation:
-        return _rework(args, plan_id, curriculum, user_message)
     handler = PLAN_EDITS.get(operation)
     if handler is None:
         return Refusal(

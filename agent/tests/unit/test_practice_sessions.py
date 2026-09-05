@@ -47,7 +47,6 @@ class _NeverGenerates:
 async def _seed_bank_problem(db_path: str, problem_id: str = "p1") -> Problem:
     problem = Problem(
         id=problem_id,
-        conceptual_id=f"c-{problem_id}",
         title="Bank Problem",
         language=Language.PYTHON,
         difficulty="easy",
@@ -161,14 +160,14 @@ async def test_edit_plan_regenerates_a_step_whose_difficulty_actually_changed(db
     session = await sessions.create_session("local-user")
     await SqliteProblemRepository(db_path).save(
         Problem(
-            id="p-easy", conceptual_id="c-easy", title="Easy One", language=Language.PYTHON,
+            id="p-easy", title="Easy One", language=Language.PYTHON,
             difficulty="easy", status=ProblemStatus.AVAILABLE, skill_ids=["skill-1"],
             created_at=datetime.now(UTC),
         )
     )
     await SqliteProblemRepository(db_path).save(
         Problem(
-            id="p-hard", conceptual_id="c-hard", title="Hard One", language=Language.PYTHON,
+            id="p-hard", title="Hard One", language=Language.PYTHON,
             difficulty="hard", status=ProblemStatus.AVAILABLE, skill_ids=["skill-1"],
             created_at=datetime.now(UTC),
         )
@@ -234,7 +233,7 @@ async def test_set_step_difficulty_regenerates_only_the_targeted_step(db_path: s
     for problem_id, difficulty in [("p-easy", "easy"), ("p-hard", "hard")]:
         await SqliteProblemRepository(db_path).save(
             Problem(
-                id=problem_id, conceptual_id=f"c-{problem_id}", title=problem_id,
+                id=problem_id, title=problem_id,
                 language=Language.PYTHON, difficulty=difficulty, status=ProblemStatus.AVAILABLE,
                 skill_ids=["skill-1"], created_at=datetime.now(UTC),
             )
@@ -335,7 +334,7 @@ async def test_set_plan_language_regenerates_an_untouched_next_problem(db_path: 
     await _seed_bank_problem(db_path, "p-py")
     await SqliteProblemRepository(db_path).save(
         Problem(
-            id="p-java", conceptual_id="c-java", title="Bank Problem Java",
+            id="p-java", title="Bank Problem Java",
             language=Language.JAVA, difficulty="easy", status=ProblemStatus.AVAILABLE,
             skill_ids=["skill-1"], created_at=datetime.now(UTC),
         )
@@ -364,7 +363,7 @@ async def test_set_plan_language_also_regenerates_an_in_progress_session(db_path
     await _seed_bank_problem(db_path, "p-py")
     await SqliteProblemRepository(db_path).save(
         Problem(
-            id="p-java", conceptual_id="c-java", title="Bank Problem Java",
+            id="p-java", title="Bank Problem Java",
             language=Language.JAVA, difficulty="easy", status=ProblemStatus.AVAILABLE,
             skill_ids=["skill-1"], created_at=datetime.now(UTC),
         )

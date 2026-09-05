@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from app.llm.prompts.chat import mastery_context
 from app.mastery.application.services import MasteryService
 from app.mastery.domain.models import UserSkillState
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.revision.application.services import RevisionService, decayed_score, suggest_difficulty
 from app.revision.domain.models import RevisionCandidate
+from app.sessions.application.tool_results import mastery_context
 from tests.db import apply_migrations, seed_skills, seed_users
 
 

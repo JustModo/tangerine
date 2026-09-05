@@ -3,7 +3,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.curriculum.api.deps import get_problem_session_service
 from app.curriculum.application.code_helper import CodeHelperService
 from app.curriculum.application.problem_sessions import ProblemSessionService
 from app.curriculum.domain.problem_chat import ProblemChatMessage
@@ -11,16 +10,17 @@ from app.curriculum.domain.problem_session import ProblemSession, ProblemSession
 from app.curriculum.infrastructure.sqlite_problem_session_repository import (
     SqliteProblemSessionRepository,
 )
+from app.deps import (
+    get_evaluation_service,
+    get_problem_repository,
+    get_problem_session_service,
+)
 from app.evaluation.application.services import EvaluationService
 from app.evaluation.domain.models import AttemptMetrics, Evaluation
-from app.evaluation.infrastructure.sqlite_repository import SqliteEvaluationRepository
-from app.execution.application.services import ExecutionService
 from app.execution.domain.models import ExecutionRequest
 from app.execution.domain.models import TestCase as ExecutionTestCase
 from app.execution.infrastructure.citron_adapter import CitronAdapter
 from app.llm.infrastructure.gemini.provider import GeminiProvider
-from app.mastery.application.services import MasteryService
-from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.code_assembly import assemble_program
 from app.shared.hashing import hash_output
@@ -146,7 +146,9 @@ async def set_flagged(
 
 @router.get("/{session_id}/solution")
 async def get_solution(
-    session_id: str, service: ProblemSessionService = Depends(get_service)
+    session_id: str,
+    service: ProblemSessionService = Depends(get_service),
+    problems: SqliteProblemRepository = Depends(get_problem_repository),
 ) -> dict:
     """The reference program, revealed only once the learner has actually solved it.
 
@@ -162,7 +164,7 @@ async def get_solution(
             status_code=403, detail="Solve this problem first — the solution unlocks once you pass."
         )
 
-    version = await SqliteProblemRepository().get_latest_version(session.problem_id)
+    version = await problems.get_latest_version(session.problem_id)
     if version is None:
         raise HTTPException(status_code=404, detail="Problem not found")
     return {"reference_solution": version.reference_solution}
@@ -177,7 +179,10 @@ async def save_code(
 
 @router.post("/{session_id}/run")
 async def run(
-    session_id: str, body: SourceCodeBody, service: ProblemSessionService = Depends(get_service)
+    session_id: str,
+    body: SourceCodeBody,
+    service: ProblemSessionService = Depends(get_service),
+    problems: SqliteProblemRepository = Depends(get_problem_repository),
 ) -> StreamingResponse:
     """Runs the problem's visible examples (not graded) — the "Run" action, distinct from
     "Submit" which grades against hidden tests."""
@@ -186,13 +191,11 @@ async def run(
         raise HTTPException(status_code=404, detail="Problem session not found")
     await service.save_code(session_id, body.source_code)
 
-    problem_repo = SqliteProblemRepository()
-    problem = await problem_repo.get(session.problem_id)
-    version = await problem_repo.get_latest_version(session.problem_id)
+    problem = await problems.get(session.problem_id)
+    version = await problems.get_latest_version(session.problem_id)
     if problem is None or version is None:
         raise HTTPException(status_code=404, detail="Problem not found")
 
-    execution_service = ExecutionService(CitronAdapter())
     request = ExecutionRequest(
         language=problem.language,
         code=assemble_program(version.pre_code, body.source_code, version.post_code),
@@ -203,7 +206,7 @@ async def run(
     )
 
     stream = sse_stream(
-        execution_service.run(request),
+        CitronAdapter().execute(request),
         context=f"run problem_session={session_id}",
         encode=lambda result: f"data: {result.model_dump_json()}\n\n",
         error_message="Couldn't run your code — the sandbox is unreachable.",
@@ -213,24 +216,21 @@ async def run(
 
 @router.post("/{session_id}/submit")
 async def submit(
-    session_id: str, body: SubmitBody, service: ProblemSessionService = Depends(get_service)
+    session_id: str,
+    body: SubmitBody,
+    service: ProblemSessionService = Depends(get_service),
+    eval_service: EvaluationService = Depends(get_evaluation_service),
+    problems: SqliteProblemRepository = Depends(get_problem_repository),
 ) -> Evaluation:
     session = await service.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Problem session not found")
     await service.save_code(session_id, body.source_code)
 
-    problem_repo = SqliteProblemRepository()
-    problem = await problem_repo.get(session.problem_id)
+    problem = await problems.get(session.problem_id)
     if problem is None:
         raise HTTPException(status_code=404, detail="Problem not found")
 
-    eval_service = EvaluationService(
-        SqliteEvaluationRepository(),
-        problem_repo,
-        CitronAdapter(),
-        MasteryService(SqliteUserSkillStateRepository()),
-    )
     evaluation = await eval_service.evaluate(
         session.problem_id, LOCAL_USER_ID, problem.language, body.source_code, body.metrics
     )

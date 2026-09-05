@@ -5,7 +5,7 @@ from typing import TypedDict
 from langgraph.graph import END, StateGraph
 
 from app.llm.domain.provider import LLMProvider
-from app.llm.graphs.shared import MAX_ATTEMPTS, attempt, cached_generate, route, run_graph
+from app.llm.graphs.shared import MAX_SCHEMA_ATTEMPTS, attempt, cached_generate, route, run_graph
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.prompts.lesson_notes import (
     LESSON_NOTES_SYSTEM_PROMPT,
@@ -64,7 +64,7 @@ def build_lesson_notes_graph(provider: LLMProvider, verifier: LessonNotesVerifie
             return state
 
         attempts = state["attempts"] + 1
-        if attempts >= MAX_ATTEMPTS:
+        if attempts >= MAX_SCHEMA_ATTEMPTS:
             logger.warning("Serving lesson notes with an unverified trace: %s", error)
             return {**state, "attempts": attempts}
         return {**state, "result": None, "error": error, "attempts": attempts}
