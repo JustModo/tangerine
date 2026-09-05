@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from app.curriculum.domain.models import LessonPlan
 from app.llm.domain.requests import ChatTurn, ToolDeclaration
 
 
@@ -26,7 +27,7 @@ class ToolContext:
     args: dict
     history: list[ChatTurn]
     message: str
-    existing_plan: bool
+    active_plan: LessonPlan | None
     user_id: str | None
     depth: int
     note_id: str | None = None
@@ -36,6 +37,6 @@ class ToolContext:
 class ToolSpec:
     tool: ToolDeclaration
     handler: Callable[..., AsyncIterator[dict]]
-    # (service, existing_plan, user_id) -> bool. Some tools need a collaborator that may not
+    # (service, active_plan, user_id) -> bool. Some tools need a collaborator that may not
     # be wired up, and offering one whose handler cannot run is worse than not offering it.
-    available: Callable[[Any, bool, str | None], bool]
+    available: Callable[[Any, LessonPlan | None, str | None], bool]

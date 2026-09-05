@@ -5,10 +5,11 @@ from pathlib import Path
 import pytest
 
 from app.curriculum.application.services import CurriculumService
-from app.curriculum.domain.models import LessonNodeStatus, LessonPlan
+from app.curriculum.domain.models import LessonNode, LessonNodeStatus, LessonPlan
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
 from app.llm.domain.requests import ChatChunk, ToolCallResult
 from app.llm.infrastructure.cache import SqliteLLMCache
+from app.llm.prompts.chat import plan_context
 from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
 from app.llm.schemas.plan_edit import RevisedCurriculum, RevisedStep
 from app.mastery.domain.models import UserSkillState
@@ -1074,12 +1075,51 @@ async def test_edit_plan_missing_operation_falls_back_to_rework(db_path: str) ->
     assert called == ["do the thing"]
 
 
+def _plan_with_steps(count: int = 9) -> LessonPlan:
+    now = datetime.now(UTC)
+    return LessonPlan(
+        id="plan-1",
+        session_id="session-1",
+        topic="dynamic programming",
+        language=Language.PYTHON,
+        level="interview",
+        version=1,
+        created_at=now,
+        nodes=[
+            LessonNode(
+                id=f"node-{i}",
+                lesson_plan_id="plan-1",
+                skill_id=f"skill-{i}",
+                skill_name=f"step {i} skill",
+                sequence_index=i,
+                status=LessonNodeStatus.LOCKED,
+                created_at=now,
+            )
+            for i in range(count)
+        ],
+    )
+
+
+def test_plan_context_lists_every_step_in_order() -> None:
+    """The bug this replaced: asked what was on a nine-step plan, the model had no plan in
+    context at all and answered off the find_problems memo, naming five problems."""
+    text = plan_context(_plan_with_steps())
+
+    assert "9 steps" in text
+    for i in range(9):
+        assert f"{i + 1}. step {i} skill" in text
+
+
+def test_plan_context_refuses_to_describe_a_plan_that_does_not_exist() -> None:
+    assert "NO PLAN EXISTS" in plan_context(None)
+
+
 def _expected_tools(has_revision, has_library, has_sessions, has_curriculum, existing_plan, user_id):
     """The gating rules spelled out independently of the implementation, so a registry that
     mis-transcribes one is caught rather than silently hiding a tool from the model."""
     names = ["generate_learning_plan"]
     if existing_plan:
-        names.append("edit_learning_plan")
+        names += ["edit_learning_plan", "get_learning_plan"]
     if has_revision and user_id:
         names.append("get_practice_record")
     if has_library and has_sessions and user_id:
@@ -1102,6 +1142,7 @@ def test_tools_offered_match_the_gating_rules(db_path, existing_plan, user_id, w
         library_service=sentinel if wired else None,
     )
 
-    offered = [t.name for t in service._tools_for(existing_plan, user_id)]
+    plan = _plan_with_steps() if existing_plan else None
+    offered = [t.name for t in service._tools_for(plan, user_id)]
 
     assert offered == _expected_tools(wired, wired, wired, wired, existing_plan, user_id)

@@ -1,3 +1,4 @@
+from app.curriculum.domain.models import LessonPlan
 from app.llm.domain.requests import ToolDeclaration
 from app.revision.domain.models import RevisionCandidate
 from app.shared.types import Language
@@ -45,9 +46,12 @@ CHAT_SYSTEM_PROMPT_BASE = (
     "as having what you need — act on it, don't ask again.\n\n"
 
     "QUESTIONS ARE NOT REQUESTS. If the user asks something ABOUT the plan — 'is my "
-    "problem in there?', 'what does step 3 cover?', 'how many steps are there?' — just "
-    "answer it from the conversation. Do NOT call any tool: rebuilding or editing the "
-    "plan because they asked a question destroys work they never asked you to touch.\n\n"
+    "problem in there?', 'what does step 3 cover?', 'how many steps are there?' — call "
+    "get_learning_plan and answer from what it returns. It is a read-only lookup and it "
+    "is the ONLY thing that knows what the plan holds; the conversation does not, and a "
+    "problems list is not the plan. Never reach for generate_learning_plan or "
+    "edit_learning_plan to answer a question: rebuilding or editing the plan because they "
+    "asked about it destroys work they never asked you to touch.\n\n"
 
     "If the user PASTES a specific coding problem, don't ask them to pick a topic — that "
     "problem is the goal; you still need their language. Call generate_learning_plan with "
@@ -406,6 +410,18 @@ SET_PROBLEM_FLAG_TOOL = ToolDeclaration(
     },
 )
 
+GET_PLAN_TOOL = ToolDeclaration(
+    name="get_learning_plan",
+    description=(
+        "Read the learner's current plan: every step in order, with its skill, the problem "
+        "on it, its status and difficulty. Call this before answering ANY question about "
+        "the plan — 'what's on my plan', 'what is step 5', 'how many steps', 'is X in "
+        "there' — you cannot know its contents otherwise. Read-only: it changes nothing. "
+        "Takes no arguments."
+    ),
+    parameters_schema={"type": "object", "properties": {}},
+)
+
 PRACTICE_RECORD_TOOL = ToolDeclaration(
     name="get_practice_record",
     description=(
@@ -516,8 +532,39 @@ def library_memo(entries: list) -> str:
     return "\n".join(lines)
 
 
+def plan_context(plan: LessonPlan | None) -> str:
+    """Renders the get_learning_plan tool result for the model.
+
+    Fetched on request rather than injected every turn: a plan is a dozen lines the model
+    needs on the handful of turns that ask about it. Nothing else in its context knows what
+    the plan holds — asked without this, it answered from library_memo, which is a list of
+    recently-viewed problems, and reported five steps for a nine-step plan.
+    """
+    if plan is None:
+        return (
+            "NO PLAN EXISTS for this session — there is nothing to describe. Say so plainly "
+            "and ask what they want to learn. Do NOT invent steps."
+        )
+
+    lines = [
+        f"CURRENT PLAN — '{plan.topic}' ({plan.language.value}, {plan.level}), "
+        f"{len(plan.nodes)} steps:"
+    ]
+    lines += [
+        f"{node.sequence_index + 1}. {node.skill_name or node.skill_id}"
+        f"{f' — {node.problem_title}' if node.problem_title else ''}"
+        f" [{node.status.lower()}{f', {node.difficulty}' if node.difficulty else ''}]"
+        for node in plan.nodes
+    ]
+    lines.append(
+        "That is every step, in order. Answer anything they ask about the plan from this "
+        "list alone — never from a problems list, never from memory of earlier turns."
+    )
+    return "\n".join(lines)
+
+
 def chat_system_prompt(
-    existing_plan: bool,
+    plan: LessonPlan | None,
     default_language: str = "ask",
     has_record: bool = True,
     has_library: bool = True,
@@ -538,8 +585,8 @@ def chat_system_prompt(
         "that discards their progress and builds from scratch. Only call "
         "generate_learning_plan if they want a plan for a genuinely different topic or "
         "level. If they are only ASKING about the existing plan rather than asking you to "
-        "change it, answer in words and call no tool at all."
-        if existing_plan
+        "change it, call get_learning_plan and answer from what it returns."
+        if plan
         else "\n\nNo learning plan exists yet for this session."
     )
     # Static blocks first, per-session notes last. Gemini bills a repeated prompt PREFIX at
