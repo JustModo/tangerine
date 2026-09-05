@@ -22,6 +22,7 @@ from app.problems.infrastructure.sqlite_repository import SqliteProblemRepositor
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.sessions.application.services import SessionService
 from app.sessions.infrastructure.sqlite_repository import SqliteSessionRepository
+from app.shared.errors import ConflictError
 from app.shared.types import Language
 from tests.db import apply_migrations, seed_lesson_node, seed_skills, seed_users
 from tests.fakes import FakeLLMProvider
@@ -445,3 +446,56 @@ async def test_starting_a_node_twice_resumes_instead_of_regenerating(db_path: st
     # And no second row was written for the same node.
     assert len(await SqliteProblemSessionRepository(db_path).list_for_user("local-user")) == 1
     assert (await plan_repo.get_node("node-1")).status == LessonNodeStatus.IN_PROGRESS
+
+
+def _curriculum(db_path: str) -> CurriculumService:
+    return CurriculumService(
+        SqliteLessonPlanRepository(db_path),
+        FakeLLMProvider(),
+        skill_repository=SqliteSkillRepository(db_path),
+        problem_session_repository=SqliteProblemSessionRepository(db_path),
+        problem_repository=SqliteProblemRepository(db_path),
+    )
+
+
+async def test_regenerating_a_step_retires_its_problem_and_serves_a_different_one(
+    db_path: str,
+) -> None:
+    """The reported bug: asked to regenerate a step's question, the chat reworked the plan,
+    changed nothing, and the step reopened the identical problem for ever."""
+    seed_lesson_node(db_path, "node-1")
+    await _seed_bank_problem(db_path, "p1")
+    await _seed_bank_problem(db_path, "p2")
+    problem_sessions = _service(db_path)
+
+    first = await problem_sessions.next_problem("lp-node-1", "local-user")
+    await _curriculum(db_path).regenerate_step_problem("lp-node-1", "1")
+    second = await problem_sessions.next_problem("lp-node-1", "local-user")
+
+    assert second.problem_id != first.problem_id
+    retired = await SqliteProblemRepository(db_path).get(first.problem_id)
+    assert retired is not None and retired.status == ProblemStatus.INVALID
+
+
+async def test_regenerating_a_step_will_not_discard_graded_work(db_path: str) -> None:
+    seed_lesson_node(db_path, "node-1")
+    await _seed_bank_problem(db_path, "p1")
+    problem_sessions = _service(db_path)
+
+    session = await problem_sessions.next_problem("lp-node-1", "local-user")
+    await problem_sessions.save_code(session.id, "code")
+    await problem_sessions.record_submission(session.id, passed=False)
+
+    with pytest.raises(ConflictError):
+        await _curriculum(db_path).regenerate_step_problem("lp-node-1", "1")
+
+    assert await SqliteProblemSessionRepository(db_path).get(session.id) is not None
+
+
+async def test_regenerating_a_step_never_opened_says_so_rather_than_pretending(
+    db_path: str,
+) -> None:
+    seed_lesson_node(db_path, "node-1")
+
+    with pytest.raises(ConflictError):
+        await _curriculum(db_path).regenerate_step_problem("lp-node-1", "1")

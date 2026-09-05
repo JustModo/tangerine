@@ -9,11 +9,12 @@ from app.curriculum.domain.models import LessonNode, LessonNodeStatus, LessonPla
 from app.curriculum.infrastructure.sqlite_repository import SqliteLessonPlanRepository
 from app.llm.domain.requests import ChatChunk, ToolCallResult
 from app.llm.infrastructure.cache import SqliteLLMCache
-from app.llm.prompts.chat import plan_context
+from app.llm.prompts.chat import plan_context, step_problem_context
 from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumNode
 from app.llm.schemas.plan_edit import RevisedCurriculum, RevisedStep
 from app.mastery.domain.models import UserSkillState
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
+from app.problems.domain.models import Problem, ProblemExample, ProblemStatus, ProblemVersion
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.revision.domain.models import RevisionCandidate
 from app.sessions.application.services import SessionService
@@ -1042,12 +1043,15 @@ async def test_edit_plan_refuses_incomplete_arguments(db_path: str, args: dict, 
     assert events[-1]["type"] == "done"
 
 
-async def test_edit_plan_unknown_operation_falls_back_to_rework(db_path: str) -> None:
-    service, curriculum, session_id, plan = await _plan_and_service(db_path)
-    called: list[tuple[str, str]] = []
+async def test_edit_plan_refuses_an_operation_that_does_not_exist(db_path: str) -> None:
+    """It used to rework instead. A request this chat cannot serve then came back as a
+    whole-plan rework that changed nothing and reported success, and the model told the
+    user it had fixed the thing they asked about."""
+    service, curriculum, session_id, _ = await _plan_and_service(db_path)
+    called: list[str] = []
 
     async def fake_edit_plan(plan_id: str, instruction: str):
-        called.append((plan_id, instruction))
+        called.append(instruction)
         return await curriculum.get(plan_id)
 
     curriculum.edit_plan = fake_edit_plan
@@ -1056,8 +1060,30 @@ async def test_edit_plan_unknown_operation_falls_back_to_rework(db_path: str) ->
         service, service._llm_provider, session_id, {"operation": "nonsense", "instruction": "mix it up"}
     )
 
-    assert called == [(plan.id, "mix it up")]
+    assert called == []
+    followup = service._llm_provider.last_chat_request.message
+    assert "NOT RUN" in followup and "nonsense" in followup
+    assert "regenerate_problem" in followup
     assert events[-1]["type"] == "done"
+
+
+async def test_a_rework_that_changed_nothing_is_reported_as_nothing(db_path: str) -> None:
+    """The unfalsifiable result string: 'Updated the plan' was emitted even when the rework
+    returned the identical plan, and the model narrated a fix that never happened."""
+    service, curriculum, session_id, _ = await _plan_and_service(db_path)
+
+    async def fake_edit_plan(plan_id: str, instruction: str):
+        return await curriculum.get(plan_id)
+
+    curriculum.edit_plan = fake_edit_plan
+
+    await _run_edit(
+        service, service._llm_provider, session_id, {"operation": "rework", "instruction": "fix it"}
+    )
+
+    followup = service._llm_provider.last_chat_request.message
+    assert "NOT CHANGED" in followup
+    assert "Updated the plan" not in followup
 
 
 async def test_edit_plan_missing_operation_falls_back_to_rework(db_path: str) -> None:
@@ -1112,6 +1138,49 @@ def test_plan_context_lists_every_step_in_order() -> None:
 
 def test_plan_context_refuses_to_describe_a_plan_that_does_not_exist() -> None:
     assert "NO PLAN EXISTS" in plan_context(None)
+
+
+def test_step_problem_context_shows_the_statement_and_every_example() -> None:
+    """What the agent could not see: asked whether step 5's test cases matched its
+    statement, it had only the title, and agreed with a complaint it never checked."""
+    node = _plan_with_steps(1).nodes[0]
+    problem = Problem(
+        id="p1",
+        conceptual_id="c1",
+        title="Longest Mountain Peak Subsequence",
+        language=Language.PYTHON,
+        difficulty="medium",
+        status=ProblemStatus.AVAILABLE,
+        created_at=datetime.now(UTC),
+    )
+    version = ProblemVersion(
+        id="v1",
+        problem_id="p1",
+        version=1,
+        statement_md="Find the longest mountain subsequence.",
+        reference_solution="print(0)",
+        constraints="3 <= n <= 1000",
+        examples=[
+            ProblemExample(id="e1", problem_version_id="v1", input="1 3 2 5 4 1", output="5"),
+            ProblemExample(id="e2", problem_version_id="v1", input="1 2 3 4 5", output="0"),
+        ],
+        created_at=datetime.now(UTC),
+    )
+
+    text = step_problem_context(node, problem, version)
+
+    assert "Find the longest mountain subsequence." in text
+    assert "3 <= n <= 1000" in text
+    assert "'1 3 2 5 4 1' -> output '5'" in text
+    assert "'1 2 3 4 5' -> output '0'" in text
+    # The reference solution must never reach the model — it is the answer.
+    assert "print(0)" not in text
+
+
+def test_step_problem_context_refuses_to_describe_a_step_with_no_question_yet() -> None:
+    node = _plan_with_steps(1).nodes[0]
+
+    assert "HAS NO QUESTION YET" in step_problem_context(node, None, None)
 
 
 def _expected_tools(has_revision, has_library, has_sessions, has_curriculum, existing_plan, user_id):

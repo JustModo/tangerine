@@ -4,6 +4,7 @@ from functools import partial
 
 from app.curriculum.application.lesson_verification import verify_lesson_code
 from app.curriculum.domain.models import LessonNode, LessonNodeStatus, LessonPlan
+from app.curriculum.domain.problem_session import ProblemSessionStatus
 from app.curriculum.domain.problem_session_repository import ProblemSessionRepository
 from app.curriculum.domain.repository import LessonPlanRepository
 from app.execution.domain.executor import CodeExecutor
@@ -14,6 +15,7 @@ from app.llm.graphs.plan_edit import revise_curriculum
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.schemas.lesson_notes import GeneratedLessonNotes
 from app.mastery.domain.repository import UserSkillStateRepository
+from app.problems.domain.models import ProblemStatus
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.shared.errors import ConflictError, NotFoundError
 from app.shared.types import Language
@@ -245,6 +247,74 @@ class CurriculumService:
             return
         for lesson_node_id in lesson_node_ids:
             await self._problem_session_repository.delete_unsubmitted_for_node(lesson_node_id)
+
+    async def _session_problem(self, node_id: str):
+        """The problem a step is actually serving, with its session and latest version.
+
+        A step's problem is bound by its problem session, not by the node row — so this is
+        the only way to answer "which question is on step 5". (None, None, None) when the
+        step has never been opened.
+        """
+        if self._problem_session_repository is None or self._problem_repository is None:
+            return None, None, None
+        session = await self._problem_session_repository.get_by_node(node_id)
+        if session is None:
+            return None, None, None
+        return (
+            session,
+            await self._problem_repository.get(session.problem_id),
+            await self._problem_repository.get_latest_version(session.problem_id),
+        )
+
+    async def step_problem(self, plan_id: str, step: str):
+        """(node, problem, version) for one step, so a caller can read the actual question.
+
+        Read-only counterpart to regenerate_step_problem — both have to agree on which step
+        the user meant, so both go through _resolve_step.
+        """
+        plan = await self._require_plan(plan_id)
+        node = self._resolve_step(plan, step)
+        _, problem, version = await self._session_problem(node.id)
+        return node, problem, version
+
+    async def regenerate_step_problem(self, plan_id: str, step: str) -> LessonPlan:
+        """Throws away the question on one step so the next open generates a different one.
+
+        Discarding the session alone is not enough: that also drops the problem from the
+        learner's seen list, and find_suitable would hand the very same row straight back.
+        Retiring it from the bank is what makes the regeneration stick.
+        """
+        plan = await self._require_plan(plan_id)
+        target = self._resolve_step(plan, step)
+        if target.problem_id:
+            raise ConflictError(
+                f"step {target.sequence_index + 1} is pinned to one specific problem they "
+                "asked for, so there is nothing to regenerate"
+            )
+
+        session, problem, _ = await self._session_problem(target.id)
+        if session is None:
+            raise ConflictError(
+                f"step {target.sequence_index + 1} has no question yet — it generates a "
+                "fresh one the first time they open it"
+            )
+        if session.status not in (
+            ProblemSessionStatus.NOT_STARTED,
+            ProblemSessionStatus.IN_PROGRESS,
+        ):
+            raise ConflictError(
+                f"step {target.sequence_index + 1} has already been submitted for grading, "
+                "and discarding graded work would lose their attempt"
+            )
+
+        if problem is not None and self._problem_repository is not None:
+            # ponytail: INVALID retires the problem for everyone, not just this learner.
+            # Fine while the bank is one user's; add a per-user exclusion table if it isn't.
+            await self._problem_repository.save(
+                problem.model_copy(update={"status": ProblemStatus.INVALID})
+            )
+        await self._invalidate_unsubmitted([target.id])
+        return await self._repository.get(plan_id) or plan
 
     def _resolve_step(self, plan: LessonPlan, step: str) -> LessonNode:
         """A step named either by its 1-indexed position (as shown in the plan UI) or its
@@ -478,12 +548,7 @@ class CurriculumService:
         if plan is None:
             raise NotFoundError(f"Lesson plan {node.lesson_plan_id} not found")
 
-        problem = version = None
-        if self._problem_session_repository is not None and self._problem_repository is not None:
-            session = await self._problem_session_repository.get_by_node(node_id)
-            if session is not None:
-                problem = await self._problem_repository.get(session.problem_id)
-                version = await self._problem_repository.get_latest_version(session.problem_id)
+        _, problem, version = await self._session_problem(node_id)
 
         # ponytail: lessons live in llm_cache keyed by (problem or skill, language, level)
         # — they're derivable and cheap to regenerate, so they need no table of their own.

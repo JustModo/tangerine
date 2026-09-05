@@ -142,6 +142,7 @@ EDIT_PLAN_TOOL = ToolDeclaration(
                     "add_problem",
                     "remove_step",
                     "reorder_step",
+                    "regenerate_problem",
                     "rework",
                 ],
                 "description": (
@@ -161,6 +162,12 @@ EDIT_PLAN_TOOL = ToolDeclaration(
                     "requires step.\n"
                     "reorder_step: move one existing step to a different position "
                     "('move step 4 to the start') — requires step and to_position.\n"
+                    "regenerate_problem: throw away the QUESTION on one step and get a "
+                    "different one ('this question is wrong', 'give me another problem for "
+                    "step 5', 'regenerate that') — requires step. The step itself stays; "
+                    "only the question is replaced, and it is written fresh when they next "
+                    "open that step. This is the ONLY operation that touches a question — "
+                    "rework cannot, and no operation can edit a statement or a test case.\n"
                     "rework: anything that doesn't fit the above — a genuinely broad "
                     "change ('redo the whole thing around graphs', 'focus more on "
                     "interview patterns') — requires instruction."
@@ -174,7 +181,8 @@ EDIT_PLAN_TOOL = ToolDeclaration(
             "step": {
                 "type": "string",
                 "description": (
-                    "change_step_difficulty/remove_step/reorder_step only: which existing "
+                    "change_step_difficulty/remove_step/reorder_step/regenerate_problem "
+                    "only: which existing "
                     "step, EXACTLY as the user identified it — its number as shown in the "
                     "plan (e.g. '3') or its skill/topic name (e.g. 'hash maps'). Never "
                     "guess a step the user didn't name."
@@ -416,10 +424,26 @@ GET_PLAN_TOOL = ToolDeclaration(
         "Read the learner's current plan: every step in order, with its skill, the problem "
         "on it, its status and difficulty. Call this before answering ANY question about "
         "the plan — 'what's on my plan', 'what is step 5', 'how many steps', 'is X in "
-        "there' — you cannot know its contents otherwise. Read-only: it changes nothing. "
-        "Takes no arguments."
+        "there' — you cannot know its contents otherwise. Pass step to also get that "
+        "step's full question: its statement, constraints and worked examples. You MUST "
+        "pass step before saying anything about what a question asks, whether its test "
+        "cases are right, or whether the user's complaint about it is correct — you cannot "
+        "see any of that otherwise, and agreeing about a question you have not read is how "
+        "you end up confirming a bug that does not exist. Read-only: it changes nothing."
     ),
-    parameters_schema={"type": "object", "properties": {}},
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "step": {
+                "type": "string",
+                "description": (
+                    "Optional: which step's full question to include, EXACTLY as the user "
+                    "identified it — its number as shown in the plan (e.g. '5') or its "
+                    "skill/topic name. Omit to list the steps alone."
+                ),
+            },
+        },
+    },
 )
 
 PRACTICE_RECORD_TOOL = ToolDeclaration(
@@ -560,6 +584,49 @@ def plan_context(plan: LessonPlan | None) -> str:
         "That is every step, in order. Answer anything they ask about the plan from this "
         "list alone — never from a problems list, never from memory of earlier turns."
     )
+    return "\n".join(lines)
+
+
+def step_problem_context(node, problem, version) -> str:
+    """Renders the actual question on one step: statement, constraints, worked examples.
+
+    The examples are the ONLY test cases anyone can see — the graded ones are stored as
+    hashes of the reference solution's own output, so there is nothing to show and nothing
+    to disagree with. Saying that here is the point: asked whether a hidden test was wrong,
+    the model has to answer that it cannot be rather than agree.
+    """
+    if problem is None or version is None:
+        return (
+            f"STEP {node.sequence_index + 1} ({node.skill_name or node.skill_id}) HAS NO "
+            "QUESTION YET — one is written the first time they open it, so there is nothing "
+            "to read and nothing to judge. Say exactly that; do not describe a question."
+        )
+
+    lines = [
+        f"STEP {node.sequence_index + 1} QUESTION — '{problem.title}' "
+        f"({problem.difficulty}, {problem.language.value}):",
+        "",
+        version.statement_md.strip(),
+    ]
+    if version.constraints:
+        lines += ["", f"Constraints: {version.constraints.strip()}"]
+    if version.examples:
+        lines.append("")
+        lines.append("Worked examples shown to the learner:")
+        for index, example in enumerate(version.examples, start=1):
+            lines.append(f"{index}. input {example.input!r} -> output {example.output!r}")
+            if example.explanation:
+                lines.append(f"   explanation: {' '.join(example.explanation.split())}")
+    lines += [
+        "",
+        "Every expected output above was produced by running the reference solution in the "
+        "sandbox, and a problem whose examples disagreed with that run is rejected before "
+        "it is ever served — so an output here cannot contradict the statement's logic. "
+        "Read the statement and the examples yourself before answering. If the user says a "
+        "test case is wrong, work it through and tell them what the right answer is, "
+        "including when that means telling them the question is fine. Do NOT agree that "
+        "something is broken because they said so.",
+    ]
     return "\n".join(lines)
 
 

@@ -21,6 +21,7 @@ from app.llm.prompts.chat import (
     library_memo,
     mastery_context,
     plan_context,
+    step_problem_context,
 )
 from app.revision.application.services import RevisionService
 from app.sessions.application import plan_edits
@@ -389,13 +390,15 @@ class SessionService:
         ):
             yield event
 
-    def _refuse(self, session_id, history, user_message, tool_name, summary, fallback, depth):
+    def _refuse(
+        self, session_id, history, user_message, tool_name, summary, fallback, depth, active_plan
+    ):
         """A tool call that never ran, and why. The summary is what the model reads."""
         return self._stream_tool_followup(
             session_id,
             history,
             user_message,
-            True,
+            active_plan,
             tool_name,
             summary,
             fallback,
@@ -437,6 +440,7 @@ class SessionService:
                 "something went wrong and they can try again.",
                 "I couldn't find a plan to edit — want to try again?",
                 depth,
+                call.active_plan,
             ):
                 yield event
             return
@@ -451,6 +455,7 @@ class SessionService:
                 outcome.summary,
                 outcome.fallback,
                 depth,
+                call.active_plan,
             ):
                 yield event
             return
@@ -486,7 +491,7 @@ class SessionService:
             session_id,
             history,
             user_message,
-            True,
+            plan if plan is not None else call.active_plan,
             "edit_learning_plan",
             result_summary,
             fallback,
@@ -502,7 +507,23 @@ class SessionService:
         The plan is already loaded for this turn, so answering costs no query — it is only
         gated behind a tool call so a dozen lines of steps stay out of the prompt on the
         turns that never ask about them."""
-        yield {"type": "tool_start", "label": "Reading your plan..."}
+        step = str(call.args.get("step") or "").strip()
+        yield {
+            "type": "tool_start",
+            "label": f"Reading step {step}..." if step else "Reading your plan...",
+        }
+
+        summary = plan_context(call.active_plan)
+        if step and call.active_plan is not None and self._curriculum_service is not None:
+            try:
+                node, problem, version = await self._curriculum_service.step_problem(
+                    call.active_plan.id, step
+                )
+                summary += f"\n\n{step_problem_context(node, problem, version)}"
+            except (NotFoundError, ConflictError) as exc:
+                summary += f"\n\nCould not read step '{step}': {exc}. Do not describe it."
+            except Exception:
+                logger.warning("Step lookup failed for %s", call.session_id, exc_info=True)
 
         async for event in self._stream_tool_followup(
             call.session_id,
@@ -510,16 +531,16 @@ class SessionService:
             call.message,
             call.active_plan,
             "get_learning_plan",
-            plan_context(call.active_plan),
+            summary,
             "I couldn't read your plan just then — want me to try again?",
             None,
             instruction=(
-                "Answer their question from this plan and nothing else. Use the step "
-                "numbers and names exactly as given, and never describe a step that is not "
-                "on the list."
+                "Answer their question from this and nothing else. Use the step numbers "
+                "and names exactly as given, and never describe a step, a question or a "
+                "test case that is not shown above."
             ),
             # Carried so a follow-up ('and step 6?') needs no second call.
-            memo=plan_context(call.active_plan),
+            memo=summary,
             depth=call.depth,
         ):
             yield event

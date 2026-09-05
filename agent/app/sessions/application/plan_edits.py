@@ -141,12 +141,56 @@ def _reorder_step(args: dict, plan_id: str, curriculum, user_message: str) -> Ou
     )
 
 
+def _regenerate_problem(args: dict, plan_id: str, curriculum, user_message: str) -> Outcome:
+    step = str(args.get("step") or "").strip()
+    if not step:
+        return Refusal(
+            "NOT RUN — no step named. Ask the user which step's question they want "
+            "replaced.",
+            "Which step's question should I replace?",
+        )
+    return PlanEdit(
+        f"Replacing step {step}'s question...",
+        lambda: curriculum.regenerate_step_problem(plan_id, step),
+        lambda plan: (
+            f"Retired step {step}'s question and discarded their attempt at it. The step "
+            "generates a different one the moment they open it. Tell them to open that "
+            "step to get it. The plan's steps are unchanged — say nothing about having "
+            "edited the question itself, because you did not: a new one is written on open."
+        ),
+    )
+
+
+def _step_shape(plan) -> list[tuple[int, str, str | None]]:
+    """What a rework is allowed to change. Compared before and after so a rework that came
+    back with the identical plan cannot be reported as a change that happened."""
+    return [(n.sequence_index, n.skill_name or n.skill_id, n.difficulty) for n in plan.nodes]
+
+
 def _rework(args: dict, plan_id: str, curriculum, user_message: str) -> Outcome:
     instruction = args.get("instruction") or user_message
+    before: list[tuple[int, str, str | None]] = []
+
+    async def run():
+        nonlocal before
+        current = await curriculum.get(plan_id)
+        before = _step_shape(current) if current is not None else []
+        return await curriculum.edit_plan(plan_id, instruction)
+
     return PlanEdit(
         "Updating your learning plan...",
-        lambda: curriculum.edit_plan(plan_id, instruction),
-        lambda plan: f"Updated the plan. {plan_step_summary(plan)}",
+        run,
+        lambda plan: (
+            # The failure this closes: a rework that returned the plan untouched still
+            # reported "Updated the plan", and the model narrated a fix that never happened.
+            f"NOT CHANGED — the rework came back with the same {len(plan.nodes)} steps, so "
+            "nothing was edited. Tell the user plainly that nothing changed and ask what "
+            "they want done differently. Do NOT claim anything was fixed or updated. If "
+            "they were asking about the QUESTION on a step rather than the step itself, "
+            "say a rework cannot touch a question and offer regenerate_problem."
+            if _step_shape(plan) == before
+            else f"Updated the plan. {plan_step_summary(plan)}"
+        ),
     )
 
 
@@ -157,10 +201,28 @@ PLAN_EDITS: dict[str, Callable[[dict, str, Any, str], Outcome]] = {
     "add_problem": _add_problem,
     "remove_step": _remove_step,
     "reorder_step": _reorder_step,
+    "regenerate_problem": _regenerate_problem,
     "rework": _rework,
 }
 
 
 def build(operation: str, args: dict, plan_id: str, curriculum, user_message: str) -> Outcome:
-    """Unrecognised operations rework, matching the old chain's else branch."""
-    return PLAN_EDITS.get(operation, _rework)(args, plan_id, curriculum, user_message)
+    """A NAMED operation that does not exist is refused, not quietly reworked.
+
+    Falling back to _rework meant the model asking for something this chat cannot do got a
+    whole-plan rework that changed nothing and reported success — it then told the user it
+    had fixed a question. An unnamed operation still reworks: that is a broad request, not
+    a wrong one.
+    """
+    if not operation:
+        return _rework(args, plan_id, curriculum, user_message)
+    handler = PLAN_EDITS.get(operation)
+    if handler is None:
+        return Refusal(
+            f"NOT RUN — '{operation}' is not one of the operations and NOTHING was changed. "
+            f"The operations are: {', '.join(PLAN_EDITS)}. Either call this again with the "
+            "one that matches what they asked, or tell them plainly that this chat cannot "
+            "do it. Never describe it as done.",
+            "I can't do that to your plan — could you put it another way?",
+        )
+    return handler(args, plan_id, curriculum, user_message)
