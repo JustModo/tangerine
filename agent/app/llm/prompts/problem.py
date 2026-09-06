@@ -16,9 +16,21 @@ _PROBLEM_INTRO = (
 
 _EXAMPLE_FORMAT = (
     "Each example's explanation: 2-4 short lines separated by \\n (a real multi-line "
-    "string), not one long paragraph. First line states the key insight; the remaining "
-    "lines briefly walk through how that example's specific numbers produce its output. "
-    "Keep each line under ~15 words.\n\n"
+    "string), each under ~15 words. Show the arithmetic that turns THIS input into THIS "
+    "output, in the order a solver would do it, ending on the stated output.\n"
+    "- Do the maths first and check it. Every number you write must be correct; a wrong "
+    "intermediate value is worse than giving no explanation at all.\n"
+    "- Show the work, never assert the result: `12 -> 1 x 2 = 2, prime`, not 'four numbers "
+    "satisfy the condition'. If listing every qualifying item is too long, show two worked "
+    "and give the count.\n"
+    "- Never name the approach or technique. No 'use dynamic programming', 'two pointers', "
+    "'greedy', 'we check each number in the range'. The explanation justifies the ANSWER, "
+    "not the method, and the method is what the learner is meant to find.\n"
+    "- No restating the question, no closing line that repeats the output as prose.\n"
+    "- Never think out loud. No 'wait', 'let us check', no mid-text correction, no "
+    "hedging, no question marks. Write only the finished reasoning.\n"
+    "- It renders as markdown, so a bare `*` becomes italics: write products as `1 x 2` or "
+    "wrap the expression in backticks. Same for `_`.\n\n"
 )
 
 _CODE_SHAPE = (

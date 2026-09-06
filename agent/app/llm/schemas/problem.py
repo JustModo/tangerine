@@ -6,8 +6,8 @@ class GeneratedExample(BaseModel):
     output: str
     explanation: str | None = Field(
         default=None,
-        description="2-4 short lines separated by \\n, walking through the reasoning step "
-        "by step — never one long paragraph.",
+        description="2-4 short lines separated by \\n, showing the arithmetic that turns "
+        "this input into this output. Correct numbers only, no technique names.",
     )
 
 
