@@ -12,6 +12,12 @@ _PROBLEM_INTRO = (
 
     "title: concise, 5-6 words maximum (e.g. 'Reverse a Linked List', 'Two Sum with Hash "
     "Map') — never a full sentence or a restatement of the whole problem.\n\n"
+
+    "statement_md: state the task exactly once, in one consistent framing, and stop. "
+    "Never think out loud while writing it — no 'wait', no second-guessing the definition "
+    "mid-paragraph, no 'more precisely' or 'specifically' walkback that redefines what was "
+    "just said. Decide what the problem asks before writing the first sentence, then write "
+    "only that finished statement.\n\n"
 )
 
 _EXAMPLE_FORMAT = (

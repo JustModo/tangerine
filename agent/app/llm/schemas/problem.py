@@ -13,7 +13,11 @@ class GeneratedExample(BaseModel):
 
 class GeneratedProblem(BaseModel):
     title: str = Field(description="Concise title, 5-6 words maximum.")
-    statement_md: str
+    statement_md: str = Field(
+        description="The problem, stated exactly once in one consistent framing. No "
+        "thinking out loud, no 'wait'/'more precisely' walkbacks that redefine the task "
+        "mid-paragraph."
+    )
     difficulty: str
     skills: list[str]
     # Hidden harness concatenated before execution; see code_assembly.py.
