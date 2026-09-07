@@ -1,3 +1,4 @@
+import json
 import aiosqlite
 
 from app.curriculum.domain.problem_chat import ProblemChatMessage
@@ -79,11 +80,6 @@ class SqliteProblemSessionRepository:
         an in-progress attempt the learner realizes no longer fits."""
         async with connect(self._database_path) as db:
             await db.execute(
-                "DELETE FROM problem_chat_messages WHERE problem_session_id IN ("
-                "SELECT id FROM problem_sessions WHERE lesson_node_id = ? AND status IN (?, ?))",
-                (lesson_node_id, "NOT_STARTED", "IN_PROGRESS"),
-            )
-            await db.execute(
                 "DELETE FROM problem_sessions WHERE lesson_node_id = ? AND status IN (?, ?)",
                 (lesson_node_id, "NOT_STARTED", "IN_PROGRESS"),
             )
@@ -108,36 +104,40 @@ class SqliteProblemSessionRepository:
 
     async def add_chat_message(self, message: ProblemChatMessage) -> None:
         async with connect(self._database_path) as db:
+            msg_dict = {
+                "id": message.id,
+                "problem_session_id": message.problem_session_id,
+                "role": message.role,
+                "content": message.content,
+                "created_at": message.created_at.isoformat(),
+            }
             await db.execute(
-                "INSERT INTO problem_chat_messages "
-                "(id, problem_session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
-                (
-                    message.id,
-                    message.problem_session_id,
-                    message.role,
-                    message.content,
-                    message.created_at.isoformat(),
-                ),
+                "UPDATE problem_sessions SET "
+                "messages_json = json_insert(messages_json, '$[#]', json(?)), "
+                "updated_at = ? WHERE id = ?",
+                (json.dumps(msg_dict), message.created_at.isoformat(), message.problem_session_id),
             )
             await db.commit()
 
     async def list_chat_messages(self, problem_session_id: str) -> list[ProblemChatMessage]:
         async with connect(self._database_path) as db:
             cursor = await db.execute(
-                "SELECT * FROM problem_chat_messages WHERE problem_session_id = ? "
-                "ORDER BY created_at ASC",
+                "SELECT messages_json FROM problem_sessions WHERE id = ?",
                 (problem_session_id,),
             )
-            rows = await cursor.fetchall()
+            row = await cursor.fetchone()
+            if not row or not row[0]:
+                return []
+            raw_messages = json.loads(row[0] or "[]")
             return [
                 ProblemChatMessage(
-                    id=row["id"],
-                    problem_session_id=row["problem_session_id"],
-                    role=row["role"],
-                    content=row["content"],
-                    created_at=row["created_at"],
+                    id=m["id"],
+                    problem_session_id=m.get("problem_session_id", problem_session_id),
+                    role=m["role"],
+                    content=m["content"],
+                    created_at=m["created_at"],
                 )
-                for row in rows
+                for m in raw_messages
             ]
 
     def _hydrate(self, row: aiosqlite.Row) -> ProblemSession:
