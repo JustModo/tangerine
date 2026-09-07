@@ -75,8 +75,6 @@ class EvaluationService:
             metrics=metrics,
             created_at=now,
         )
-        await self._repository.save_submission(submission)
-
         passed_all = passed == len(version.tests)
 
         if self._mastery_service is not None:
@@ -98,7 +96,7 @@ class EvaluationService:
                     )
 
         evaluation = Evaluation(
-            id=str(uuid.uuid4()),
+            id=submission.id,
             submission_id=submission.id,
             passed_tests=passed,
             total_tests=len(version.tests),
@@ -107,5 +105,5 @@ class EvaluationService:
             created_at=now,
             results=results,
         )
-        await self._repository.save_evaluation(evaluation)
+        await self._repository.save(submission, evaluation)
         return evaluation
