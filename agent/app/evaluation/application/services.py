@@ -16,30 +16,6 @@ from app.shared.types import Language
 logger = logging.getLogger(__name__)
 
 
-# Ratio of the learner's runtime to the reference's on the same large input. Passing every
-# test says the answer is right; this says whether it would survive an interview.
-# ponytail: fixed ratios and a noise floor, not a real complexity analysis — it cannot tell
-# O(n log n) from O(n). Replace with a two-point curve fit (time at n and at 2n) if the
-# verdict starts misleading people.
-_OPTIMAL_RATIO = 2.5
-_ACCEPTABLE_RATIO = 8.0
-# Below this, sandbox scheduling noise swamps the signal and every ratio is meaningless.
-_MIN_BASELINE_MS = 50.0
-
-
-def _complexity_verdict(reference_ms: float, learner_ms: float | None) -> str | None:
-    if reference_ms < _MIN_BASELINE_MS:
-        return None
-    if learner_ms is None:
-        return None
-    ratio = learner_ms / reference_ms
-    if ratio <= _OPTIMAL_RATIO:
-        return "optimal"
-    if ratio <= _ACCEPTABLE_RATIO:
-        return "acceptable"
-    return "slow"
-
-
 class EvaluationService:
     """Evaluate pipeline: deterministic hidden-test grading, start to
     finish, with no LLM anywhere in it. Advice about a submission is the code helper
@@ -102,14 +78,6 @@ class EvaluationService:
         await self._repository.save_submission(submission)
 
         passed_all = passed == len(version.tests)
-        complexity_verdict = None
-        if passed_all and version.stress_input and version.stress_runtime_ms:
-            complexity_verdict = await self._grade_speed(
-                language,
-                assemble_program(version.pre_code, code, version.post_code),
-                version.stress_input,
-                version.stress_runtime_ms,
-            )
 
         if self._mastery_service is not None:
             assistance = metrics.assistance()
@@ -136,33 +104,8 @@ class EvaluationService:
             total_tests=len(version.tests),
             runtime_ms=runtime_ms,
             memory_mb=memory_mb,
-            complexity_verdict=complexity_verdict,
             created_at=now,
             results=results,
         )
         await self._repository.save_evaluation(evaluation)
         return evaluation
-
-    async def _grade_speed(
-        self, language: Language, program: str, stress_input: str, reference_ms: float
-    ) -> str | None:
-        """One extra sandbox run on the large input the reference was baselined against.
-        Any failure here is silent: a missing verdict is fine, a lost grade is not."""
-        try:
-            request = ExecutionRequest(
-                language=language,
-                code=program,
-                test_cases=[ExecutionTestCase(id="stress", input=stress_input, output_hash="")],
-            )
-            results = [result async for result in self._executor.execute(request)]
-        except Exception:
-            logger.warning("Complexity grading failed", exc_info=True)
-            return None
-
-        if not results:
-            return None
-        if results[0].status == ExecutionStatus.TIMEOUT:
-            return "slow"
-        if results[0].status == ExecutionStatus.ERROR:
-            return None
-        return _complexity_verdict(reference_ms, parse_runtime_ms(results[0].execution_time_ms))

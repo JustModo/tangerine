@@ -24,7 +24,6 @@ class ProblemTest(BaseModel):
     id: str
     input: str
     output_hash: str
-    is_hidden: bool = True
 
 
 class ProblemVersion(BaseModel):
@@ -48,11 +47,6 @@ class ProblemVersion(BaseModel):
     hints: list[str] = []
     examples: list[ProblemExample] = []
     tests: list[ProblemTest] = []
-    # One input at the top of the stated constraint range, plus how long the reference
-    # solution took on it. Both null when the generator gave no stress input or it failed
-    # to run — the problem stays perfectly usable, it just can't be graded on speed.
-    stress_input: str | None = None
-    stress_runtime_ms: float | None = None
     created_at: datetime
 
 

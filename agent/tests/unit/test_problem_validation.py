@@ -318,54 +318,7 @@ async def test_the_plan_scoped_avoid_list_reaches_the_prompt(db_path: str) -> No
     assert "Climbing Stairs" in llm.last_structured_request.user_prompt
 
 
-async def test_a_stress_input_that_fails_leaves_the_problem_usable(db_path: str) -> None:
-    repo = SqliteProblemRepository(db_path)
-    generated = _generated_problem()
-    generated.stress_test = "1 " * 100_000
-    llm = FakeLLMProvider(structured_responses=[generated])
-    # Fake executor has no timing info, stress test gets dropped.
-    executor = FakeCodeExecutor(
-        [
-            TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6\n"),
-            TestResult(id="1", status=ExecutionStatus.PASSED, input="0", actual_output="0\n"),
-            TestResult(id="2", status=ExecutionStatus.PASSED, input="5", actual_output="5\n"),
-            TestResult(id="3", status=ExecutionStatus.PASSED, input="-1 -2", actual_output="-3\n"),
-        ]
-    )
-    service = ProblemValidationService(repo, llm, executor, SqliteSkillRepository(db_path))
 
-    problem = await service.generate_and_validate("prefix-sum", Language.PYTHON, "easy")
-
-    assert problem is not None and problem.status == ProblemStatus.AVAILABLE
-    version = await repo.get_latest_version(problem.id)
-    assert version is not None
-    assert version.stress_input is None and version.stress_runtime_ms is None
-
-
-async def test_a_timed_stress_run_becomes_the_speed_baseline(db_path: str) -> None:
-    repo = SqliteProblemRepository(db_path)
-    generated = _generated_problem()
-    generated.stress_test = "9 9 9"
-    llm = FakeLLMProvider(structured_responses=[generated])
-    executor = FakeCodeExecutor(
-        [
-            TestResult(
-                id="0", status=ExecutionStatus.PASSED, input="1 2 3",
-                actual_output="6\n", execution_time_ms="120ms",
-            ),
-            TestResult(id="1", status=ExecutionStatus.PASSED, input="0", actual_output="0\n"),
-            TestResult(id="2", status=ExecutionStatus.PASSED, input="5", actual_output="5\n"),
-            TestResult(id="3", status=ExecutionStatus.PASSED, input="-1 -2", actual_output="-3\n"),
-        ]
-    )
-    service = ProblemValidationService(repo, llm, executor, SqliteSkillRepository(db_path))
-
-    problem = await service.generate_and_validate("prefix-sum", Language.PYTHON, "easy")
-
-    version = await repo.get_latest_version(problem.id)
-    assert version is not None
-    assert version.stress_input == "9 9 9"
-    assert version.stress_runtime_ms == pytest.approx(120.0)
 
 
 async def test_an_empty_test_input_is_dropped_rather_than_killing_the_problem(db_path: str) -> None:

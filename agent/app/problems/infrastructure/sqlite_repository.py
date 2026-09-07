@@ -233,8 +233,8 @@ class SqliteProblemRepository:
                 "INSERT INTO problem_versions "
                 "(id, problem_id, version, statement_md, reference_solution, user_code, "
                 "pre_code, post_code, constraints, input_format, output_format, hints_json, "
-                "stress_input, stress_runtime_ms, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     version.id,
                     version.problem_id,
@@ -248,8 +248,6 @@ class SqliteProblemRepository:
                     version.input_format,
                     version.output_format,
                     json.dumps(version.hints),
-                    version.stress_input,
-                    version.stress_runtime_ms,
                     version.created_at.isoformat(),
                 ),
             )
@@ -261,9 +259,9 @@ class SqliteProblemRepository:
                 )
             for test in version.tests:
                 await db.execute(
-                    "INSERT INTO problem_tests (id, problem_version_id, input, output_hash, is_hidden) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (test.id, version.id, test.input, test.output_hash, int(test.is_hidden)),
+                    "INSERT INTO problem_tests (id, problem_version_id, input, output_hash) "
+                    "VALUES (?, ?, ?, ?)",
+                    (test.id, version.id, test.input, test.output_hash),
                 )
             await db.commit()
 
@@ -299,8 +297,6 @@ class SqliteProblemRepository:
                 input_format=row["input_format"],
                 output_format=row["output_format"],
                 hints=json.loads(row["hints_json"] or "[]"),
-                stress_input=row["stress_input"],
-                stress_runtime_ms=row["stress_runtime_ms"],
                 created_at=row["created_at"],
                 examples=[
                     ProblemExample(
@@ -313,7 +309,6 @@ class SqliteProblemRepository:
                         id=t["id"],
                         input=t["input"],
                         output_hash=t["output_hash"],
-                        is_hidden=bool(t["is_hidden"]),
                     )
                     for t in test_rows
                 ],

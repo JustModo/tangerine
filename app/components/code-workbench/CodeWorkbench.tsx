@@ -58,7 +58,6 @@ export function CodeWorkbench({
   const [panelResults, setPanelResults] = useState<TestResult[]>([]);
   const [panelHidden, setPanelHidden] = useState(false);
   const [summary, setSummary] = useState<{ passed: number; total: number } | null>(null);
-  const [verdict, setVerdict] = useState<EvaluationResult["complexity_verdict"]>(null);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // The helper chat reads these through a stable getter instead of props - passing `code`
   // down directly would re-render the chat (and its markdown) on every keystroke.
@@ -136,7 +135,6 @@ export function CodeWorkbench({
     setPanelResults([]);
     setPanelHidden(true);
     setSummary(null);
-    setVerdict(null);
     setPanelLabel("Evaluating...");
     try {
       const evaluation = await onSubmit(code, {
@@ -147,7 +145,6 @@ export function CodeWorkbench({
       });
       setPanelResults(evaluation.results);
       setSummary({ passed: evaluation.passed_tests, total: evaluation.total_tests });
-      setVerdict(evaluation.complexity_verdict ?? null);
       lastRunRef.current = {
         kind: "submit",
         passed: evaluation.passed_tests,
@@ -256,7 +253,6 @@ export function CodeWorkbench({
                   hidden={panelHidden}
                   expectedById={panelHidden ? undefined : expectedById}
                   summary={summary}
-                  complexityVerdict={verdict}
                 />
               </div>
             </ResizablePanel>

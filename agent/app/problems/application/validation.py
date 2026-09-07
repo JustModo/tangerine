@@ -233,10 +233,6 @@ class ProblemValidationService:
         ):
             return await self._mark_invalid(problem, mismatch_failure(examples, results))
 
-        stress_input, stress_runtime_ms = await self._measure_stress(
-            language, reference_program, generated.stress_test
-        )
-
         version = ProblemVersion(
             id=str(uuid.uuid4()),
             problem_id=problem.id,
@@ -262,12 +258,9 @@ class ProblemValidationService:
                     id=str(uuid.uuid4()),
                     input=value,
                     output_hash=hash_output(result.actual_output or ""),
-                    is_hidden=True,
                 )
                 for value, result in zip(graded_inputs, results, strict=True)
             ],
-            stress_input=stress_input,
-            stress_runtime_ms=stress_runtime_ms,
             created_at=datetime.now(UTC),
         )
         await self._repository.save_version(version)
@@ -275,28 +268,6 @@ class ProblemValidationService:
         approved = problem.model_copy(update={"status": ProblemStatus.AVAILABLE})
         await self._repository.save(approved)
         return approved
-
-    async def _measure_stress(
-        self, language: Language, reference_program: str, stress_test: str | None
-    ) -> tuple[str | None, float | None]:
-        """Baseline: how long the reference takes on a large input. A learner's runtime
-        means nothing on its own — only against this. A stress input that errors, times out
-        or can't be timed is dropped, never fatal: the problem is fine, it just can't be
-        graded on speed."""
-        if not stress_test or not stress_test.strip():
-            return None, None
-
-        request = ExecutionRequest(
-            language=language,
-            code=reference_program,
-            test_cases=[ExecutionTestCase(id="stress", input=stress_test, output_hash="")],
-        )
-        results = [result async for result in self._executor.execute(request)]
-        if not results or results[0].status in (ExecutionStatus.ERROR, ExecutionStatus.TIMEOUT):
-            return None, None
-
-        runtime_ms = parse_runtime_ms(results[0].execution_time_ms)
-        return (stress_test, runtime_ms) if runtime_ms is not None else (None, None)
 
     async def _mark_invalid(
         self, problem: Problem, failure: ValidationFailure

@@ -32,8 +32,8 @@ class SqliteEvaluationRepository:
             await db.execute(
                 "INSERT INTO evaluations "
                 "(id, submission_id, passed_tests, total_tests, runtime_ms, memory_mb, "
-                "complexity_verdict, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     evaluation.id,
                     evaluation.submission_id,
@@ -41,7 +41,6 @@ class SqliteEvaluationRepository:
                     evaluation.total_tests,
                     evaluation.runtime_ms,
                     evaluation.memory_mb,
-                    evaluation.complexity_verdict,
                     evaluation.created_at.isoformat(),
                 ),
             )

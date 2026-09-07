@@ -44,9 +44,6 @@ class Evaluation(BaseModel):
     total_tests: int
     runtime_ms: float | None = None
     memory_mb: float | None = None  # peak across per-test memory_kb; null when unmeasured
-    # 'optimal' | 'acceptable' | 'slow'. Null when the problem has no stress input, or the
-    # submission didn't pass everything — there's nothing to grade the speed of.
-    complexity_verdict: str | None = None
     created_at: datetime
     # Per-test breakdown (input/status/actual_output) — never the expected output, since
     # problem_tests only ever stores its hash. Not persisted —

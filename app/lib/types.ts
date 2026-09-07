@@ -47,9 +47,6 @@ export interface TestResult {
 export interface EvaluationResult {
   passed_tests: number;
   total_tests: number;
-  /** How the solution compares to the reference on a large input. Null when the problem
-   * has no stress input, or the submission didn't pass everything. */
-  complexity_verdict?: "optimal" | "acceptable" | "slow" | null;
   results: TestResult[];
 }
 
