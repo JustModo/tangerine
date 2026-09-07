@@ -26,14 +26,16 @@ class ProblemTest(BaseModel):
     output_hash: str
 
 
-class ProblemVersion(BaseModel):
+class Problem(BaseModel):
     id: str
-    problem_id: str
-    version: int
-    statement_md: str
+    title: str
+    language: Language
+    difficulty: str
+    status: ProblemStatus
+    statement_md: str = ""
     # reference_solution holds the fully assembled reference program (pre_code +
     # reference_user_code + post_code) — audit-only, never re-executed after validation.
-    reference_solution: str
+    reference_solution: str = ""
     # Hidden harness, never sent to the frontend — concatenated with user_code at
     # Run/Submit time (app/shared/code_assembly.py) before execution.
     pre_code: str = ""
@@ -47,18 +49,28 @@ class ProblemVersion(BaseModel):
     hints: list[str] = []
     examples: list[ProblemExample] = []
     tests: list[ProblemTest] = []
-    created_at: datetime
-
-
-class Problem(BaseModel):
-    id: str
-    title: str
-    language: Language
-    difficulty: str
-    status: ProblemStatus
     skill_ids: list[str] = []
     tags: list[str] = []
     created_at: datetime
+
+
+class ProblemVersion(BaseModel):
+    """Backwards-compatible view of problem content."""
+    id: str
+    problem_id: str
+    version: int = 1
+    statement_md: str = ""
+    reference_solution: str = ""
+    pre_code: str = ""
+    post_code: str = ""
+    user_code: str = ""
+    constraints: str | None = None
+    input_format: str | None = None
+    output_format: str | None = None
+    hints: list[str] = []
+    examples: list[ProblemExample] = []
+    tests: list[ProblemTest] = []
+    created_at: datetime | None = None
 
 
 class ProblemCriteria(BaseModel):

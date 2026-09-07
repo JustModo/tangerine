@@ -18,13 +18,26 @@ from app.shared.types import Language
 SIMILAR_TITLE_THRESHOLD = 0.6
 
 
-def _problem(row, skill_ids: list[str]) -> Problem:
+def _problem(row: aiosqlite.Row, skill_ids: list[str]) -> Problem:
+    examples_raw = json.loads(row["examples_json"] or "[]")
+    tests_raw = json.loads(row["tests_json"] or "[]")
     return Problem(
         id=row["id"],
         title=row["title"],
         language=row["language"],
         difficulty=row["difficulty"],
         status=row["status"],
+        statement_md=row["statement_md"] or "",
+        reference_solution=row["reference_solution"] or "",
+        pre_code=row["pre_code"] or "",
+        post_code=row["post_code"] or "",
+        user_code=row["user_code"] or "",
+        constraints=row["constraints"],
+        input_format=row["input_format"],
+        output_format=row["output_format"],
+        hints=json.loads(row["hints_json"] or "[]"),
+        examples=[ProblemExample(**e) for e in examples_raw],
+        tests=[ProblemTest(**t) for t in tests_raw],
         skill_ids=skill_ids,
         tags=json.loads(row["tags_json"] or "[]"),
         created_at=row["created_at"],
@@ -44,8 +57,7 @@ class SqliteProblemRepository:
             return await self._hydrate(db, row) if row else None
 
     async def get_many(self, problem_ids: list[str]) -> dict[str, Problem]:
-        """Several problems in two queries instead of two per problem. Callers that walk a
-        learner's sessions were opening a connection per row."""
+        """Several problems in two queries instead of two per problem."""
         if not problem_ids:
             return {}
         placeholders = ",".join("?" for _ in problem_ids)
@@ -82,9 +94,6 @@ class SqliteProblemRepository:
             conditions.append(f"p.id NOT IN ({placeholders})")
             params.extend(criteria.exclude_problem_ids)
 
-        # RANDOM(), not the first row: without it a skill with several bank problems would
-        # serve the same one to everybody forever, and exclude_problem_ids would be the only
-        # thing that ever varied the answer.
         query += " WHERE " + " AND ".join(conditions) + " ORDER BY RANDOM() LIMIT 1"
 
         async with connect(self._database_path) as db:
@@ -95,22 +104,9 @@ class SqliteProblemRepository:
     async def list_all(
         self, page: int, page_size: int, query: str | None = None, language: str | None = None
     ) -> tuple[list[Problem], int]:
-        """Every AVAILABLE problem ever generated, newest first, for the "all problems"
-        browser — `find_suitable` picks one at random for practice, this lists all of them.
-
-        Without a query this pages straight off SQL. With one, every AVAILABLE problem
-        (title + latest statement_md + tags + language) is ranked in Python via difflib
-        and then paged — ponytail: fine at the hundreds-of-rows scale a single local
-        learner's bank reaches; move ranking into SQL/FTS if the bank grows into the
-        thousands.
-        """
+        """Every AVAILABLE problem ever generated, newest first."""
         async with connect(self._database_path) as db:
-            base = (
-                "SELECT p.*, "
-                "(SELECT statement_md FROM problem_versions pv WHERE pv.problem_id = p.id "
-                "ORDER BY version DESC LIMIT 1) AS description "
-                "FROM problems p WHERE p.status = ?"
-            )
+            base = "SELECT p.*, p.statement_md AS description FROM problems p WHERE p.status = ?"
             params: list[str] = [ProblemStatus.AVAILABLE.value]
             if language:
                 base += " AND p.language = ?"
@@ -130,9 +126,6 @@ class SqliteProblemRepository:
             ranked = sorted(((row, score(row)) for row in rows), key=lambda pair: pair[1], reverse=True)
             threshold = 0.5
             matched = [row for row, s in ranked if s >= threshold]
-            # A query with no match at or above the threshold still gets the closest results
-            # instead of a blank list — "closest match" beats "nothing", same as any other
-            # fuzzy search.
             rows = matched or [row for row, _ in ranked[:page_size]]
         else:
             rows = sorted(rows, key=lambda row: row["created_at"], reverse=True)
@@ -148,8 +141,7 @@ class SqliteProblemRepository:
     async def find_similar(
         self, title: str, language: Language, exclude_problem_ids: list[str] | None = None
     ) -> Problem | None:
-        """The bank's closest question to one just generated, or None. Titles-only scan,
-        then a single hydrate of the winner. An exact title scores 1.0."""
+        """The bank's closest question to one just generated, or None."""
         query = "SELECT id, title FROM problems WHERE language = ? AND status = ?"
         params: list[object] = [language.value, ProblemStatus.AVAILABLE.value]
         if exclude_problem_ids:
@@ -161,8 +153,6 @@ class SqliteProblemRepository:
             cursor = await db.execute(query, params)
             rows = await cursor.fetchall()
 
-            # max, not min: near-duplicate titles are containments, and containment only
-            # scores 1.0 in the shorter-title direction.
             best_id, best_score = None, 0.0
             for row in rows:
                 score = max(match_score(title, row["title"]), match_score(row["title"], title))
@@ -176,8 +166,7 @@ class SqliteProblemRepository:
             return await self._hydrate(db, row) if row else None
 
     async def list_titles(self, skill_id: str, language: Language) -> list[str]:
-        """Titles already in the bank for a skill, fed to the generator as a do-not-repeat
-        list so a second problem is actually a second problem."""
+        """Titles already in the bank for a skill."""
         async with connect(self._database_path) as db:
             cursor = await db.execute(
                 "SELECT DISTINCT p.title FROM problems p "
@@ -188,12 +177,8 @@ class SqliteProblemRepository:
             return [row[0] for row in await cursor.fetchall()]
 
     async def save(self, problem: Problem) -> None:
-        """Upserts. The ON CONFLICT list is the whitelist of mutable fields:
-        created_at and language are set once and never rewritten."""
+        """Upserts self-contained problem document."""
         async with connect(self._database_path) as db:
-            # language is immutable: the stored versions' code, tests and output hashes are
-            # all in that language. Raised rather than dropped from the ON CONFLICT list, so
-            # the caller learns the write did nothing.
             cursor = await db.execute("SELECT language FROM problems WHERE id = ?", (problem.id,))
             row = await cursor.fetchone()
             if row is not None and row[0] != problem.language.value:
@@ -205,10 +190,17 @@ class SqliteProblemRepository:
 
             await db.execute(
                 "INSERT INTO problems (id, title, language, difficulty, "
-                "status, tags_json, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "status, statement_md, reference_solution, user_code, pre_code, post_code, "
+                "constraints, input_format, output_format, hints_json, examples_json, "
+                "tests_json, tags_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET "
                 "title=excluded.title, difficulty=excluded.difficulty, status=excluded.status, "
+                "statement_md=excluded.statement_md, reference_solution=excluded.reference_solution, "
+                "user_code=excluded.user_code, pre_code=excluded.pre_code, post_code=excluded.post_code, "
+                "constraints=excluded.constraints, input_format=excluded.input_format, "
+                "output_format=excluded.output_format, hints_json=excluded.hints_json, "
+                "examples_json=excluded.examples_json, tests_json=excluded.tests_json, "
                 "tags_json=excluded.tags_json",
                 (
                     problem.id,
@@ -216,8 +208,19 @@ class SqliteProblemRepository:
                     problem.language.value,
                     problem.difficulty,
                     problem.status.value,
+                    problem.statement_md,
+                    problem.reference_solution,
+                    problem.user_code,
+                    problem.pre_code,
+                    problem.post_code,
+                    problem.constraints,
+                    problem.input_format,
+                    problem.output_format,
+                    json.dumps(problem.hints),
+                    json.dumps([e.model_dump() for e in problem.examples]),
+                    json.dumps([t.model_dump() for t in problem.tests]),
                     json.dumps(problem.tags),
-                    problem.created_at.isoformat(),
+                    problem.created_at.isoformat() if hasattr(problem.created_at, "isoformat") else str(problem.created_at),
                 ),
             )
             for skill_id in problem.skill_ids:
@@ -228,17 +231,13 @@ class SqliteProblemRepository:
             await db.commit()
 
     async def save_version(self, version: ProblemVersion) -> None:
+        """Backwards-compatible updater for problem content fields."""
         async with connect(self._database_path) as db:
             await db.execute(
-                "INSERT INTO problem_versions "
-                "(id, problem_id, version, statement_md, reference_solution, user_code, "
-                "pre_code, post_code, constraints, input_format, output_format, hints_json, "
-                "created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "UPDATE problems SET statement_md = ?, reference_solution = ?, user_code = ?, "
+                "pre_code = ?, post_code = ?, constraints = ?, input_format = ?, output_format = ?, "
+                "hints_json = ?, examples_json = ?, tests_json = ? WHERE id = ?",
                 (
-                    version.id,
-                    version.problem_id,
-                    version.version,
                     version.statement_md,
                     version.reference_solution,
                     version.user_code,
@@ -248,71 +247,35 @@ class SqliteProblemRepository:
                     version.input_format,
                     version.output_format,
                     json.dumps(version.hints),
-                    version.created_at.isoformat(),
+                    json.dumps([e.model_dump() for e in version.examples]),
+                    json.dumps([t.model_dump() for t in version.tests]),
+                    version.problem_id,
                 ),
             )
-            for example in version.examples:
-                await db.execute(
-                    "INSERT INTO problem_examples (id, problem_version_id, input, output, explanation) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (example.id, version.id, example.input, example.output, example.explanation),
-                )
-            for test in version.tests:
-                await db.execute(
-                    "INSERT INTO problem_tests (id, problem_version_id, input, output_hash) "
-                    "VALUES (?, ?, ?, ?)",
-                    (test.id, version.id, test.input, test.output_hash),
-                )
             await db.commit()
 
     async def get_latest_version(self, problem_id: str) -> ProblemVersion | None:
-        async with connect(self._database_path) as db:
-            cursor = await db.execute(
-                "SELECT * FROM problem_versions WHERE problem_id = ? ORDER BY version DESC LIMIT 1",
-                (problem_id,),
-            )
-            row = await cursor.fetchone()
-            if row is None:
-                return None
-
-            examples_cursor = await db.execute(
-                "SELECT * FROM problem_examples WHERE problem_version_id = ?", (row["id"],)
-            )
-            example_rows = await examples_cursor.fetchall()
-            tests_cursor = await db.execute(
-                "SELECT * FROM problem_tests WHERE problem_version_id = ?", (row["id"],)
-            )
-            test_rows = await tests_cursor.fetchall()
-
-            return ProblemVersion(
-                id=row["id"],
-                problem_id=row["problem_id"],
-                version=row["version"],
-                statement_md=row["statement_md"],
-                reference_solution=row["reference_solution"],
-                user_code=row["user_code"],
-                pre_code=row["pre_code"],
-                post_code=row["post_code"],
-                constraints=row["constraints"],
-                input_format=row["input_format"],
-                output_format=row["output_format"],
-                hints=json.loads(row["hints_json"] or "[]"),
-                created_at=row["created_at"],
-                examples=[
-                    ProblemExample(
-                        id=e["id"], input=e["input"], output=e["output"], explanation=e["explanation"]
-                    )
-                    for e in example_rows
-                ],
-                tests=[
-                    ProblemTest(
-                        id=t["id"],
-                        input=t["input"],
-                        output_hash=t["output_hash"],
-                    )
-                    for t in test_rows
-                ],
-            )
+        """Backwards-compatible view of problem content."""
+        problem = await self.get(problem_id)
+        if problem is None:
+            return None
+        return ProblemVersion(
+            id=problem.id,
+            problem_id=problem.id,
+            version=1,
+            statement_md=problem.statement_md,
+            reference_solution=problem.reference_solution,
+            user_code=problem.user_code,
+            pre_code=problem.pre_code,
+            post_code=problem.post_code,
+            constraints=problem.constraints,
+            input_format=problem.input_format,
+            output_format=problem.output_format,
+            hints=problem.hints,
+            examples=problem.examples,
+            tests=problem.tests,
+            created_at=problem.created_at,
+        )
 
     async def _hydrate(self, db: aiosqlite.Connection, row: aiosqlite.Row) -> Problem:
         cursor = await db.execute("SELECT skill_id FROM problem_skills WHERE problem_id = ?", (row["id"],))

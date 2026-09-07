@@ -90,20 +90,19 @@ async def get_problem(
     problem = await service.get(problem_id)
     if problem is None:
         raise HTTPException(status_code=404, detail="Problem not found")
-    version = await SqliteProblemRepository().get_latest_version(problem_id)
-    if version is None:
+    if not problem.statement_md:
         raise HTTPException(status_code=404, detail="Problem has no content yet")
     return ProblemDetail(
         id=problem.id,
         title=problem.title,
         language=problem.language,
         difficulty=problem.difficulty,
-        statement_md=version.statement_md,
-        user_code=version.user_code,
-        constraints=version.constraints,
-        input_format=version.input_format,
-        output_format=version.output_format,
-        hints=version.hints,
+        statement_md=problem.statement_md,
+        user_code=problem.user_code,
+        constraints=problem.constraints,
+        input_format=problem.input_format,
+        output_format=problem.output_format,
+        hints=problem.hints,
         tags=problem.tags,
-        examples=version.examples,
+        examples=problem.examples,
     )

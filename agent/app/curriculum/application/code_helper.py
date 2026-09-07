@@ -52,8 +52,7 @@ class CodeHelperService:
             raise NotFoundError(f"Problem session {problem_session_id} not found")
 
         problem = await self._problem_repository.get(session.problem_id)
-        version = await self._problem_repository.get_latest_version(session.problem_id)
-        if problem is None or version is None:
+        if problem is None:
             raise NotFoundError(f"Problem {session.problem_id} not found")
 
         # Capped for the same reason as the main chat, and more urgently: each turn also
@@ -74,20 +73,20 @@ class CodeHelperService:
         await self._session_repository.add_chat_message(user_message)
         yield {"type": "user_message", "message_id": user_message.id}
 
-        # Only fields the browser already holds go into the context. version.reference_solution,
-        # version.tests and version.pre_code/post_code are deliberately never passed.
+        # Only fields the browser already holds go into the context. problem.reference_solution,
+        # problem.tests and problem.pre_code/post_code are deliberately never passed.
         context = code_helper_context(
             title=problem.title,
             language=problem.language.value,
             difficulty=problem.difficulty,
-            statement_md=version.statement_md,
-            constraints=version.constraints,
-            input_format=version.input_format,
-            output_format=version.output_format,
+            statement_md=problem.statement_md,
+            constraints=problem.constraints,
+            input_format=problem.input_format,
+            output_format=problem.output_format,
             examples=[
-                {"input": example.input, "output": example.output} for example in version.examples
+                {"input": example.input, "output": example.output} for example in problem.examples
             ],
-            starter_code=version.user_code,
+            starter_code=problem.user_code,
             source_code=source_code,
             last_run=last_run,
         )

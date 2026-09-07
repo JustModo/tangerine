@@ -45,16 +45,15 @@ class EvaluationService:
         if problem is None:
             raise NotFoundError(f"Problem {problem_id} not found")
 
-        version = await self._problem_repository.get_latest_version(problem_id)
-        if version is None or not version.tests:
+        if not problem.tests:
             raise NotFoundError(f"Problem {problem_id} has no tests to evaluate against")
 
         request = ExecutionRequest(
             language=language,
-            code=assemble_program(version.pre_code, code, version.post_code),
+            code=assemble_program(problem.pre_code, code, problem.post_code),
             test_cases=[
                 ExecutionTestCase(id=test.id, input=test.input, output_hash=test.output_hash)
-                for test in version.tests
+                for test in problem.tests
             ],
         )
         results = [result async for result in self._executor.execute(request)]
@@ -75,7 +74,7 @@ class EvaluationService:
             metrics=metrics,
             created_at=now,
         )
-        passed_all = passed == len(version.tests)
+        passed_all = passed == len(problem.tests)
 
         if self._mastery_service is not None:
             assistance = metrics.assistance()
@@ -99,7 +98,7 @@ class EvaluationService:
             id=submission.id,
             submission_id=submission.id,
             passed_tests=passed,
-            total_tests=len(version.tests),
+            total_tests=len(problem.tests),
             runtime_ms=runtime_ms,
             memory_mb=memory_mb,
             created_at=now,

@@ -233,39 +233,37 @@ class ProblemValidationService:
         ):
             return await self._mark_invalid(problem, mismatch_failure(examples, results))
 
-        version = ProblemVersion(
-            id=str(uuid.uuid4()),
-            problem_id=problem.id,
-            version=1,
-            statement_md=generated.statement_md,
-            reference_solution=reference_program,
-            user_code=generated.user_code,
-            pre_code=generated.pre_code,
-            post_code=generated.post_code,
-            constraints=generated.constraints,
-            input_format=generated.input_format,
-            output_format=generated.output_format,
-            hints=generated.hints,
-            examples=[
-                ProblemExample(
-                    id=str(uuid.uuid4()), input=ex.input, output=ex.output, explanation=ex.explanation
-                )
-                for ex in examples
-            ],
-            # Expected outputs from running reference solution, never from LLM.
-            tests=[
-                ProblemTest(
-                    id=str(uuid.uuid4()),
-                    input=value,
-                    output_hash=hash_output(result.actual_output or ""),
-                )
-                for value, result in zip(graded_inputs, results, strict=True)
-            ],
-            created_at=datetime.now(UTC),
-        )
-        await self._repository.save_version(version)
+        examples_list = [
+            ProblemExample(
+                id=str(uuid.uuid4()), input=ex.input, output=ex.output, explanation=ex.explanation
+            )
+            for ex in examples
+        ]
+        tests_list = [
+            ProblemTest(
+                id=str(uuid.uuid4()),
+                input=value,
+                output_hash=hash_output(result.actual_output or ""),
+            )
+            for value, result in zip(graded_inputs, results, strict=True)
+        ]
 
-        approved = problem.model_copy(update={"status": ProblemStatus.AVAILABLE})
+        approved = problem.model_copy(
+            update={
+                "status": ProblemStatus.AVAILABLE,
+                "statement_md": generated.statement_md,
+                "reference_solution": reference_program,
+                "user_code": generated.user_code,
+                "pre_code": generated.pre_code,
+                "post_code": generated.post_code,
+                "constraints": generated.constraints,
+                "input_format": generated.input_format,
+                "output_format": generated.output_format,
+                "hints": generated.hints,
+                "examples": examples_list,
+                "tests": tests_list,
+            }
+        )
         await self._repository.save(approved)
         return approved
 
