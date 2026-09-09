@@ -1,10 +1,16 @@
 from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.curriculum.infrastructure.sqlite_problem_session_repository import (
     SqliteProblemSessionRepository,
+)
+from app.deps import (
+    get_mastery_repository,
+    get_problem_repository,
+    get_problem_session_repository,
+    get_skill_repository,
 )
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
 from app.problems.application.library import compute_stats
@@ -52,11 +58,15 @@ async def get_current_user() -> User:
 
 
 @router.get("/{user_id}/progress")
-async def get_progress(user_id: str) -> Progress:
-    mastery_repository = SqliteUserSkillStateRepository()
-    skill_repository = SqliteSkillRepository()
-    problem_repository = SqliteProblemRepository()
-
+async def get_progress(
+    user_id: str,
+    mastery_repository: SqliteUserSkillStateRepository = Depends(get_mastery_repository),
+    skill_repository: SqliteSkillRepository = Depends(get_skill_repository),
+    problem_repository: SqliteProblemRepository = Depends(get_problem_repository),
+    problem_session_repository: SqliteProblemSessionRepository = Depends(
+        get_problem_session_repository
+    ),
+) -> Progress:
     states = await mastery_repository.list_for_user(user_id)
     skill_names = await skill_repository.names()
     skills = [
@@ -71,7 +81,7 @@ async def get_progress(user_id: str) -> Progress:
     ]
     skills.sort(key=lambda s: s.mastery_score, reverse=True)
 
-    sessions = await SqliteProblemSessionRepository().list_for_user(user_id)
+    sessions = await problem_session_repository.list_for_user(user_id)
     stats = compute_stats(sessions, states)
 
     flagged_sessions = [s for s in sessions if s.flagged]

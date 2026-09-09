@@ -1208,3 +1208,41 @@ def test_tools_offered_match_the_gating_rules(db_path, existing_plan, user_id, w
     offered = [t.name for t in service._tools_for(plan, user_id)]
 
     assert offered == _expected_tools(wired, wired, wired, wired, existing_plan, user_id)
+
+
+async def test_tool_label_reaches_the_client_before_the_work_it_describes(db_path: str) -> None:
+    """The "Generating a learning plan..." bubble is the whole point of the label: it has to
+    be on the wire while generation runs, not after it."""
+    user = await SqliteUserRepository(db_path).ensure_default_user()
+    llm = FakeLLMProvider(
+        chat_streams=[
+            [
+                ChatChunk(
+                    tool_call=ToolCallResult(
+                        name="generate_learning_plan",
+                        args={"topic": "graphs", "language": "python", "level": "beginner"},
+                    )
+                ),
+                ChatChunk(done=True),
+            ],
+            [ChatChunk(text_delta="Ready!"), ChatChunk(done=True)],
+        ],
+    )
+    order: list[str] = []
+
+    class _RecordingCurriculum:
+        async def list_for_session(self, session_id: str) -> list[LessonPlan]:
+            return []
+
+        async def create_draft(self, *args, **kwargs) -> LessonPlan:
+            order.append("work")
+            return _plan_with_steps(1)
+
+    service = SessionService(SqliteSessionRepository(db_path), llm, _RecordingCurriculum())
+    session = await service.create_session(user.id)
+
+    async for event in service.add_message(session.id, "teach me graphs"):
+        if event["type"] == "tool_start":
+            order.append("label")
+
+    assert order == ["label", "work"]

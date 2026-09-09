@@ -4,8 +4,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from app.llm.prompts.chat import SUPPORTED_LANGUAGES
-from app.shared.types import Language
+from app.shared.types import SUPPORTED_LANGUAGES, Language
 
 
 @dataclass(frozen=True)

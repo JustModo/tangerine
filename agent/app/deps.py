@@ -74,12 +74,24 @@ def get_session_service() -> SessionService:
     return SessionService(
         SqliteSessionRepository(),
         GeminiProvider(),
-        get_curriculum_service(),
-        RevisionService(SqliteUserSkillStateRepository()),
-        get_problem_session_service(),
-        get_library_service(),
+        curriculum_service=get_curriculum_service(),
+        revision_service=RevisionService(SqliteUserSkillStateRepository()),
+        problem_session_service=get_problem_session_service(),
+        library_service=get_library_service(),
     )
 
 
 def get_problem_repository() -> SqliteProblemRepository:
     return SqliteProblemRepository()
+
+
+def get_problem_session_repository() -> SqliteProblemSessionRepository:
+    return SqliteProblemSessionRepository()
+
+
+def get_mastery_repository() -> SqliteUserSkillStateRepository:
+    return SqliteUserSkillStateRepository()
+
+
+def get_skill_repository() -> SqliteSkillRepository:
+    return SqliteSkillRepository()

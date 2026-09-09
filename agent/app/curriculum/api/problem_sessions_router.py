@@ -13,6 +13,7 @@ from app.curriculum.infrastructure.sqlite_problem_session_repository import (
 from app.deps import (
     get_evaluation_service,
     get_problem_repository,
+    get_problem_session_repository,
     get_problem_session_service,
 )
 from app.evaluation.application.services import EvaluationService
@@ -55,10 +56,11 @@ class FlagForProblemBody(BaseModel):
     flagged: bool
 
 
-def get_code_helper_service() -> CodeHelperService:
-    return CodeHelperService(
-        SqliteProblemSessionRepository(), SqliteProblemRepository(), GeminiProvider()
-    )
+def get_code_helper_service(
+    problem_sessions: SqliteProblemSessionRepository = Depends(get_problem_session_repository),
+    problems: SqliteProblemRepository = Depends(get_problem_repository),
+) -> CodeHelperService:
+    return CodeHelperService(problem_sessions, problems, GeminiProvider())
 
 
 class ChatMessageBody(BaseModel):

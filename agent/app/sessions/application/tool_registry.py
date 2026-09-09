@@ -1,25 +1,20 @@
-from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
-from typing import Any
+from collections.abc import Sequence
 
 from app.curriculum.domain.models import LessonPlan
-from app.llm.domain.requests import ChatTurn, ToolDeclaration
+from app.llm.domain.requests import ToolDeclaration
+from app.sessions.tools.base import ChatTool
 
 
-@dataclass(frozen=True)
-class ToolContext:
-    session_id: str
-    args: dict
-    history: list[ChatTurn]
-    message: str
-    active_plan: LessonPlan | None
-    user_id: str | None
-    depth: int
-    note_id: str | None = None
+class ToolRegistry:
+    def __init__(self, tools: Sequence[ChatTool]) -> None:
+        self._tools: dict[str, ChatTool] = {tool.declaration.name: tool for tool in tools}
 
+    def get(self, name: str) -> ChatTool | None:
+        return self._tools.get(name)
 
-@dataclass(frozen=True)
-class ToolSpec:
-    tool: ToolDeclaration
-    handler: Callable[..., AsyncIterator[dict]]
-    available: Callable[[Any, LessonPlan | None, str | None], bool]
+    def declarations_for(
+        self, active_plan: LessonPlan | None, user_id: str | None
+    ) -> list[ToolDeclaration]:
+        return [
+            tool.declaration for tool in self._tools.values() if tool.is_available(active_plan, user_id)
+        ]

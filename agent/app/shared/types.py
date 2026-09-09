@@ -6,3 +6,6 @@ class Language(StrEnum):
     CPP = "cpp"
     C = "c"
     JAVA = "java"
+
+
+SUPPORTED_LANGUAGES = [language.value for language in Language]

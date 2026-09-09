@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from app.curriculum.infrastructure.sqlite_problem_session_repository import (
     SqliteProblemSessionRepository,
 )
+from app.deps import get_problem_repository, get_problem_session_repository
 from app.problems.application.services import ProblemSelectionService
 from app.problems.domain.models import ProblemExample
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
@@ -13,8 +14,10 @@ from app.users.domain.models import LOCAL_USER_ID
 router = APIRouter(prefix="/problems", tags=["problems"])
 
 
-def get_service() -> ProblemSelectionService:
-    return ProblemSelectionService(SqliteProblemRepository())
+def get_service(
+    problem_repository: SqliteProblemRepository = Depends(get_problem_repository),
+) -> ProblemSelectionService:
+    return ProblemSelectionService(problem_repository)
 
 
 class ProblemSummary(BaseModel):
@@ -43,11 +46,15 @@ async def list_all_problems(
     page_size: int = Query(default=20, ge=1, le=100),
     q: str | None = Query(default=None),
     language: Language | None = Query(default=None),
+    problem_repository: SqliteProblemRepository = Depends(get_problem_repository),
+    problem_session_repository: SqliteProblemSessionRepository = Depends(
+        get_problem_session_repository
+    ),
 ) -> ProblemsPage:
-    items, total = await SqliteProblemRepository().list_all(
+    items, total = await problem_repository.list_all(
         page, page_size, q, language.value if language else None
     )
-    sessions = await SqliteProblemSessionRepository().list_for_user(LOCAL_USER_ID)
+    sessions = await problem_session_repository.list_for_user(LOCAL_USER_ID)
     flagged_problem_ids = {s.problem_id for s in sessions if s.flagged}
     # list_for_user is ORDER BY updated_at DESC, so the newest session per problem wins.
     status_by_problem: dict[str, str] = {}
