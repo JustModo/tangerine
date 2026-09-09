@@ -1,21 +1,11 @@
-"""How a tool's result is rendered for the model.
-
-Not prompts: these turn runtime rows — a plan, a practice record, a page of the problem
-bank — into the text the model reads back. They sat in llm/prompts/chat.py, which is why
-the prompts package imported from two feature domains; they belong next to the tool
-registry that decides which of them runs.
-"""
+"""Render tool results into text representation for the model."""
 
 from app.curriculum.domain.models import LessonPlan
 from app.revision.domain.models import RevisionCandidate
 
 
 def mastery_context(candidates: list[RevisionCandidate], limit: int = 8) -> str:
-    """Renders the get_practice_record tool result for the model.
-
-    Reuses the RevisionService ranking (weakest + most overdue first), so the cap keeps the
-    entries that matter most rather than an arbitrary slice.
-    """
+    """Render practice record candidates into prompt context."""
     if not candidates:
         return (
             "PRACTICE RECORD: empty — this learner has not completed any practice problems "
@@ -34,7 +24,7 @@ def mastery_context(candidates: list[RevisionCandidate], limit: int = 8) -> str:
             bucket = "In progress"
         buckets[bucket].append(
             f"{candidate.skill_name} (id: {candidate.skill_id}, {candidate.mastery_score:.2f}, "
-            f"last practised {round(candidate.days_since_seen)}d ago)"
+            f"last practiced {round(candidate.days_since_seen)}d ago)"
         )
 
     lines = ["PRACTICE RECORD (mastery 0.00-1.00, from their own solved problems):"]
@@ -48,18 +38,13 @@ def mastery_context(candidates: list[RevisionCandidate], limit: int = 8) -> str:
             "not the whole record.)"
         )
     lines.append(
-        "Skills absent from this list have never been practised at all."
+        "Skills absent from this list have never been practiced at all."
     )
     return "\n".join(lines)
 
 
 def library_context(entries: list, scope: str, stats=None) -> str:
-    """Renders the find_problems tool result for the model.
-
-    One line per problem and never a statement — the model needs to know WHICH problems
-    exist and where the learner stands on each, and a list of full statements would cost
-    more context than the answer is worth. It fetches the detail for the one it picks.
-    """
+    """Render library problem search results into prompt context."""
     header = f"PROBLEMS FOUND (scope: {scope}) — these are real rows from their bank:"
     if not entries:
         return (
@@ -91,11 +76,7 @@ def library_context(entries: list, scope: str, stats=None) -> str:
 
 
 def library_memo(entries: list) -> str:
-    """The same result, stripped to what a LATER turn needs to act.
-
-    Carried on the reply so a follow-up "yes" still has the ids — the answering prose is
-    told to keep ids out of sight, which is exactly why they have to be kept somewhere else.
-    """
+    """Format compact problem IDs memo for subsequent conversational turns."""
     if not entries:
         return ""
     lines = ["Problems last shown to this user (ids for your use only):"]
@@ -108,13 +89,7 @@ def library_memo(entries: list) -> str:
 
 
 def plan_context(plan: LessonPlan | None) -> str:
-    """Renders the get_learning_plan tool result for the model.
-
-    Fetched on request rather than injected every turn: a plan is a dozen lines the model
-    needs on the handful of turns that ask about it. Nothing else in its context knows what
-    the plan holds — asked without this, it answered from library_memo, which is a list of
-    recently-viewed problems, and reported five steps for a nine-step plan.
-    """
+    """Render lesson plan into prompt context."""
     if plan is None:
         return (
             "NO PLAN EXISTS for this session — there is nothing to describe. Say so plainly "
@@ -138,15 +113,10 @@ def plan_context(plan: LessonPlan | None) -> str:
     return "\n".join(lines)
 
 
-def step_problem_context(node, problem, version) -> str:
-    """Renders the actual question on one step: statement, constraints, worked examples.
-
-    The examples are the ONLY test cases anyone can see — the graded ones are stored as
-    hashes of the reference solution's own output, so there is nothing to show and nothing
-    to disagree with. Saying that here is the point: asked whether a hidden test was wrong,
-    the model has to answer that it cannot be rather than agree.
-    """
-    if problem is None or version is None:
+def step_problem_context(node, problem, version=None) -> str:
+    """Render problem statement, constraints, and worked examples for a plan step."""
+    target = version or problem
+    if target is None:
         return (
             f"STEP {node.sequence_index + 1} ({node.skill_name or node.skill_id}) HAS NO "
             "QUESTION YET — one is written the first time they open it, so there is nothing "
@@ -157,14 +127,14 @@ def step_problem_context(node, problem, version) -> str:
         f"STEP {node.sequence_index + 1} QUESTION — '{problem.title}' "
         f"({problem.difficulty}, {problem.language.value}):",
         "",
-        version.statement_md.strip(),
+        target.statement_md.strip(),
     ]
-    if version.constraints:
-        lines += ["", f"Constraints: {version.constraints.strip()}"]
-    if version.examples:
+    if target.constraints:
+        lines += ["", f"Constraints: {target.constraints.strip()}"]
+    if target.examples:
         lines.append("")
         lines.append("Worked examples shown to the learner:")
-        for index, example in enumerate(version.examples, start=1):
+        for index, example in enumerate(target.examples, start=1):
             lines.append(f"{index}. input {example.input!r} -> output {example.output!r}")
             if example.explanation:
                 lines.append(f"   explanation: {' '.join(example.explanation.split())}")

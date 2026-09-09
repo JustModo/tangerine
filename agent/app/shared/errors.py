@@ -16,18 +16,10 @@ class NotFoundError(AgentError):
 
 
 class ConflictError(AgentError):
-    """Raised when a request is valid but clashes with the current state — adding a step
-    that is already on the plan, say. Distinct from NotFoundError so "you already have
-    this" doesn't reach the client dressed as "this doesn't exist"."""
+    pass
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    """Every error leaves this app as {"error": "<human-readable sentence>"}.
-
-    FastAPI's own defaults are two other shapes — {"detail": str} for HTTPException and
-    {"detail": [{...}]} for validation errors — so without these the client has to sniff
-    three envelopes to find out what went wrong."""
-
     @app.exception_handler(NotFoundError)
     async def _not_found(_request: Request, exc: NotFoundError) -> JSONResponse:
         return JSONResponse(status_code=404, content={"error": str(exc)})
@@ -55,10 +47,6 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _unhandled(_request: Request, exc: Exception) -> JSONResponse:
-        """Without this, an unexpected failure (a dependency being down, say) escapes as
-        Starlette's plain-text "Internal Server Error" — not JSON at all, so the client's
-        error parsing finds nothing and shows a useless fallback. The real cause goes to
-        the log; the browser gets a sentence."""
         logger.exception("Unhandled error")
         return JSONResponse(
             status_code=500,

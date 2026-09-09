@@ -2,9 +2,6 @@ from app.curriculum.domain.models import LessonPlan
 from app.llm.domain.requests import ToolDeclaration
 from app.shared.types import Language
 
-# Derived from the Language enum so this can never drift from what the sandbox can
-# actually execute — adding or removing a language updates the prompt and the tool schema
-# together, with nothing to remember.
 SUPPORTED_LANGUAGES = [language.value for language in Language]
 _SUPPORTED_LANGUAGES_TEXT = ", ".join(SUPPORTED_LANGUAGES)
 
@@ -229,9 +226,6 @@ EDIT_PLAN_TOOL = ToolDeclaration(
 )
 
 
-# Split by the tool each block talks about, so a session that was never offered those
-# tools doesn't pay for instructions on using them. Wording is unchanged from when this
-# was one constant; only the seams are new.
 _COACHING_RECOMMEND = (
     "COACHING — recommending what to learn next.\n"
     "You do NOT know how the learner is doing until you look. When they ask what to focus on "
@@ -243,7 +237,7 @@ _COACHING_RECOMMEND = (
     "is not something to bring up unprompted.\n"
     "Then recommend concretely: two or three specific topics, a few words on why each, and ask "
     "if they want a plan for one. Not a syllabus.\n"
-    "A skill the record calls weak is one they practised and struggled with — the strongest "
+    "A skill the record calls weak is one they practiced and struggled with — the strongest "
     "signal there is. A skill missing from the record has never been tried, which is a gap, not "
     "a strength: never call an absent skill mastered. If the record is empty, say plainly that "
     "there is nothing to go on yet and recommend from general DSA knowledge instead.\n"
@@ -325,10 +319,10 @@ FIND_PROBLEMS_TOOL = ToolDeclaration(
             },
             "scope": {
                 "type": "string",
-                "enum": ["flagged", "solved", "practised", "attempted", "all"],
+                "enum": ["flagged", "solved", "practiced", "attempted", "all"],
                 "description": (
                     "Which problems to look in. 'flagged' = marked to come back to. "
-                    "'solved' = completed. 'practised' = solved or submitted-and-failed, "
+                    "'solved' = completed. 'practiced' = solved or submitted-and-failed, "
                     "the right scope for revision. 'attempted' = started but not finished. "
                     "'all' = the whole bank including ones they have never seen. Default "
                     "to 'all' for 'is there a X problem', and to the specific scope "
@@ -359,7 +353,7 @@ CREATE_PRACTICE_PLAN_TOOL = ToolDeclaration(
     name="create_practice_plan",
     description=(
         "Build a plan whose steps are specific problems the learner already has — for "
-        "'make me a plan to practise my flagged questions' or 'a plan to redo everything I "
+        "'make me a plan to practice my flagged questions' or 'a plan to redo everything I "
         "got wrong'. Every step reopens that exact problem, nothing is regenerated. Call "
         "find_problems first to get the ids. For a plan on a TOPIC rather than on specific "
         "problems, use generate_learning_plan instead."
@@ -372,7 +366,7 @@ CREATE_PRACTICE_PLAN_TOOL = ToolDeclaration(
                 "items": {"type": "string"},
                 "description": (
                     "Ids from a find_problems result, in the order they should be "
-                    "practised. Never invent one."
+                    "practiced. Never invent one."
                 ),
             },
             "topic": {
@@ -438,7 +432,7 @@ GET_PLAN_TOOL = ToolDeclaration(
 PRACTICE_RECORD_TOOL = ToolDeclaration(
     name="get_practice_record",
     description=(
-        "Look up how this learner is actually doing: which skills they have practised, their "
+        "Look up how this learner is actually doing: which skills they have practiced, their "
         "mastery score on each, and how long since they last saw it. Call this before "
         "recommending what to study next, what they are weak in, or what to focus on for "
         "interviews — it is the only way to know. Takes no arguments. Do not call it for "

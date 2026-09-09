@@ -39,8 +39,6 @@ class SourceCodeBody(BaseModel):
 
 class SubmitBody(BaseModel):
     source_code: str
-    # What the attempt cost. Only the client knows any of this — the editor clock, the run
-    # count and which hints were revealed all live in the browser.
     metrics: AttemptMetrics = AttemptMetrics()
 
 
@@ -66,8 +64,6 @@ def get_code_helper_service() -> CodeHelperService:
 class ChatMessageBody(BaseModel):
     content: str
     source_code: str = ""
-    # The client sends its own last-run results: per-test results are never persisted, so
-    # the server has no way to reconstruct what the learner is actually looking at.
     last_run: dict | None = None
 
 
@@ -164,10 +160,10 @@ async def get_solution(
             status_code=403, detail="Solve this problem first — the solution unlocks once you pass."
         )
 
-    version = await problems.get_latest_version(session.problem_id)
-    if version is None:
+    problem = await problems.get(session.problem_id)
+    if problem is None:
         raise HTTPException(status_code=404, detail="Problem not found")
-    return {"reference_solution": version.reference_solution}
+    return {"reference_solution": problem.reference_solution}
 
 
 @router.patch("/{session_id}/code")
@@ -192,16 +188,15 @@ async def run(
     await service.save_code(session_id, body.source_code)
 
     problem = await problems.get(session.problem_id)
-    version = await problems.get_latest_version(session.problem_id)
-    if problem is None or version is None:
+    if problem is None:
         raise HTTPException(status_code=404, detail="Problem not found")
 
     request = ExecutionRequest(
         language=problem.language,
-        code=assemble_program(version.pre_code, body.source_code, version.post_code),
+        code=assemble_program(problem.pre_code, body.source_code, problem.post_code),
         test_cases=[
             ExecutionTestCase(id=example.id, input=example.input, output_hash=hash_output(example.output))
-            for example in version.examples
+            for example in problem.examples
         ],
     )
 

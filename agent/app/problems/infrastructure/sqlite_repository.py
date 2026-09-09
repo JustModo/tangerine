@@ -8,7 +8,6 @@ from app.problems.domain.models import (
     ProblemExample,
     ProblemStatus,
     ProblemTest,
-    ProblemVersion,
 )
 from app.shared.database import connect
 from app.shared.errors import ConflictError
@@ -220,7 +219,9 @@ class SqliteProblemRepository:
                     json.dumps([e.model_dump() for e in problem.examples]),
                     json.dumps([t.model_dump() for t in problem.tests]),
                     json.dumps(problem.tags),
-                    problem.created_at.isoformat() if hasattr(problem.created_at, "isoformat") else str(problem.created_at),
+                    problem.created_at.isoformat()
+                    if hasattr(problem.created_at, "isoformat")
+                    else str(problem.created_at),
                 ),
             )
             for skill_id in problem.skill_ids:
@@ -230,52 +231,7 @@ class SqliteProblemRepository:
                 )
             await db.commit()
 
-    async def save_version(self, version: ProblemVersion) -> None:
-        """Backwards-compatible updater for problem content fields."""
-        async with connect(self._database_path) as db:
-            await db.execute(
-                "UPDATE problems SET statement_md = ?, reference_solution = ?, user_code = ?, "
-                "pre_code = ?, post_code = ?, constraints = ?, input_format = ?, output_format = ?, "
-                "hints_json = ?, examples_json = ?, tests_json = ? WHERE id = ?",
-                (
-                    version.statement_md,
-                    version.reference_solution,
-                    version.user_code,
-                    version.pre_code,
-                    version.post_code,
-                    version.constraints,
-                    version.input_format,
-                    version.output_format,
-                    json.dumps(version.hints),
-                    json.dumps([e.model_dump() for e in version.examples]),
-                    json.dumps([t.model_dump() for t in version.tests]),
-                    version.problem_id,
-                ),
-            )
-            await db.commit()
 
-    async def get_latest_version(self, problem_id: str) -> ProblemVersion | None:
-        """Backwards-compatible view of problem content."""
-        problem = await self.get(problem_id)
-        if problem is None:
-            return None
-        return ProblemVersion(
-            id=problem.id,
-            problem_id=problem.id,
-            version=1,
-            statement_md=problem.statement_md,
-            reference_solution=problem.reference_solution,
-            user_code=problem.user_code,
-            pre_code=problem.pre_code,
-            post_code=problem.post_code,
-            constraints=problem.constraints,
-            input_format=problem.input_format,
-            output_format=problem.output_format,
-            hints=problem.hints,
-            examples=problem.examples,
-            tests=problem.tests,
-            created_at=problem.created_at,
-        )
 
     async def _hydrate(self, db: aiosqlite.Connection, row: aiosqlite.Row) -> Problem:
         cursor = await db.execute("SELECT skill_id FROM problem_skills WHERE problem_id = ?", (row["id"],))

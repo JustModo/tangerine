@@ -20,7 +20,6 @@ from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepos
 from app.shared.errors import ConflictError, NotFoundError
 from app.shared.types import Language
 
-# The curriculum LLM rates each step 1-5; problem selection speaks easy/medium/hard.
 _DIFFICULTY_BY_RATING = {1: "easy", 2: "easy", 3: "medium", 4: "hard", 5: "hard"}
 
 
@@ -28,15 +27,11 @@ def _difficulty_label(rating: int) -> str:
     return _DIFFICULTY_BY_RATING.get(rating, "medium")
 
 
-# Above this the learner has repeatedly solved problems on the skill unaided, so the plan
-# marks it DONE rather than making them repeat it.
 KNOWN_SKILL_THRESHOLD = 0.8
 
 
 class CurriculumService:
-    """Lesson plan creation and per-node lesson notes. A plan's nodes are populated
-    immediately via the curriculum LangGraph and are usable right
-    away — there's no accept step, and the most recently created plan is the active one."""
+    """Lesson plan creation, node management, and lesson notes generation."""
 
     def __init__(
         self,
@@ -56,8 +51,6 @@ class CurriculumService:
         self._mastery_repository = mastery_repository
         self._problem_session_repository = problem_session_repository
         self._problem_repository = problem_repository
-        # Without one, a lesson's code blocks are served on trust — which is what every
-        # caller did before there was anywhere to run them.
         self._executor = executor
 
     async def create_draft(
@@ -70,13 +63,7 @@ class CurriculumService:
         target_problem: str | None = None,
         user_id: str | None = None,
     ) -> LessonPlan:
-        """step_count honours an explicit "just 2 lessons" request; target_problem is a
-        question the learner pasted in, in which case the generated steps are prerequisites
-        and one extra final step is appended that serves that exact problem.
-
-        user_id lets the plan account for what this learner already knows — steps on skills
-        they have demonstrably mastered start DONE instead of blocking the ones they came
-        for."""
+        """Create a new lesson plan with generated sequence of lesson nodes."""
         known_skills = await self._known_skills(user_id)
         plan = LessonPlan(
             id=str(uuid.uuid4()),
@@ -89,10 +76,6 @@ class CurriculumService:
         )
         await self._repository.save(plan)
 
-        # A pasted problem occupies the final step, so the LLM only has to produce the
-        # prerequisites — one fewer than the learner asked for in total. "Just this one
-        # problem" therefore means zero prerequisites, and we skip curriculum generation
-        # altogether rather than padding the plan with a step they explicitly didn't want.
         prerequisite_count = step_count - 1 if step_count is not None and target_problem else step_count
         generated_nodes = []
         if prerequisite_count is None or prerequisite_count > 0:
@@ -108,8 +91,6 @@ class CurriculumService:
             )
             generated_nodes = generated.nodes
 
-        # The prompt asks for distinct skills; this enforces it. sequence_index stays 0 —
-        # _ensure_startable reindexes below, so a skipped node leaves no gap.
         nodes = []
         seen_skill_ids: set[str] = set()
         for generated_node in generated_nodes:
@@ -131,8 +112,6 @@ class CurriculumService:
             )
 
         if target_problem:
-            # The course ends on the learner's own question. Carrying the statement on the
-            # node means it's adapted lazily, when they actually reach it.
             nodes.append(
                 LessonNode(
                     id=str(uuid.uuid4()),
@@ -154,11 +133,7 @@ class CurriculumService:
     async def create_practice_plan(
         self, session_id: str, problem_ids: list[str], topic: str = "Revision"
     ) -> LessonPlan:
-        """A plan whose steps ARE these exact problems — for revising work already done.
-
-        No LLM call anywhere: the steps are given, and each node's skill, difficulty and
-        language come off the problem itself. That is also why every step is instant to
-        open — next_problem's problem_id branch skips selection and generation entirely."""
+        """Create a plan bound directly to existing problem IDs."""
         if self._problem_repository is None:
             raise NotFoundError("Practice plans are not available without a problem bank.")
 
@@ -174,8 +149,6 @@ class CurriculumService:
             id=str(uuid.uuid4()),
             session_id=session_id,
             topic=topic,
-            # The problems already exist in one language; a plan-level override would be a
-            # lie, since none of them will be regenerated.
             language=problems[0].language,
             level="revision",
             version=1,
@@ -188,8 +161,6 @@ class CurriculumService:
             LessonNode(
                 id=str(uuid.uuid4()),
                 lesson_plan_id=plan.id,
-                # Straight off the problem — ensure_skill takes a NAME and would create a
-                # junk row, and the problem already carries resolved ids.
                 skill_id=problem.skill_ids[0]
                 if problem.skill_ids
                 else await self._skill_repository.ensure_skill(topic),
@@ -206,8 +177,7 @@ class CurriculumService:
         return await self._reloaded(plan.id, plan)
 
     async def _known_skills(self, user_id: str | None) -> set[str]:
-        """Normalised names of skills this learner has already demonstrated. Compared by
-        name because that is all the curriculum generator emits — it never sees skill ids."""
+        """Fetch normalised names of skills mastered by user above threshold."""
         if user_id is None or self._mastery_repository is None:
             return set()
         known = set()
@@ -223,12 +193,7 @@ class CurriculumService:
         return await self._repository.get(plan_id)
 
     async def set_plan_language(self, plan_id: str, language: Language) -> LessonPlan:
-        """Switches what language the plan's remaining problems generate in — a pure
-        language swap, not a step revision, so unlike edit_plan this touches no step, no
-        LLM call, and no node reconciliation. Every node's NOT_STARTED/IN_PROGRESS problem
-        session is discarded (see _invalidate_unsubmitted) so it regenerates fresh in the
-        new language next time it's opened — a SUBMITTED or COMPLETED session is real,
-        graded work and is left exactly as it is."""
+        """Update the plan's programming language and invalidate unsubmitted problem sessions."""
         plan = await self._require_plan(plan_id)
         if language == plan.language:
             return plan
@@ -238,52 +203,33 @@ class CurriculumService:
         return await self._repository.get(plan_id) or updated
 
     async def _invalidate_unsubmitted(self, lesson_node_ids) -> None:
-        """Discards a node's problem session unless it's been submitted for grading — the
-        shared hook behind "what a node's problem should be just changed": a language swap
-        (every node) or an edited step's difficulty (that one node). Without this,
-        next_problem's get_by_node short-circuit keeps resurfacing the stale problem, even
-        for an in-progress attempt that no longer fits."""
+        """Delete unsubmitted problem sessions for the given lesson nodes."""
         if self._problem_session_repository is None:
             return
         for lesson_node_id in lesson_node_ids:
             await self._problem_session_repository.delete_unsubmitted_for_node(lesson_node_id)
 
     async def _session_problem(self, node_id: str):
-        """The problem a step is actually serving, with its session and latest version.
-
-        A step's problem is bound by its problem session, not by the node row — so this is
-        the only way to answer "which question is on step 5". (None, None, None) when the
-        step has never been opened.
-        """
+        """Fetch problem session and bound problem for a lesson node."""
         if self._problem_session_repository is None or self._problem_repository is None:
-            return None, None, None
+            return None, None
         session = await self._problem_session_repository.get_by_node(node_id)
         if session is None:
-            return None, None, None
+            return None, None
         return (
             session,
             await self._problem_repository.get(session.problem_id),
-            await self._problem_repository.get_latest_version(session.problem_id),
         )
 
     async def step_problem(self, plan_id: str, step: str):
-        """(node, problem, version) for one step, so a caller can read the actual question.
-
-        Read-only counterpart to regenerate_step_problem — both have to agree on which step
-        the user meant, so both go through _resolve_step.
-        """
+        """Fetch lesson node and problem for a specific step."""
         plan = await self._require_plan(plan_id)
         node = self._resolve_step(plan, step)
-        _, problem, version = await self._session_problem(node.id)
-        return node, problem, version
+        _, problem = await self._session_problem(node.id)
+        return node, problem
 
     async def regenerate_step_problem(self, plan_id: str, step: str) -> LessonPlan:
-        """Throws away the question on one step so the next open generates a different one.
-
-        Discarding the session alone is not enough: that also drops the problem from the
-        learner's seen list, and find_suitable would hand the very same row straight back.
-        Retiring it from the bank is what makes the regeneration stick.
-        """
+        """Invalidate the problem on a step to trigger regeneration on next open."""
         plan = await self._require_plan(plan_id)
         target = self._resolve_step(plan, step)
         if target.problem_id:
@@ -292,7 +238,7 @@ class CurriculumService:
                 "asked for, so there is nothing to regenerate"
             )
 
-        session, problem, _ = await self._session_problem(target.id)
+        session, problem = await self._session_problem(target.id)
         if session is None:
             raise ConflictError(
                 f"step {target.sequence_index + 1} has no question yet — it generates a "
@@ -308,8 +254,6 @@ class CurriculumService:
             )
 
         if problem is not None and self._problem_repository is not None:
-            # ponytail: INVALID retires the problem for everyone, not just this learner.
-            # Fine while the bank is one user's; add a per-user exclusion table if it isn't.
             await self._problem_repository.save(
                 problem.model_copy(update={"status": ProblemStatus.INVALID})
             )
@@ -317,10 +261,7 @@ class CurriculumService:
         return await self._reloaded(plan_id, plan)
 
     def _resolve_step(self, plan: LessonPlan, step: str) -> LessonNode:
-        """A step named either by its 1-indexed position (as shown in the plan UI) or its
-        skill name — whichever the user actually said. Shared by every operation that
-        targets one existing step, so "which step did they mean" is resolved exactly the
-        same way everywhere."""
+        """Resolve a step identifier (1-indexed sequence number or skill name) to a LessonNode."""
         stripped = step.strip()
         if stripped.isdigit():
             index = int(stripped) - 1
@@ -334,9 +275,7 @@ class CurriculumService:
 
     @staticmethod
     def _ensure_startable(nodes: list[LessonNode]) -> list[LessonNode]:
-        """Reindexes sequentially and unlocks the first unfinished step — every structural
-        change (add/remove/reorder a step, or an LLM-driven rework) must leave the plan in a
-        state the learner can actually continue from, never all-locked."""
+        """Ensure sequential reindexing and unlock the first unfinished lesson node."""
         ordered = [node.model_copy(update={"sequence_index": index}) for index, node in enumerate(nodes)]
         first = next(
             (i for i, node in enumerate(ordered) if node.status != LessonNodeStatus.DONE), None
@@ -348,8 +287,6 @@ class CurriculumService:
         return ordered
 
     async def _reloaded(self, plan_id: str, fallback: LessonPlan) -> LessonPlan:
-        """Re-reads a plan a mutator just wrote, so the caller gets the joined skill_name
-        and problem_title the in-memory copy has never carried."""
         return await self._repository.get(plan_id) or fallback
 
     async def _require_plan(self, plan_id: str) -> LessonPlan:
@@ -359,9 +296,7 @@ class CurriculumService:
         return plan
 
     async def set_step_difficulty(self, plan_id: str, step: str, difficulty: str) -> LessonPlan:
-        """Changes one step's difficulty in place — no LLM call, no other step touched.
-        Invalidates only that step's not-yet-submitted problem session (see
-        _invalidate_unsubmitted) so it regenerates at the new difficulty."""
+        """Update the difficulty of a specific step and invalidate unsubmitted sessions."""
         plan = await self._require_plan(plan_id)
         target = self._resolve_step(plan, step)
         if difficulty == target.difficulty:
@@ -377,11 +312,9 @@ class CurriculumService:
     async def add_step(
         self, plan_id: str, skill: str, difficulty: str | None = None, position: int | None = None
     ) -> LessonPlan:
-        """Inserts a brand new step — no existing step's row, session, or progress is
-        touched, so nothing needs invalidating."""
+        """Add a new step to the lesson plan at the specified position."""
         plan = await self._require_plan(plan_id)
         skill_id = await self._skill_repository.ensure_skill(skill)
-        # Same guard add_problem_step has.
         if any(node.skill_id == skill_id for node in plan.nodes):
             raise ConflictError(f"'{skill}' is already a step on this plan.")
 
@@ -389,7 +322,7 @@ class CurriculumService:
             id=str(uuid.uuid4()),
             lesson_plan_id=plan.id,
             skill_id=skill_id,
-            sequence_index=0,  # reindexed below
+            sequence_index=0,
             status=LessonNodeStatus.LOCKED,
             difficulty=difficulty or "medium",
             created_at=datetime.now(UTC),
@@ -401,9 +334,7 @@ class CurriculumService:
         return await self._reloaded(plan_id, plan)
 
     async def add_problem_step(self, plan_id: str, problem_id: str) -> LessonPlan:
-        """Appends a step that serves one problem the learner ALREADY has — how an existing
-        question gets somewhere they can work it. Skill and difficulty come off the problem,
-        so nothing is generated and nothing is asked of the LLM."""
+        """Append an existing problem to the lesson plan as a new step."""
         if self._problem_repository is None:
             raise NotFoundError("Adding an existing problem needs a problem bank.")
         plan = await self._require_plan(plan_id)
@@ -419,13 +350,9 @@ class CurriculumService:
             skill_id=(
                 problem.skill_ids[0]
                 if problem.skill_ids
-                # ensure_skill takes a NAME, so the title is the only sane fallback for a
-                # problem stored without skills.
                 else await self._skill_repository.ensure_skill(problem.title)
             ),
-            sequence_index=0,  # reindexed below
-            # AVAILABLE, not LOCKED: the learner named this problem, and it is one they
-            # already have, so there is no prerequisite to gate it behind.
+            sequence_index=0,
             status=LessonNodeStatus.AVAILABLE,
             difficulty=problem.difficulty,
             problem_id=problem.id,
@@ -435,9 +362,7 @@ class CurriculumService:
         return await self._reloaded(plan_id, plan)
 
     async def remove_step(self, plan_id: str, step: str) -> LessonPlan:
-        """Drops one step. Refuses to remove a completed one — matching the rest of this
-        file, finished work is never silently discarded. replace_nodes already cascades the
-        dropped node's problem session (see its docstring)."""
+        """Remove a step from the lesson plan."""
         plan = await self._require_plan(plan_id)
         target = self._resolve_step(plan, step)
         if target.status == LessonNodeStatus.DONE:
@@ -447,9 +372,7 @@ class CurriculumService:
         return await self._reloaded(plan_id, plan)
 
     async def reorder_step(self, plan_id: str, step: str, to_position: int) -> LessonPlan:
-        """Moves one step to a new position. The step's own problem is still exactly as
-        valid as it was — nothing about what it should contain changed — so no session is
-        invalidated."""
+        """Move a step to a new position in the plan."""
         plan = await self._require_plan(plan_id)
         target = self._resolve_step(plan, step)
         nodes = [node for node in plan.nodes if node.id != target.id]
@@ -459,13 +382,7 @@ class CurriculumService:
         return await self._reloaded(plan_id, plan)
 
     async def edit_plan(self, plan_id: str, instruction: str) -> LessonPlan:
-        """Applies a free-text revision ("add a step on hash maps", "make step 3 harder",
-        "redo the whole thing") to an existing plan. Steps the revision leaves alone keep
-        their identity — and therefore their DONE status and problem sessions — so editing
-        a plan never costs the learner finished work. A step whose difficulty the revision
-        actually changed has its not-yet-submitted problem session invalidated (see
-        _invalidate_unsubmitted), so "make step 3 harder" regenerates step 3's problem
-        instead of leaving the old, now-mismatched one in place."""
+        """Apply free-text curriculum revision to the plan while preserving completed progress."""
         plan = await self._require_plan(plan_id)
 
         current_steps = "\n".join(
@@ -482,29 +399,21 @@ class CurriculumService:
             instruction,
         )
 
-        # Match revised steps back onto existing nodes by skill name — an exact (normalized)
-        # match means "this step was untouched", so it keeps its row and its progress.
         existing_by_skill: dict[str, list[LessonNode]] = {}
         for node in plan.nodes:
             existing_by_skill.setdefault((node.skill_name or "").strip().lower(), []).append(node)
 
         nodes: list[LessonNode] = []
         matched_ids: set[str] = set()
-        # A matched node keeps its row (and therefore its problem session) — but if the
-        # revision actually changed its difficulty, the session that was already selected or
-        # started no longer matches what the step is supposed to be, and must regenerate.
         redifficultied_ids: set[str] = set()
         seen_skills: set[str] = set()
         for step in revised.steps:
             skill_key = step.skill.strip().lower()
-            # Without this a repeated skill falls through to creating a second node for it.
             if skill_key in seen_skills:
                 continue
             seen_skills.add(skill_key)
             candidates = existing_by_skill.get(skill_key, [])
             match = next((c for c in candidates if c.id not in matched_ids), None)
-            # Already easy/medium/hard — the revision schema speaks the same vocabulary the
-            # plan stores, so an untouched step's difficulty round-trips unchanged.
             difficulty = step.difficulty
             if match is not None:
                 matched_ids.add(match.id)
@@ -517,15 +426,13 @@ class CurriculumService:
                         id=str(uuid.uuid4()),
                         lesson_plan_id=plan.id,
                         skill_id=await self._skill_repository.ensure_skill(step.skill),
-                        sequence_index=0,  # reindexed below
+                        sequence_index=0,
                         status=LessonNodeStatus.LOCKED,
                         difficulty=difficulty,
                         created_at=datetime.now(UTC),
                     )
                 )
 
-        # Completed work is never discarded, even if the revision dropped it. Finished steps
-        # keep their original relative order at the front of the plan.
         rescued = sorted(
             (n for n in plan.nodes if n.status == LessonNodeStatus.DONE and n.id not in matched_ids),
             key=lambda n: n.sequence_index,
@@ -534,17 +441,10 @@ class CurriculumService:
 
         await self._repository.replace_nodes(plan.id, self._ensure_startable(nodes))
         await self._invalidate_unsubmitted(redifficultied_ids)
-        return await self._reloaded(plan.id, plan)
+        return await self._reloaded(plan_id, plan)
 
     async def get_node_notes(self, node_id: str, refresh: bool = False) -> GeneratedLessonNotes:
-        """Lesson for the problem the node is serving, generated on request and cached
-        after. Locked nodes are refused so lessons can't be generated (and paid for) ahead
-        of the curriculum. refresh forces a fresh generation over the cached one.
-
-        The problem is passed in so the lesson teaches the mechanic that actually solves
-        it rather than a loose association with the skill name. It is genuinely optional:
-        the notes tab can be opened before the learner presses Start, and a skill-only
-        lesson is still worth having then."""
+        """Generate or retrieve cached lesson notes for a node."""
         node = await self._repository.get_node(node_id)
         if node is None:
             raise NotFoundError(f"Lesson node {node_id} not found")
@@ -555,16 +455,10 @@ class CurriculumService:
         if plan is None:
             raise NotFoundError(f"Lesson plan {node.lesson_plan_id} not found")
 
-        _, problem, version = await self._session_problem(node_id)
+        _, problem = await self._session_problem(node_id)
 
-        # ponytail: lessons live in llm_cache keyed by (problem or skill, language, level)
-        # — they're derivable and cheap to regenerate, so they need no table of their own.
-        # Give them one only if they ever become user-editable or per-user personalized, at
-        # which point they stop being derivable.
         return await generate_lesson_notes(
             self._llm_provider,
-            # The skills JOIN is INNER so skill_name is always present; the fallback only
-            # satisfies the str | None type (a raw UUID here would poison the cache key).
             node.skill_name or node.skill_id,
             plan.language.value,
             plan.level,
@@ -573,8 +467,8 @@ class CurriculumService:
             problem_id=problem.id if problem else None,
             problem_title=problem.title if problem else None,
             tags=problem.tags if problem else None,
-            statement_md=version.statement_md if version else None,
-            reference_solution=version.reference_solution if version else None,
+            statement_md=problem.statement_md if problem else None,
+            reference_solution=problem.reference_solution if problem else None,
             verifier=partial(verify_lesson_code, self._executor) if self._executor else None,
         )
 

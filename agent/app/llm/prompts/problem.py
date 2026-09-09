@@ -1,10 +1,6 @@
 from app.llm.schemas.problem import GeneratedProblem
 from app.shared.code_assembly import annotated_program
 
-# Split into blocks so the repair call can take the subset it actually needs. A patch
-# cannot return a title, hints, tags or a stress test (see ProblemPatch), so the rules for
-# writing those are dead weight on every repair — and repairs are budgeted at up to two
-# per problem. Wording is unchanged; only the seams are new.
 _PROBLEM_INTRO = (
     "You write a single DSA practice problem for a given skill, language, and difficulty. "
     "Produce a clear statement (markdown), 2-4 worked examples, and the problem's code as "
@@ -109,10 +105,6 @@ _CODE_SHAPE = (
     "produce one acceptable answer.\n\n"
 )
 
-# The only language-specific text in this file, and the only thing that changes when a
-# language is added: one entry per Language value, each carrying that language's fragment
-# shape, its printing idiom, and one worked example aimed at what actually breaks in it.
-# Exactly ONE entry is sent per call, so a C generation no longer pays for Python's rules.
 _LANGUAGE_BLOCKS: dict[str, str] = {
     "python": (
         "LANGUAGE SHAPE (python):\n"
@@ -325,12 +317,10 @@ _LANGUAGE_BLOCKS: dict[str, str] = {
 
 
 def _language_block(language: str) -> str:
-    """The shape and worked example for one language. A language with no entry yet (a new
-    Language value added before its block is written) falls back to all of them rather than
-    to nothing — verbose, but the model still sees a valid shape to copy."""
+    """Format the shape and worked example for a programming language."""
     return _LANGUAGE_BLOCKS.get(language) or "".join(_LANGUAGE_BLOCKS.values())
 
-# Everything here describes a field ProblemPatch cannot return, so repairs skip it.
+
 _AUTHORING_EXTRAS = (
     "Also produce these as their OWN fields — never restate them inside statement_md, "
     "which is the problem description only:\n"
@@ -422,7 +412,6 @@ def problem_user_prompt(
 ) -> str:
     prompt = f"Skill: {skill}\nLanguage: {language}\nDifficulty: {difficulty}"
     if avoid_titles:
-        # Without this, learner gets the same problem on repeat attempts.
         listed = "\n".join(f"- {title}" for title in avoid_titles)
         prompt += (
             "\n\nThe learner has ALREADY been given these problems for this skill. Write a "
@@ -450,8 +439,6 @@ _PATCH_RULES = (
 )
 
 
-# One entry per FailureKind (app.problems.application.repair), and the only place a failure
-# kind is described. test_problem_prompts asserts the two stay in step.
 _DIAGNOSIS: dict[str, str] = {
     "compile": "Your fragments do NOT compile, so nothing ran at all. The compiler's own "
     "output is below, and its line numbers refer to the numbered program that follows it — "
@@ -477,23 +464,17 @@ _DIAGNOSIS: dict[str, str] = {
 def patch_problem_user_prompt(
     kind: str, detail: str, language: str, problem: GeneratedProblem
 ) -> str:
-    """A repair prompt for a problem that already failed the sandbox. Carries the minimum
-    that can explain the failure: the harness, the tests, and what actually happened.
-
-    Which sections a kind needs is decided HERE and nowhere else, so the caller passes the
-    whole problem and never reasons about it."""
+    """Format a patch repair user prompt for a rejected problem."""
     sections = [
         f"Language: {language}",
         f"THIS PROBLEM FAILED VALIDATION.\n{_DIAGNOSIS[kind]}",
         f"WHAT HAPPENED:\n{detail}",
     ]
 
-    # Only a mismatch disagrees with the statement, so only it needs the statement.
     if kind == "mismatch":
         sections.append(f"statement_md:\n{problem.statement_md}")
 
     if kind == "compile":
-        # One numbered file, so the compiler's line numbers resolve.
         sections.append(
             "THE PROGRAM THE COMPILER SAW (pre_code + reference_user_code + post_code):\n"
             + annotated_program(
@@ -502,7 +483,6 @@ def patch_problem_user_prompt(
         )
     else:
         sections.append(f"pre_code:\n{problem.pre_code}")
-        # The stub matters only when the fix is about the stdin format it is written against.
         if kind == "no_tests":
             sections.append(f"user_code:\n{problem.user_code}")
         sections.append(f"reference_user_code:\n{problem.reference_user_code}")
@@ -521,8 +501,7 @@ def patch_problem_user_prompt(
 
 
 def adapt_problem_user_prompt(source_problem: str, language: str) -> str:
-    """For a problem the learner pasted in (e.g. from LeetCode): keep THEIR question, and
-    build the harness/examples/solution around it rather than inventing a new problem."""
+    """Format user prompt to adapt a user-provided problem statement."""
     return (
         f"Language: {language}\n\n"
         "Do NOT invent a new problem. Adapt the exact problem below into the required "

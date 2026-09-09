@@ -54,25 +54,6 @@ class Problem(BaseModel):
     created_at: datetime
 
 
-class ProblemVersion(BaseModel):
-    """Backwards-compatible view of problem content."""
-    id: str
-    problem_id: str
-    version: int = 1
-    statement_md: str = ""
-    reference_solution: str = ""
-    pre_code: str = ""
-    post_code: str = ""
-    user_code: str = ""
-    constraints: str | None = None
-    input_format: str | None = None
-    output_format: str | None = None
-    hints: list[str] = []
-    examples: list[ProblemExample] = []
-    tests: list[ProblemTest] = []
-    created_at: datetime | None = None
-
-
 class ProblemCriteria(BaseModel):
     skill_id: str | None = None
     language: Language | None = None

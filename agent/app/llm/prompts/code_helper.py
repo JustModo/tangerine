@@ -1,5 +1,3 @@
-# The prompt avoids em dashes and long sentences itself: the model copies the register of
-# its instructions.
 CODE_HELPER_SYSTEM_PROMPT = (
     "You are a coding mentor helping a learner with ONE specific practice problem. You can "
     "see the problem, the code they have written so far, and the result of their last test "
@@ -185,11 +183,6 @@ CODE_HELPER_SYSTEM_PROMPT = (
 
 _MAX_FAILURES = 3
 _MAX_FIELD_CHARS = 400
-# The two fields that are re-sent in full on every single helper turn. Generous rather
-# than tight — the helper is useless if it cannot see the learner's actual code — but
-# bounded, because an unbounded paste was previously billed again on every message.
-# ponytail: truncates the tail, so a bug past 4k chars is invisible; raise the cap if
-# real solutions ever run that long.
 _MAX_CODE_CHARS = 4_000
 _MAX_STATEMENT_CHARS = 2_000
 

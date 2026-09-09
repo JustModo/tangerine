@@ -72,7 +72,7 @@ function Pager({
 
 export const meta: MetaFunction = () => [
   { title: "Progress · Tangerine" },
-  { name: "description", content: "What you have practised, what you are weak in, and which skills are due for revision." },
+  { name: "description", content: "What you have practiced, what you are weak in, and which skills are due for revision." },
 ];
 
 export async function clientLoader() {
@@ -177,7 +177,7 @@ export default function ProgressScreen() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 w-full">
-      <PageHeader title="Progress" subtitle="What you've practised and what's due" />
+      <PageHeader title="Progress" subtitle="What you've practiced and what's due" />
       <div className="flex-1 min-h-0 overflow-y-auto w-full">
         <div className="max-w-3xl mx-auto flex flex-col gap-10 py-10 px-10">
           {!hasRecord && (

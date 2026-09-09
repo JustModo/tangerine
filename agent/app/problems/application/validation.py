@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from app.execution.domain.executor import CodeExecutor
-from app.execution.domain.models import ExecutionRequest, ExecutionStatus, parse_runtime_ms
+from app.execution.domain.models import ExecutionRequest, ExecutionStatus
 from app.execution.domain.models import TestCase as ExecutionTestCase
 from app.llm.domain.provider import LLMProvider
 from app.llm.graphs.problem import generate_problem, patch_problem
@@ -22,7 +22,6 @@ from app.problems.domain.models import (
     ProblemExample,
     ProblemStatus,
     ProblemTest,
-    ProblemVersion,
 )
 from app.problems.domain.repository import ProblemRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
@@ -32,16 +31,12 @@ from app.shared.types import Language
 
 logger = logging.getLogger(__name__)
 
-# Most recent titles to tell the generator not to repeat. Enough to keep consecutive
-# problems on a skill feeling different, without the list growing forever.
+# Most recent titles to avoid repeating
 MAX_AVOID_TITLES = 8
 
 
 class ProblemValidationService:
-    """Generates a problem via the problem LangGraph, then proves it out against the real
-    sandbox before it can enter the selection pool. Expected test
-    outputs always come from actually running the reference solution — never from the
-    LLM's claimed example output."""
+    """Generates and validates coding problems against the execution sandbox."""
 
     def __init__(
         self,
@@ -67,24 +62,7 @@ class ProblemValidationService:
         avoid_titles: list[str] | None = None,
         exclude_problem_ids: list[str] | None = None,
     ) -> Problem | None:
-        """Generate, prove it out against the real sandbox, and — when it fails — repair it
-        with the failure in hand before falling back to starting over.
-
-        The budget is deliberately the shape of this method rather than a counter: two
-        candidates, each getting one targeted repair before it is abandoned. A repair is far
-        cheaper than a regeneration and fixes the common failures (a signature mismatch, a
-        parse that eats the wrong tokens, an example output the reference disagrees with),
-        so it goes first; starting over is the escape hatch for when the whole approach is
-        wrong.
-
-        When source_problem is given, the learner pasted that question in and the LLM adapts
-        it rather than inventing one. Neither the repair nor the fresh generation may change
-        what is being asked — the regeneration re-adapts the SAME source, and the repair is
-        barred from touching the statement.
-
-        avoid_titles, when given, is the caller's own do-not-repeat list; a plan passes the
-        questions its earlier steps served. Without it, the skill's own titles are used —
-        right for the plan-less practice path."""
+        """Generate problem candidate, validate against sandbox, and attempt repair if rejected."""
         stage = on_stage or (lambda _: None)
 
         if source_problem:
@@ -92,16 +70,10 @@ class ProblemValidationService:
         elif avoid_titles is None:
             skill_id = await self._skill_repository.ensure_skill(skill)
             avoid_titles = await self._repository.list_titles(skill_id, language)
-        # Capped for two reasons: it grows without bound as the bank fills, and it is part of
-        # the generation cache key — every extra title is another key nobody else will ever
-        # hit. Not repeating a problem is already guaranteed upstream by
-        # ProblemSelectionService.find_suitable; this list is only a nudge for variety.
         avoid_titles = avoid_titles[-MAX_AVOID_TITLES:]
 
         generated = None
         for attempt in range(2):
-            # The second pass regenerates without the cache: replaying a rejected cached
-            # answer would loop, and the rejected title joins the avoid list.
             stage("generating" if attempt == 0 else "regenerating")
             generated = await generate_problem(
                 self._llm_provider,
@@ -113,8 +85,6 @@ class ProblemValidationService:
                 avoid_titles=avoid_titles if attempt == 0 else avoid_titles + [generated.title],
             )
 
-            # A question the bank already has is served from the bank: already validated, not
-            # yet seen by this learner, and no further LLM call.
             duplicate_of = await self._find_duplicate(
                 generated, source_problem, language, exclude_problem_ids
             )
@@ -137,11 +107,7 @@ class ProblemValidationService:
         source_problem: str | None,
         stage: Callable[[str], None],
     ) -> Problem | None:
-        """Validate one candidate, and on failure spend a single targeted repair on it.
-
-        Every candidate gets its repair, the regenerated one included: it used to get a
-        bare validate and no second chance, which threw away the cheapest fix available at
-        exactly the point the budget was nearly spent."""
+        """Validate generated problem and attempt patch repair on failure."""
         stage("validating")
         result = await self._validate(generated, skill, language, difficulty)
         if isinstance(result, Problem):
@@ -166,9 +132,7 @@ class ProblemValidationService:
         language: Language,
         exclude_problem_ids: list[str] | None,
     ) -> Problem | None:
-        """The bank's existing take on the question just generated, if it has one. Fuzzy on
-        the title rather than an exact hash, which only ever caught identical ones. Never for
-        a pasted problem — the learner asked for that exact question."""
+        """Check for existing similar problems in the problem repository."""
         if source_problem:
             return None
         return await self._repository.find_similar(generated.title, language, exclude_problem_ids)
@@ -180,8 +144,7 @@ class ProblemValidationService:
         language: Language,
         difficulty: str,
     ) -> Problem | ValidationFailure:
-        """Returns the approved problem, or why it was rejected. The failure is the input to
-        the repair attempt, so every rejection has to carry one."""
+        """Validate generated problem test cases and execution outputs against reference solution."""
         skill_ids = [
             await self._skill_repository.ensure_skill(name) for name in (generated.skills or [skill])
         ]
@@ -197,10 +160,8 @@ class ProblemValidationService:
         )
         await self._repository.save(problem)
 
-        # Drop empty inputs (causes EOFError on reference solution).
         examples = [ex for ex in generated.examples if ex.input.strip()]
         hidden_tests = [value for value in generated.hidden_tests if value.strip()]
-        # Need both examples and hidden tests (without hidden, learner can hardcode answers).
         if not examples or not hidden_tests:
             return await self._mark_invalid(problem, no_tests_failure(examples, hidden_tests))
 
@@ -211,7 +172,6 @@ class ProblemValidationService:
         request = ExecutionRequest(
             language=language,
             code=reference_program,
-            # output_hash not used here, only actual_output is read.
             test_cases=[
                 ExecutionTestCase(id=str(index), input=value, output_hash="")
                 for index, value in enumerate(graded_inputs)
@@ -226,7 +186,6 @@ class ProblemValidationService:
                 problem, execution_failure(results, len(graded_inputs), all_empty=all_empty)
             )
 
-        # The correctness check: the reference must match the statement's examples.
         if any(
             comparable_output(result.actual_output) != comparable_output(example.output)
             for example, result in zip(examples, results, strict=False)

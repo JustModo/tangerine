@@ -14,7 +14,6 @@ from app.problems.domain.models import (
     ProblemExample,
     ProblemStatus,
     ProblemTest,
-    ProblemVersion,
 )
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.errors import NotFoundError
@@ -45,14 +44,6 @@ async def _seed(db_path: str) -> str:
             language=Language.PYTHON,
             difficulty="easy",
             status=ProblemStatus.AVAILABLE,
-            created_at="2026-01-01T00:00:00",
-        )
-    )
-    await problems.save_version(
-        ProblemVersion(
-            id="v1",
-            problem_id="p1",
-            version=1,
             statement_md="Sum the list of integers.",
             reference_solution=REFERENCE_SOLUTION,
             user_code="def solve(nums): pass",

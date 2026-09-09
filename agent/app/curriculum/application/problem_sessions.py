@@ -20,11 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProblemSessionService:
-    """Selects/generates the problem for a lesson node, tracks the user's local source
-    file against it, and progresses the curriculum on a passing submission.
-
-    Generation happens when the learner presses Start on a node, and only then: nothing is
-    produced ahead of time for a step they may never reach."""
+    """Problem selection, generation, code tracking, and progression for lesson nodes."""
 
     def __init__(
         self,
@@ -49,13 +45,7 @@ class ProblemSessionService:
         on_stage: Callable[[str], None] | None = None,
         node_id: str | None = None,
     ) -> ProblemSession:
-        """on_stage, when given, reports what this call is actually doing right now
-        ("generating", "patching", ...) so the UI can say so honestly instead of guessing
-        on a timer. A bank hit reports nothing past "selecting" — it is instant.
-
-        node_id serves THAT step. Without it the first unfinished step wins, which is right
-        for a bare "continue" but wrong when the learner pressed play on a specific row —
-        they got whatever was earliest instead of what they clicked."""
+        """Fetch or generate the problem session for the next or specified lesson node."""
         if on_stage:
             on_stage("selecting")
 
@@ -78,8 +68,6 @@ class ProblemSessionService:
         if existing is not None:
             return existing
 
-        # A bound step serves that problem directly: no selection, no generation, no
-        # sandbox. Checked before every other branch.
         if node.problem_id:
             problem = await self._problem_selection.get(node.problem_id)
             if problem is None:
@@ -110,7 +98,6 @@ class ProblemSessionService:
         if self._mastery_repository is not None:
             state = await self._mastery_repository.get(user_id, node.skill_id)
             mastery_score = state.mastery_score if state else None
-        # Node difficulty overrides mastery estimate; computed before bank lookup.
         difficulty = node.difficulty or suggest_difficulty(mastery_score, node.sequence_index)
 
         problem = await self._select_or_generate(
@@ -131,13 +118,7 @@ class ProblemSessionService:
         user_id: str,
         on_stage: Callable[[str], None] | None = None,
     ):
-        """Bank first, generation on a miss — excluding everything this learner has already
-        been served, so practising a skill twice is never the same question twice.
-
-        The do-not-repeat list is scoped to the plan, not the step's skill: a plan's steps
-        are all different skills, so a skill-scoped list is empty on every first visit and
-        the generator keeps reaching for the same canonical question. Nodes already carry
-        the title they served, so this costs no extra lookup."""
+        """Find a suitable problem in the bank or generate and validate a new one."""
         seen_problem_ids = await self._session_repository.list_problem_ids_for_user(user_id)
         criteria = ProblemCriteria(
             skill_id=skill_id,
@@ -158,8 +139,7 @@ class ProblemSessionService:
         )
 
     async def start_for_problem(self, user_id: str, problem_id: str) -> ProblemSession:
-        """Opens a specific already-generated problem (from the "all problems" list) rather
-        than selecting one — resumes an existing session for it if there is one."""
+        """Start or resume a problem session directly for a problem ID."""
         existing = await self._session_repository.find_for_problem(user_id, problem_id)
         if existing is not None:
             return existing
@@ -179,8 +159,7 @@ class ProblemSessionService:
     async def set_flagged_for_problem(
         self, user_id: str, problem_id: str, flagged: bool
     ) -> ProblemSession:
-        """Flags/unflags a problem from a list of problems rather than an open session — the
-        "all problems" browser has no session yet for one never opened before."""
+        """Update flagged status for a problem, creating a session if none exists."""
         session = await self.start_for_problem(user_id, problem_id)
         return await self.set_flagged(session.id, flagged)
 
@@ -194,27 +173,14 @@ class ProblemSessionService:
 
     async def _start_session(self, plan, node, problem, user_id: str) -> ProblemSession:
         now = datetime.now(UTC)
-
-        # A revision plan serves problems the learner already has a session for — flagging
-        # one from the browser creates a node-less session. Adopting it keeps the flag and
-        # their old code on one row; a second row would split the flag from the progress
-        # and list the problem twice on the progress screen.
         existing = await self._session_repository.find_for_problem(user_id, problem.id)
-        # Only ever adopt a session belonging to no node — re-pointing one that does would
-        # silently steal it from another plan's step.
-        # ponytail: when it IS owned, we insert a duplicate and the flag stays on the old
-        # row. Make the flag problem-scoped rather than session-scoped if that shows up.
         if existing is not None and existing.lesson_node_id is None:
-            # Revising a solved problem means solving it again, so the old answer is
-            # cleared. An unfinished attempt keeps its code: that is work in progress.
             already_solved = existing.status == ProblemSessionStatus.COMPLETED
             session = existing.model_copy(
                 update={
                     "lesson_node_id": node.id,
                     "lesson_plan_id": plan.id,
                     "source_code": None if already_solved else existing.source_code,
-                    # Re-doable: that they solved it before lives in mastery and
-                    # evaluations, not here, so nothing is lost by resetting.
                     "status": ProblemSessionStatus.NOT_STARTED,
                     "updated_at": now,
                 }

@@ -103,22 +103,22 @@ async def test_generate_and_validate_marks_available_on_success(db_path: str) ->
     assert problem is not None
     assert problem.status == ProblemStatus.AVAILABLE
 
-    version = await repo.get_latest_version(problem.id)
-    assert version is not None
+    problem = await repo.get(problem.id)
+    assert problem is not None
     # Tests: examples + hidden inputs (learner can't hardcode if hidden aren't included).
-    assert len(version.tests) == 4
-    assert len(version.examples) == 1
-    assert [t.input for t in version.tests] == ["1 2 3", "0", "5", "-1 -2"]
+    assert len(problem.tests) == 4
+    assert len(problem.examples) == 1
+    assert [t.input for t in problem.tests] == ["1 2 3", "0", "5", "-1 -2"]
     # Hashes from executor output, not LLM.
-    assert version.tests[0].output_hash == hash_output("6\n")
-    assert version.tests[3].output_hash == hash_output("-3\n")
-    assert version.constraints == "1 <= len(nums) <= 10^5"
-    assert version.hints == ["Consider a running total."]
+    assert problem.tests[0].output_hash == hash_output("6\n")
+    assert problem.tests[3].output_hash == hash_output("-3\n")
+    assert problem.constraints == "1 <= len(nums) <= 10^5"
+    assert problem.hints == ["Consider a running total."]
     assert problem.tags == ["prefix-sum", "arrays"]
     # Persisted user_code is the stub, not the reference.
-    assert version.user_code == "def solve(nums): pass"
-    assert version.pre_code == "nums = list(map(int, input().split()))"
-    assert version.post_code == "print(solve(nums))"
+    assert problem.user_code == "def solve(nums): pass"
+    assert problem.pre_code == "nums = list(map(int, input().split()))"
+    assert problem.post_code == "print(solve(nums))"
 
 
 async def test_generate_and_validate_marks_invalid_when_reference_solution_errors(db_path: str) -> None:
@@ -340,9 +340,9 @@ async def test_an_empty_test_input_is_dropped_rather_than_killing_the_problem(db
     problem = await service.generate_and_validate("prefix-sum", Language.PYTHON, "easy")
 
     assert problem is not None and problem.status == ProblemStatus.AVAILABLE
-    version = await repo.get_latest_version(problem.id)
-    assert version is not None
-    assert [t.input for t in version.tests] == ["1 2 3", "5", "-1 -2"]
+    problem = await repo.get(problem.id)
+    assert problem is not None
+    assert [t.input for t in problem.tests] == ["1 2 3", "5", "-1 -2"]
 
 
 async def test_a_problem_with_no_usable_hidden_test_is_rejected(db_path: str) -> None:
@@ -407,12 +407,12 @@ async def test_a_repair_rescues_a_problem_the_first_run_rejected(db_path: str) -
 
     assert problem is not None and problem.status == ProblemStatus.AVAILABLE
     assert stages == ["generating", "validating", "patching", "revalidating"]
-    version = await repo.get_latest_version(problem.id)
-    assert version is not None and "# repaired" in version.reference_solution
+    problem = await repo.get(problem.id)
+    assert problem is not None and "# repaired" in problem.reference_solution
     # Patch only replaces named fields, rest carry over.
     assert problem.title == "Static Range Sum"
-    assert [t.input for t in version.tests] == ["1 2 3", "0", "5", "-1 -2"]
-    assert version.user_code == "def solve(nums): pass"
+    assert [t.input for t in problem.tests] == ["1 2 3", "0", "5", "-1 -2"]
+    assert problem.user_code == "def solve(nums): pass"
 
 
 async def test_a_repair_may_not_rewrite_a_pasted_question(db_path: str) -> None:
@@ -435,9 +435,9 @@ async def test_a_repair_may_not_rewrite_a_pasted_question(db_path: str) -> None:
     )
 
     assert problem is not None and problem.status == ProblemStatus.AVAILABLE
-    version = await repo.get_latest_version(problem.id)
-    assert version is not None
-    assert version.statement_md == "Given an array, answer sum queries."
+    problem = await repo.get(problem.id)
+    assert problem is not None
+    assert problem.statement_md == "Given an array, answer sum queries."
 
 
 async def test_a_problem_that_validates_first_time_is_never_patched(db_path: str) -> None:
@@ -516,10 +516,10 @@ async def test_an_empty_answer_on_some_inputs_is_a_real_answer(db_path: str) -> 
     assert problem is not None
     assert problem.status == ProblemStatus.AVAILABLE
     # The blank answer is graded like any other, not silently dropped.
-    version = await repo.get_latest_version(problem.id)
-    assert version is not None
-    assert len(version.tests) == 4
-    assert version.tests[1].output_hash == hash_output("\n")
+    problem = await repo.get(problem.id)
+    assert problem is not None
+    assert len(problem.tests) == 4
+    assert problem.tests[1].output_hash == hash_output("\n")
 
 
 async def test_a_reference_that_prints_nothing_on_every_input_is_still_rejected(

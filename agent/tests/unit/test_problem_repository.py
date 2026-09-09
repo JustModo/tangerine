@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app.problems.domain.models import Problem, ProblemCriteria, ProblemStatus, ProblemVersion
+from app.problems.domain.models import Problem, ProblemCriteria, ProblemStatus
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.database import MIGRATIONS_DIR
 from app.shared.types import Language
@@ -41,13 +41,28 @@ async def test_save_then_find_suitable_and_get(db_path: str) -> None:
     assert found is not None
     assert found.id == "p1"
 
+
+async def test_save_then_get_round_trips_fields(db_path: str) -> None:
+    repo = SqliteProblemRepository(db_path)
+    await repo.save(
+        Problem(
+            id="p1",
+            title="Static Range Sum",
+            language=Language.PYTHON,
+            difficulty="easy",
+            status=ProblemStatus.AVAILABLE,
+            tags=["prefix-sum", "arrays"],
+            created_at="2026-01-01T00:00:00",
+        )
+    )
+
     fetched = await repo.get("p1")
     assert fetched is not None
     assert fetched.title == "Static Range Sum"
     assert fetched.tags == ["prefix-sum", "arrays"]
 
 
-async def test_save_version_then_get_latest_version_round_trips_metadata(db_path: str) -> None:
+async def test_save_then_get_round_trips_metadata(db_path: str) -> None:
     repo = SqliteProblemRepository(db_path)
     await repo.save(
         Problem(
@@ -56,14 +71,6 @@ async def test_save_version_then_get_latest_version_round_trips_metadata(db_path
             language=Language.PYTHON,
             difficulty="easy",
             status=ProblemStatus.AVAILABLE,
-            created_at="2026-01-01T00:00:00",
-        )
-    )
-    await repo.save_version(
-        ProblemVersion(
-            id="v3",
-            problem_id="p3",
-            version=1,
             statement_md="Find two numbers that sum to target.",
             reference_solution="...",
             user_code="def solve(nums, target): pass",
@@ -75,13 +82,13 @@ async def test_save_version_then_get_latest_version_round_trips_metadata(db_path
         )
     )
 
-    version = await repo.get_latest_version("p3")
-    assert version is not None
-    assert version.constraints == "1 <= n <= 10^5"
-    assert version.hints == ["Try a hash map.", "Look up target - x as you go."]
-    assert version.user_code == "def solve(nums, target): pass"
-    assert version.pre_code == "x = 1"
-    assert version.post_code == "print(x)"
+    problem = await repo.get("p3")
+    assert problem is not None
+    assert problem.constraints == "1 <= n <= 10^5"
+    assert problem.hints == ["Try a hash map.", "Look up target - x as you go."]
+    assert problem.user_code == "def solve(nums, target): pass"
+    assert problem.pre_code == "x = 1"
+    assert problem.post_code == "print(x)"
 
 
 async def _save_with_version(repo: SqliteProblemRepository, **overrides) -> Problem:
@@ -91,22 +98,13 @@ async def _save_with_version(repo: SqliteProblemRepository, **overrides) -> Prob
         "language": Language.PYTHON,
         "difficulty": "easy",
         "status": ProblemStatus.AVAILABLE,
+        "statement_md": "Find two numbers that sum to target.",
         "tags": ["arrays", "hashing"],
         "created_at": "2026-01-01T00:00:00",
     }
     defaults.update(overrides)
     problem = Problem(**defaults)
     await repo.save(problem)
-    await repo.save_version(
-        ProblemVersion(
-            id=f"v-{problem.id}",
-            problem_id=problem.id,
-            version=1,
-            statement_md=overrides.get("statement_md", "Find two numbers that sum to target."),
-            reference_solution="...",
-            created_at="2026-01-01T00:00:00",
-        )
-    )
     return problem
 
 

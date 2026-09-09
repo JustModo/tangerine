@@ -1,4 +1,5 @@
 import json
+
 import aiosqlite
 
 from app.curriculum.domain.problem_chat import ProblemChatMessage

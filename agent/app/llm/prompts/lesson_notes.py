@@ -1,7 +1,3 @@
-# Bump LESSON_NOTES_VERSION whenever LESSON_NOTES_SYSTEM_PROMPT or GeneratedLessonNotes
-# changes — SqliteLLMCache keys on caller-supplied semantics, not prompt content, so
-# previously cached notes are not invalidated by editing either alone. A tightened schema
-# is the more urgent of the two: an entry written before it no longer parses on read.
 LESSON_NOTES_VERSION = "v13"
 
 LESSON_NOTES_SYSTEM_PROMPT = (
@@ -252,8 +248,6 @@ LESSON_NOTES_SYSTEM_PROMPT = (
 )
 
 
-# Same caps as the code helper's context: a statement or a reference solution is bounded
-# input, but an unbounded one multiplies straight into every regenerate.
 _MAX_STATEMENT_CHARS = 2000
 _MAX_CODE_CHARS = 4000
 
@@ -267,8 +261,7 @@ def lesson_notes_user_prompt(
     tags: list[str] | None = None,
     reference_solution: str | None = None,
 ) -> str:
-    """The problem is optional: notes can be opened before a problem session exists, and
-    the lesson is still worth generating from the skill alone in that case."""
+    """Format user prompt for lesson notes generation."""
     sections = [f"Skill: {skill}\nLanguage: {language}\nLearner level: {level}"]
     if problem_title:
         sections.append(f"Problem: {problem_title}")

@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from app.problems.domain.models import Problem, ProblemCriteria, ProblemVersion
+from app.problems.domain.models import Problem, ProblemCriteria
 from app.shared.types import Language
 
 
@@ -22,7 +22,3 @@ class ProblemRepository(Protocol):
     ) -> Problem | None: ...
 
     async def list_titles(self, skill_id: str, language: Language) -> list[str]: ...
-
-    async def save_version(self, version: ProblemVersion) -> None: ...
-
-    async def get_latest_version(self, problem_id: str) -> ProblemVersion | None: ...

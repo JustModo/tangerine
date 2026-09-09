@@ -6,9 +6,7 @@ from app.execution.domain.models import TestResult
 
 
 class AttemptMetrics(BaseModel):
-    """What the attempt actually cost the learner. Reported by the client — the server sees
-    neither the editor clock nor which hints were revealed. All optional: an old client, or
-    a submission from a context that doesn't track them, simply says nothing."""
+    """Client-reported metrics about a submission attempt."""
 
     duration_ms: int | None = None
     run_count: int | None = None
@@ -16,12 +14,7 @@ class AttemptMetrics(BaseModel):
     helper_used: bool | None = None
 
     def assistance(self) -> float:
-        """0.0 unaided to 1.0 heavily assisted, for weighting the mastery delta. Solving
-        after three hints and a conversation with the helper is not the same evidence of
-        mastery as solving cold, and scoring them identically makes the whole record
-        meaningless."""
-        # ponytail: flat weights, no calibration. Revisit if the record starts disagreeing
-        # with how learners actually perform.
+        """Calculate assistance score between 0.0 (unaided) and 1.0 (assisted)."""
         score = 0.2 * min(self.hints_used or 0, 3)
         if self.helper_used:
             score += 0.4
@@ -43,10 +36,6 @@ class Evaluation(BaseModel):
     passed_tests: int
     total_tests: int
     runtime_ms: float | None = None
-    memory_mb: float | None = None  # peak across per-test memory_kb; null when unmeasured
+    memory_mb: float | None = None
     created_at: datetime
-    # Per-test breakdown (input/status/actual_output) — never the expected output, since
-    # problem_tests only ever stores its hash. Not persisted —
-    # only returned in the direct /submit response, so it's there right when it matters
-    # for debugging, without adding a table for something that's cheap to just re-run.
     results: list[TestResult] = []

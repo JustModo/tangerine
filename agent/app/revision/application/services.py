@@ -5,23 +5,17 @@ from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepos
 from app.revision.domain.models import RevisionCandidate
 
 _OVERDUE_DAYS = 7.0
-# Applied on read rather than by a background job: nothing else needs to run, and a score
-# that only moves when someone looks at it is indistinguishable from one that decays
-# continuously. Full strength for a fortnight, then down to a floor over ~three months.
 _DECAY_GRACE_DAYS = 14.0
 _DECAY_PER_DAY = 0.004
 _DECAY_FLOOR = 0.3
 
 
 def decayed_score(mastery_score: float, days_since_seen: float) -> float:
-    """A skill practised once in March should not still read as mastered in August."""
     stale_days = max(0.0, days_since_seen - _DECAY_GRACE_DAYS)
     return max(mastery_score * _DECAY_FLOOR, mastery_score - stale_days * _DECAY_PER_DAY)
 
 
 def suggest_difficulty(mastery_score: float | None, sequence_index: int) -> str:
-    """Feeds problem selection with a mastery-aware difficulty instead of pure
-    curriculum-position guessing."""
     if mastery_score is not None:
         if mastery_score < 0.3:
             return "easy"
@@ -36,8 +30,6 @@ def suggest_difficulty(mastery_score: float | None, sequence_index: int) -> str:
 
 
 class RevisionService:
-    """Priority = weak_skill + overdue_revision, computed from the
-    deterministic mastery/user_skill_state — no LLM call needed for this."""
 
     def __init__(
         self,

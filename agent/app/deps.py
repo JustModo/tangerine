@@ -1,11 +1,3 @@
-"""Every fully-wired service, built in one place.
-
-Routers used to construct their own. That meant the same CurriculumService and
-ProblemSessionService blocks existed byte-identically in two and three files, kept in step
-by hand, and a router reaching for a service another slice owned had to restate its whole
-dependency tree.
-"""
-
 from app.curriculum.application.problem_sessions import ProblemSessionService
 from app.curriculum.application.services import CurriculumService
 from app.curriculum.infrastructure.sqlite_problem_session_repository import (

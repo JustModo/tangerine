@@ -116,9 +116,9 @@ async def test_scope_filters_by_what_the_learner_actually_did(db_path: str) -> N
     assert titles(await library.find(user.id, scope="flagged")) == {"Flagged One"}
     # A submitted-but-failed problem is the best revision candidate there is — dropping it
     # would hide exactly what the learner most needs to redo.
-    assert titles(await library.find(user.id, scope="practised")) == {"Solved One", "Failed One"}
+    assert titles(await library.find(user.id, scope="practiced")) == {"Solved One", "Failed One"}
     # Nothing user-scoped ever includes a problem they have never opened.
-    assert untouched.title not in titles(await library.find(user.id, scope="practised"))
+    assert untouched.title not in titles(await library.find(user.id, scope="practiced"))
     assert untouched.title in titles(await library.find(user.id, scope="all"))
 
 
@@ -129,7 +129,7 @@ async def test_find_never_returns_more_than_the_cap_or_any_statement(db_path: st
         await _make_session(db_path, user.id, problem.id)
 
     # Asking for more than the cap must still return the cap, not the number requested.
-    entries = await _library(db_path).find(user.id, scope="practised", limit=100)
+    entries = await _library(db_path).find(user.id, scope="practiced", limit=100)
 
     assert len(entries) == MAX_RESULTS
     # The whole point of the thin entry: a list of statements would cost more context than
@@ -144,7 +144,7 @@ async def test_find_matches_a_rough_description(db_path: str) -> None:
     await _make_session(db_path, user.id, wanted.id)
     await _make_session(db_path, user.id, other.id)
 
-    entries = await _library(db_path).find(user.id, query="two sum", scope="practised")
+    entries = await _library(db_path).find(user.id, query="two sum", scope="practiced")
 
     assert [entry.title for entry in entries] == ["Two Sum Pairs"]
 
@@ -157,7 +157,7 @@ async def test_skill_is_resolved_by_name_not_id(db_path: str) -> None:
     await _make_session(db_path, user.id, array.id)
 
     # The user says "graphs"; the skill is stored as "graph traversal".
-    entries = await _library(db_path).find(user.id, scope="practised", skill="graphs")
+    entries = await _library(db_path).find(user.id, scope="practiced", skill="graphs")
 
     assert [entry.title for entry in entries] == ["Course Order"]
 
@@ -170,7 +170,7 @@ async def test_an_unknown_skill_name_creates_no_skill_row(db_path: str) -> None:
     await _make_session(db_path, user.id, problem.id)
     before = len(await SqliteSkillRepository(db_path).list_all())
 
-    await _library(db_path).find(user.id, scope="practised", skill="quantum tunnelling")
+    await _library(db_path).find(user.id, scope="practiced", skill="quantum tunnelling")
 
     assert len(await SqliteSkillRepository(db_path).list_all()) == before
 
@@ -265,7 +265,7 @@ async def test_a_lookups_ids_survive_into_the_next_turn(db_path: str) -> None:
             [
                 ChatChunk(
                     tool_call=ToolCallResult(
-                        name="find_problems", args={"query": "two sum", "scope": "practised"}
+                        name="find_problems", args={"query": "two sum", "scope": "practiced"}
                     )
                 ),
                 ChatChunk(done=True),
@@ -307,7 +307,7 @@ async def test_one_turn_can_look_up_then_act_on_what_it_found(db_path: str) -> N
             [
                 ChatChunk(
                     tool_call=ToolCallResult(
-                        name="find_problems", args={"query": "mean", "scope": "practised"}
+                        name="find_problems", args={"query": "mean", "scope": "practiced"}
                     )
                 ),
                 ChatChunk(done=True),
@@ -359,7 +359,7 @@ async def test_a_chain_stops_at_the_limit(db_path: str) -> None:
     await _make_session(db_path, user.id, problem.id, ProblemSessionStatus.COMPLETED)
 
     lookup = [
-        ChatChunk(tool_call=ToolCallResult(name="find_problems", args={"scope": "practised"})),
+        ChatChunk(tool_call=ToolCallResult(name="find_problems", args={"scope": "practiced"})),
         ChatChunk(done=True),
     ]
     llm = FakeLLMProvider(

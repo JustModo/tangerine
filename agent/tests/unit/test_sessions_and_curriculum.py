@@ -13,7 +13,7 @@ from app.llm.schemas.curriculum import GeneratedCurriculum, GeneratedCurriculumN
 from app.llm.schemas.plan_edit import RevisedCurriculum, RevisedStep
 from app.mastery.domain.models import UserSkillState
 from app.mastery.infrastructure.sqlite_repository import SqliteUserSkillStateRepository
-from app.problems.domain.models import Problem, ProblemExample, ProblemStatus, ProblemVersion
+from app.problems.domain.models import Problem, ProblemExample, ProblemStatus
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.revision.domain.models import RevisionCandidate
 from app.sessions.application.services import SessionService
@@ -1150,23 +1150,17 @@ def test_step_problem_context_shows_the_statement_and_every_example() -> None:
         language=Language.PYTHON,
         difficulty="medium",
         status=ProblemStatus.AVAILABLE,
-        created_at=datetime.now(UTC),
-    )
-    version = ProblemVersion(
-        id="v1",
-        problem_id="p1",
-        version=1,
         statement_md="Find the longest mountain subsequence.",
         reference_solution="print(0)",
         constraints="3 <= n <= 1000",
         examples=[
-            ProblemExample(id="e1", problem_version_id="v1", input="1 3 2 5 4 1", output="5"),
-            ProblemExample(id="e2", problem_version_id="v1", input="1 2 3 4 5", output="0"),
+            ProblemExample(id="e1", input="1 3 2 5 4 1", output="5"),
+            ProblemExample(id="e2", input="1 2 3 4 5", output="0"),
         ],
         created_at=datetime.now(UTC),
     )
 
-    text = step_problem_context(node, problem, version)
+    text = step_problem_context(node, problem)
 
     assert "Find the longest mountain subsequence." in text
     assert "3 <= n <= 1000" in text

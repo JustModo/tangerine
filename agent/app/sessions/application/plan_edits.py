@@ -1,13 +1,4 @@
-"""What each `edit_learning_plan` operation does, as data.
-
-Every operation reduces to the same shape: validate the arguments the model supplied, then
-name a label, an action to run, and how to describe the result. Nothing here knows about
-streaming, chat messages or SSE — the caller owns all of that, and owns it once instead of
-once per operation.
-
-The refusal strings are prompt input, not user-facing copy. The model reads `summary` and
-acts on it, so the wording is load-bearing.
-"""
+"""Plan edit operations dispatch and handler definitions."""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -162,8 +153,6 @@ def _regenerate_problem(args: dict, plan_id: str, curriculum, user_message: str)
 
 
 def _step_shape(plan) -> list[tuple[int, str, str | None]]:
-    """What a rework is allowed to change. Compared before and after so a rework that came
-    back with the identical plan cannot be reported as a change that happened."""
     return [(n.sequence_index, n.skill_name or n.skill_id, n.difficulty) for n in plan.nodes]
 
 
@@ -181,8 +170,6 @@ def _rework(args: dict, plan_id: str, curriculum, user_message: str) -> Outcome:
         "Updating your learning plan...",
         run,
         lambda plan: (
-            # The failure this closes: a rework that returned the plan untouched still
-            # reported "Updated the plan", and the model narrated a fix that never happened.
             f"NOT CHANGED — the rework came back with the same {len(plan.nodes)} steps, so "
             "nothing was edited. Tell the user plainly that nothing changed and ask what "
             "they want done differently. Do NOT claim anything was fixed or updated. If "
@@ -207,13 +194,7 @@ PLAN_EDITS: dict[str, Callable[[dict, str, Any, str], Outcome]] = {
 
 
 def build(operation: str, args: dict, plan_id: str, curriculum, user_message: str) -> Outcome:
-    """A NAMED operation that does not exist is refused, not quietly reworked.
-
-    Falling back to _rework meant the model asking for something this chat cannot do got a
-    whole-plan rework that changed nothing and reported success — it then told the user it
-    had fixed a question. An unnamed operation still reworks: that is a broad request, not
-    a wrong one.
-    """
+    """Build a plan edit outcome from an operation name and arguments."""
     handler = PLAN_EDITS.get(operation)
     if handler is None:
         return Refusal(

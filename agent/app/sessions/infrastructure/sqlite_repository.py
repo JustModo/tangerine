@@ -1,4 +1,5 @@
 import json
+
 import aiosqlite
 
 from app.sessions.domain.models import ChatMessage, LearningSession

@@ -6,7 +6,7 @@ from app.evaluation.application.services import EvaluationService
 from app.evaluation.domain.models import AttemptMetrics
 from app.evaluation.infrastructure.sqlite_repository import SqliteEvaluationRepository
 from app.execution.domain.models import ExecutionStatus, TestResult
-from app.problems.domain.models import Problem, ProblemStatus, ProblemTest, ProblemVersion
+from app.problems.domain.models import Problem, ProblemStatus, ProblemTest
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.types import Language
 from tests.db import apply_migrations, seed_users
@@ -29,13 +29,6 @@ async def _seed_problem(db_path: str) -> str:
         language=Language.PYTHON,
         difficulty="easy",
         status=ProblemStatus.AVAILABLE,
-        created_at="2026-01-01T00:00:00",
-    )
-    await repo.save(problem)
-    version = ProblemVersion(
-        id="v1",
-        problem_id="p1",
-        version=1,
         statement_md="Sum the list.",
         reference_solution="print(sum(int(x) for x in input().split()))",
         user_code="",
@@ -44,7 +37,7 @@ async def _seed_problem(db_path: str) -> str:
         tests=[ProblemTest(id="t1", input="1 2 3", output_hash="expectedhash")],
         created_at="2026-01-01T00:00:00",
     )
-    await repo.save_version(version)
+    await repo.save(problem)
     return problem.id
 
 

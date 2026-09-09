@@ -8,19 +8,14 @@ from app.shared.config import get_settings
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent.parent / "migrations"
 
-# Per-connection, so every connection has to set them.
 _PRAGMAS = (
     "PRAGMA foreign_keys = ON",
     "PRAGMA busy_timeout = 5000",
 )
-
-# A property of the database file itself: it survives in the file header once set, and
-# setting it takes a lock. Applied once at migration time, never per connection.
 _PERSISTENT_PRAGMAS = ("PRAGMA journal_mode = WAL",)
 
 
 def get_connection() -> sqlite3.Connection:
-    """Synchronous connection — migrations only. Request paths use `connect()` instead."""
     conn = sqlite3.connect(get_settings().database_path)
     for pragma in _PRAGMAS + _PERSISTENT_PRAGMAS:
         conn.execute(pragma)
@@ -29,11 +24,6 @@ def get_connection() -> sqlite3.Connection:
 
 @asynccontextmanager
 async def connect(database_path: str | None = None):
-    """The async connection every repository must use. Drop-in for
-    `async with aiosqlite.connect(path) as db`, minus the missing pragmas.
-
-    row_factory is set here rather than per-query: every repository wants Row access, and
-    setting it in one place removes the chance of a new query forgetting to."""
     async with aiosqlite.connect(database_path or get_settings().database_path) as db:
         for pragma in _PRAGMAS:
             await db.execute(pragma)

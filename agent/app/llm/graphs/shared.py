@@ -1,9 +1,4 @@
-"""What all four generation graphs do identically.
-
-Each graph is one node that asks for structured output and retries on a schema rejection,
-wrapped in a semantic cache. Only the prompt differs, so the attempt bookkeeping and the
-cache dance live here rather than four times over.
-"""
+"""Shared graph compilation, retries, and caching utilities for LLM generation."""
 
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
@@ -22,11 +17,7 @@ MAX_SCHEMA_ATTEMPTS = 3
 
 
 def rejection_note(error: str | None) -> str:
-    """Appended to the user prompt on a retry.
-
-    Without it a retry re-sends a byte-identical prompt and depends entirely on sampling to
-    come out different — three chances at the same dice. Naming the failure is the same
-    trick patch_problem already uses to repair a rejected problem."""
+    """Format schema error rejection note for retry prompt."""
     if not error:
         return ""
     return (
@@ -44,8 +35,7 @@ async def attempt[T: BaseModel](
     user_prompt: str,
     response_model: type[T],
 ) -> dict:
-    """One generation, folded back into graph state. A schema rejection is recorded rather
-    than raised so the graph can route to a retry that knows what went wrong."""
+    """Execute a structured generation attempt and update graph state."""
     request = StructuredGenerationRequest(
         system_prompt=system_prompt,
         user_prompt=user_prompt + rejection_note(state["error"]),
@@ -58,8 +48,7 @@ async def attempt[T: BaseModel](
 
 
 def compile_retry_graph(state_type, generate):
-    """The wiring every single-node graph repeated: generate, retry on a schema rejection,
-    stop when route says done."""
+    """Compile single-node graph with conditional retry on schema validation failure."""
     graph = StateGraph(state_type)
     graph.add_node("generate", generate)
     graph.set_entry_point("generate")
@@ -74,8 +63,7 @@ def route(state: dict) -> str:
 
 
 async def run_graph(graph, state: dict, what: str):
-    """Invokes a compiled graph and insists on a result. Every graph seeds the same three
-    bookkeeping fields, so callers pass only their own inputs."""
+    """Invoke compiled generation graph with initial state and validation assertion."""
     final = await graph.ainvoke({**state, "result": None, "error": None, "attempts": 0})
     if final["result"] is None:
         raise SchemaValidationError(
@@ -91,11 +79,7 @@ async def cached_generate[T: BaseModel](
     run: Callable[[], Awaitable[T]],
     refresh: bool = False,
 ) -> T:
-    """Wraps a graph run in the semantic cache. `key_parts` of None means this result is
-    one-of-a-kind and must never be cached — a pasted problem, say.
-
-    refresh skips the READ, not the write: a regenerate replaces the cached entry rather
-    than bypassing it forever."""
+    """Execute cached structured generation."""
     key = cache_key(*key_parts) if cache is not None and key_parts is not None else None
     if key is not None and not refresh:
         cached = await cache.get(key)

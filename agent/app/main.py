@@ -22,12 +22,7 @@ from app.shared.secrets import get_gemini_api_key
 from app.users.api.router import router as users_router
 from app.users.infrastructure.sqlite_repository import SqliteUserRepository
 
-# Populated by `pnpm run build` + scripts/run.js (and by the Dockerfile) — absent in
-# `uvicorn --reload` dev mode, where the Vite dev server proxies to this process instead.
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
-
-# Written by the Dockerfile's gitinfo stage — absent in dev mode, where the frontend
-# just skips the outdated-version check.
 GIT_SHA_FILE = Path(__file__).resolve().parent.parent / "GIT_SHA"
 
 
@@ -44,8 +39,6 @@ logging.basicConfig(
 async def lifespan(_app: FastAPI):
     run_migrations()
     await SqliteUserRepository().ensure_default_user()
-    # Cheap on a small table and it only has to happen once a process — the cache has no
-    # other eviction, so without this it grows for the life of the deployment.
     await SqliteLLMCache().prune()
     yield
     await _probe_client.aclose()
@@ -63,13 +56,11 @@ app.include_router(settings_router, prefix="/api")
 
 
 class HealthResponse(BaseModel):
-    status: str  # "ok" | "degraded"
+    status: str
     services: dict[str, bool]
     git_sha: str
 
 
-# One client for the whole process rather than one per probe: /health is polled for the
-# life of every open tab, and building a connection pool each time is pure waste.
 _probe_client = httpx.AsyncClient(timeout=3.0)
 
 
@@ -98,12 +89,6 @@ if STATIC_DIR.is_dir():
 
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str) -> FileResponse:
-        # Client-side React Router owns everything not under /api or /assets — always
-        # serve index.html and let it route, same as any SPA behind a catch-all.
-        #
-        # /api is excluded explicitly: without this, an unmatched API path returns
-        # index.html with a 200, so a typo'd or removed endpoint looks like success to the
-        # caller and only fails later as "unexpected token < in JSON".
         if full_path == "api" or full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not found")
         candidate = STATIC_DIR / full_path

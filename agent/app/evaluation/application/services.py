@@ -17,9 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class EvaluationService:
-    """Evaluate pipeline: deterministic hidden-test grading, start to
-    finish, with no LLM anywhere in it. Advice about a submission is the code helper
-    chat's job (app/curriculum/application/code_helper.py), not this service's."""
+    """Service evaluating submissions against test cases and updating mastery."""
 
     def __init__(
         self,
@@ -80,8 +78,6 @@ class EvaluationService:
             assistance = metrics.assistance()
             for index, skill_id in enumerate(problem.skill_ids):
                 try:
-                    # skill_ids[0] is the problem's primary skill; the rest are incidental
-                    # and shouldn't move as much on the strength of one problem.
                     await self._mastery_service.record_result(
                         user_id,
                         skill_id,
