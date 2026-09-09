@@ -33,6 +33,15 @@ def _git_sha() -> str:
 logging.basicConfig(
     level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s", force=True
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/health" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
 
 
 @asynccontextmanager
