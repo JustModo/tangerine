@@ -10,9 +10,11 @@ from app.curriculum.domain.repository import LessonPlanRepository
 from app.mastery.domain.repository import UserSkillStateRepository
 from app.problems.application.services import ProblemSelectionService
 from app.problems.application.validation import ProblemValidationService
+from app.problems.domain.interview_topics import random_target
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.revision.application.services import suggest_difficulty
 from app.shared.errors import NotFoundError
+from app.shared.types import Language
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +130,27 @@ class ProblemSessionService:
             on_stage=on_stage,
             avoid_titles=[node.problem_title for node in plan.nodes if node.problem_title],
         )
+
+    async def start_test_problem(
+        self,
+        user_id: str,
+        language: Language,
+        difficulty: str | None = None,
+        topic: str | None = None,
+        on_stage: Callable[[str], None] | None = None,
+    ) -> ProblemSession:
+        target = random_target(topic=topic, difficulty=difficulty)
+        problem = await self._problem_validation.generate_and_validate(
+            target.skill,
+            language,
+            target.difficulty,
+            on_stage=on_stage,
+            areas=target.areas,
+            twist=target.twist,
+        )
+        if problem is None:
+            raise NotFoundError("Couldn't prepare a test problem. Try again in a moment.")
+        return await self.start_for_problem(user_id, problem.id)
 
     async def start_for_problem(self, user_id: str, problem_id: str) -> ProblemSession:
         """Start or resume a problem session directly for a problem ID."""

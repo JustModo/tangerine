@@ -38,6 +38,8 @@ class ProblemGraphState(TypedDict):
     difficulty: str
     source_problem: str | None
     avoid_titles: list[str]
+    areas: tuple[str, str] | None
+    twist: str | None
     result: GeneratedProblem | None
     error: str | None
     attempts: int
@@ -71,6 +73,8 @@ def build_problem_graph(provider: LLMProvider, on_stage: Callable[[str], None] |
                 state["language"],
                 state["difficulty"],
                 state["avoid_titles"],
+                state["areas"],
+                state["twist"],
             )
         )
         return await attempt(provider, state, system_prompt, user_prompt, GeneratedProblem)
@@ -145,6 +149,8 @@ async def generate_problem(
     source_problem: str | None = None,
     avoid_titles: list[str] | None = None,
     on_stage: Callable[[str], None] | None = None,
+    areas: tuple[str, str] | None = None,
+    twist: str | None = None,
 ) -> GeneratedProblem:
     """Deliberately uncached. A cache key of (skill, language, difficulty, avoid titles) is
     identical for the first step of every new plan on a skill, so caching handed every
@@ -158,6 +164,8 @@ async def generate_problem(
             "difficulty": difficulty,
             "source_problem": source_problem,
             "avoid_titles": avoid_titles or [],
+            "areas": areas,
+            "twist": twist,
             "violations": [],
             "revisions": 0,
         },

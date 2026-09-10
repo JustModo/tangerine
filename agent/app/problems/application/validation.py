@@ -70,6 +70,8 @@ class ProblemValidationService:
         source_problem: str | None = None,
         on_stage: Callable[[str], None] | None = None,
         avoid_titles: list[str] | None = None,
+        areas: tuple[str, str] | None = None,
+        twist: str | None = None,
     ) -> Problem | None:
         """Generate problem candidate, validate against sandbox, and attempt repair if rejected."""
         stage = on_stage or (lambda _: None)
@@ -93,6 +95,8 @@ class ProblemValidationService:
                 source_problem=source_problem,
                 avoid_titles=avoid_titles if attempt == 0 else avoid_titles + [generated.title],
                 on_stage=stage,
+                areas=areas,
+                twist=twist,
             )
 
             if attempt == 0 and _repeats_a_plan_title(generated.title, plan_titles):
@@ -144,9 +148,11 @@ class ProblemValidationService:
         difficulty: str,
     ) -> Problem | ValidationFailure:
         """Validate generated problem test cases and execution outputs against reference solution."""
-        skill_ids = [
-            await self._skill_repository.ensure_skill(name) for name in (generated.skills or [skill])
-        ]
+        skill_ids: list[str] = []
+        for name in [skill, *generated.skills]:
+            skill_id = await self._skill_repository.ensure_skill(name)
+            if skill_id not in skill_ids:
+                skill_ids.append(skill_id)
         problem = Problem(
             id=str(uuid.uuid4()),
             title=generated.title,

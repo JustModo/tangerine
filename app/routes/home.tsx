@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import type { MetaFunction } from "react-router";
 import { Link, useLoaderData, useNavigate } from "react-router";
-import { BarChart3, Download, DownloadCloud, ListTree, MessageSquare, RefreshCw, Settings } from "lucide-react";
+import { BarChart3, Download, DownloadCloud, ListTree, MessageSquare, RefreshCw, Settings, Swords } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useStatus } from "~/lib/status";
-import { ApiError, apiJson } from "~/lib/api";
+import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
+import { TestModeDialog } from "@/components/TestModeDialog";
 import { GeminiKeySettings } from "@/components/GeminiKey";
 import { AppSettings } from "@/components/AppSettings";
 import { Separator } from "@/components/ui/separator";
@@ -22,6 +23,13 @@ interface LessonPlanSummary {
   id: string;
   topic: string;
 }
+
+interface SettingEntry {
+  value: string;
+  options: string[];
+}
+
+const FALLBACK_LANGUAGES = ["python", "cpp", "c", "java"];
 
 export const meta: MetaFunction = () => [
   { title: "Learning Sessions · Tangerine" },
@@ -48,7 +56,10 @@ export async function clientLoader() {
       }
     }),
   );
-  return { sessions, plansBySession: Object.fromEntries(entries) };
+  // Only used to preselect the test-mode language. A failure here must not take the whole
+  // screen down with it, so it degrades to the fallback list.
+  const settings = await apiJson<Record<string, SettingEntry>>("/api/settings").catch(() => null);
+  return { sessions, plansBySession: Object.fromEntries(entries), settings };
 }
 
 
@@ -74,7 +85,13 @@ async function checkOutdated(): Promise<boolean> {
 }
 
 export default function Home() {
-  const { sessions, plansBySession } = useLoaderData<typeof clientLoader>();
+  const { sessions, plansBySession, settings } = useLoaderData<typeof clientLoader>();
+  const languagePreference = settings?.default_language;
+  const languages = languagePreference?.options.filter((option) => option !== "ask") ?? FALLBACK_LANGUAGES;
+  const initialLanguage =
+    languagePreference && languagePreference.value !== "ask" ? languagePreference.value : "python";
+  const [testOpen, setTestOpen] = useState(false);
+  const [testStage, setTestStage] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [outdated, setOutdated] = useState(false);
   const navigate = useNavigate();
@@ -93,6 +110,40 @@ export default function Home() {
       showError(err instanceof ApiError ? err.message : "Failed to start a new session");
     } finally {
       setBusyMessage(null);
+    }
+  }
+
+  async function startTestMode(options: {
+    language: string;
+    difficulty: string;
+    topic: string;
+  }) {
+    setTestStage("generating");
+    try {
+      const response = await apiFetch("/api/problem-sessions/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          language: options.language,
+          // "random" is the dialog's word for "let the backend draw one".
+          difficulty: options.difficulty === "random" ? null : options.difficulty,
+          topic: options.topic || null,
+        }),
+      });
+      let sessionId: string | null = null;
+      await consumeSSE(response, (event) => {
+        if (event.type === "stage" && typeof event.stage === "string") {
+          setTestStage(event.stage);
+        } else if (event.type === "session" && typeof event.id === "string") {
+          sessionId = event.id;
+        }
+      });
+      if (!sessionId) throw new ApiError("The server didn't return a problem.");
+      navigate(`/problem-sessions/${sessionId}?mode=test`);
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : "Failed to start a test problem");
+    } finally {
+      setTestStage(null);
     }
   }
 
@@ -134,6 +185,15 @@ export default function Home() {
           >
             <Settings className="w-4 h-4" />
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Test mode"
+            onClick={() => setTestOpen(true)}
+            className={testOpen ? "text-white" : "text-zinc-500 hover:text-white"}
+          >
+            <Swords className="w-4 h-4" />
+          </Button>
           <Button size="sm" className="tracking-[0.3em]" onClick={startNewSession}>
             + NEW SESSION
           </Button>
@@ -160,6 +220,15 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      <TestModeDialog
+        open={testOpen}
+        languages={languages}
+        initialLanguage={initialLanguage}
+        busyStage={testStage}
+        onStart={startTestMode}
+        onClose={() => setTestOpen(false)}
+      />
 
       <ScrollArea className="flex-1 min-h-0 px-10">
         <div className="max-w-3xl mx-auto w-full flex flex-col pb-16">

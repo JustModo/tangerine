@@ -133,6 +133,7 @@ function HintList({
 export function ProblemPanel({
   problem,
   lessonNodeId,
+  testMode = false,
   problemSessionId,
   getContext,
   onHintRevealed,
@@ -142,6 +143,7 @@ export function ProblemPanel({
 }: {
   problem: ProblemDetail;
   lessonNodeId?: string;
+  testMode?: boolean;
   problemSessionId?: string;
   getContext?: () => HelperContext;
   onHintRevealed?: (count: number) => void;
@@ -158,8 +160,8 @@ export function ProblemPanel({
   const { showError } = useStatus();
   const tabs: Tab[] = [
     "statement",
-    ...(lessonNodeId ? (["lesson"] as const) : []),
-    ...(problemSessionId && getContext ? (["helper"] as const) : []),
+    ...(!testMode && lessonNodeId ? (["lesson"] as const) : []),
+    ...(!testMode && problemSessionId && getContext ? (["helper"] as const) : []),
   ];
 
   async function toggleFlag() {
@@ -205,11 +207,12 @@ export function ProblemPanel({
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">{problem.language}</Badge>
             <Badge variant="secondary">{problem.difficulty}</Badge>
-            {problem.tags.map((tag) => (
-              <Badge key={tag} variant="outline">
-                {tag}
-              </Badge>
-            ))}
+            {!testMode &&
+              problem.tags.map((tag) => (
+                <Badge key={tag} variant="outline">
+                  {tag}
+                </Badge>
+              ))}
           </div>
         </div>
 
@@ -321,7 +324,7 @@ export function ProblemPanel({
           </div>
         )}
 
-        <HintList hints={problem.hints} onRevealed={onHintRevealed} />
+        {!testMode && <HintList hints={problem.hints} onRevealed={onHintRevealed} />}
 
         {solved && problemSessionId && <SolutionSection problemSessionId={problemSessionId} />}
         </div>

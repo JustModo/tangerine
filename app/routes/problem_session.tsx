@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { MetaFunction } from "react-router";
-import { useLoaderData, useNavigate } from "react-router";
+import { useLoaderData, useNavigate, useSearchParams } from "react-router";
 import { Check } from "lucide-react";
 import { CodeWorkbench } from "@/components/code-workbench/CodeWorkbench";
 import { PageHeader } from "@/components/PageHeader";
@@ -33,6 +33,8 @@ export default function ProblemSessionScreen() {
   const { session, problem } = useLoaderData<typeof clientLoader>();
   const id = session.id;
   const [solved, setSolved] = useState(session.status === "COMPLETED");
+  const [searchParams] = useSearchParams();
+  const testMode = searchParams.get("mode") === "test";
   const navigate = useNavigate();
 
   async function autosave(code: string) {
@@ -103,6 +105,7 @@ export default function ProblemSessionScreen() {
           problemSessionId={session.id}
           initiallySolved={session.status === "COMPLETED"}
           initiallyFlagged={session.flagged}
+          testMode={testMode}
           onSolved={() => setSolved(true)}
         />
       </div>

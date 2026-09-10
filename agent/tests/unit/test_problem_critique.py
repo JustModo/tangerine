@@ -144,7 +144,7 @@ async def test_a_pasted_question_is_generated_with_the_adaptation_prompt() -> No
     )
 
     system_prompt = llm.last_structured_request.system_prompt
-    assert "WRITE A SITUATION, NOT A SPECIFICATION" not in system_prompt
+    assert "WRITE A CONTEST PROBLEM, NOT A STORY" not in system_prompt
     assert "VERBATIM" in system_prompt
 
 
@@ -153,4 +153,33 @@ async def test_a_generated_question_is_generated_with_the_authoring_prompt() -> 
 
     await generate_problem(llm, "prefix-sum", "python", "easy")
 
-    assert "WRITE A SITUATION, NOT A SPECIFICATION" in llm.last_structured_request.system_prompt
+    assert "WRITE A CONTEST PROBLEM, NOT A STORY" in llm.last_structured_request.system_prompt
+
+
+async def test_the_interview_pattern_survives_the_graph() -> None:
+    """Threaded through three signatures and a TypedDict, so it is the easiest thing in the
+    feature to drop silently — the problem would still generate, just untargeted."""
+    llm = FakeLLMProvider(structured_responses=[_generated_problem()])
+
+    await generate_problem(
+        llm, "graphs", "python", "medium",
+        areas=("sliding window", "dynamic programming"),
+        twist="a budget that may be spent at most K times",
+    )
+
+    prompt = llm.last_structured_request.user_prompt
+    assert "sliding window" in prompt
+    assert "dynamic programming" in prompt
+    assert "a budget that may be spent at most K times" in prompt
+
+
+async def test_a_pasted_question_ignores_any_interview_pattern() -> None:
+    llm = FakeLLMProvider(structured_responses=[_generated_problem()])
+
+    await generate_problem(
+        llm, "graphs", "python", "medium",
+        source_problem="Return the k-th largest element.",
+        areas=("sliding window", "dynamic programming"),
+    )
+
+    assert "TEST-MODE TARGET" not in llm.last_structured_request.user_prompt

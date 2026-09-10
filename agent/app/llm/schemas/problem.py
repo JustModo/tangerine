@@ -18,10 +18,12 @@ class GeneratedProblem(BaseModel):
         "complexity — that hands the solver the answer."
     )
     statement_md: str = Field(
-        description="3-6 sentences in two short paragraphs: the concrete scenario, then "
-        "exactly what must be computed and the rule that makes it non-obvious. Stated once "
-        "in one consistent framing, no thinking out loud, no 'wait'/'more precisely' "
-        "walkbacks, and no hint at how to solve it."
+        description="A competitive-programming statement, 80-180 words: the setup stated "
+        "declaratively, then the rules one per sentence (a markdown bullet list when "
+        "enumerating options), then exactly what to compute, then the degenerate case. "
+        "Every variable in backticks using the exact user_code parameter names. No "
+        "narrative, no motivation, nobody wanting anything. At least one rule must cut "
+        "against the obvious approach. No hint at how to solve it."
     )
     difficulty: str
     skills: list[str]

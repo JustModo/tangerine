@@ -546,3 +546,26 @@ async def test_two_plans_on_the_same_skill_do_not_get_the_identical_question(
 
     assert first is not None and second is not None
     assert first.title != second.title
+
+
+async def test_the_requested_skill_is_always_attached_and_comes_first(db_path: str) -> None:
+    """The generator names its own skills, and left to itself it splits a topic into its
+    own vocabulary — "arrays and hashing" comes back as "arrays", "hashing". That orphans
+    the problem from the skill it was asked for, so the avoid-titles fallback finds nothing
+    and the next draw on that topic can repeat it. First position also decides which skill
+    mastery treats as primary."""
+    generated = _generated_problem()
+    generated.skills = ["arrays", "hashing"]
+    repo = SqliteProblemRepository(db_path)
+    skill_repo = SqliteSkillRepository(db_path)
+
+    problem = await ProblemValidationService(
+        repo, FakeLLMProvider(structured_responses=[generated]),
+        FakeCodeExecutor(_passing_results()), skill_repo,
+    ).generate_and_validate("arrays and hashing", Language.PYTHON, "easy")
+
+    assert problem is not None
+    names = [await skill_repo.get_name(skill_id) for skill_id in problem.skill_ids]
+    assert names[0] == "arrays and hashing"
+    assert set(names) == {"arrays and hashing", "arrays", "hashing"}
+    assert await repo.list_titles(problem.skill_ids[0], Language.PYTHON) == [problem.title]

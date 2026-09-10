@@ -19,6 +19,7 @@ from app.llm.prompts.problem import (
     patch_problem_user_prompt,
     patch_system_prompt,
     problem_system_prompt,
+    problem_user_prompt,
     revise_problem_user_prompt,
     revise_system_prompt,
 )
@@ -196,7 +197,7 @@ def test_a_revision_prompt_names_every_violation_it_must_fix() -> None:
 def test_a_pasted_question_is_never_put_through_the_scenario_authoring_rules() -> None:
     """The rules that make a new problem case-based would rewrite the learner's own
     question, which is the one thing adaptation must not do."""
-    authoring = "WRITE A SITUATION, NOT A SPECIFICATION"
+    authoring = "WRITE A CONTEST PROBLEM, NOT A STORY"
 
     assert authoring in problem_system_prompt("python")
     assert authoring not in adapt_system_prompt("python")
@@ -235,3 +236,138 @@ def test_a_pasted_multi_answer_question_is_normalised_in_post_code_not_in_the_st
     assert "SEVERAL VALID ANSWERS" in prompt
     assert "do NOT edit the statement to remove that freedom" in prompt
     assert "sort the collection before printing it" in prompt
+
+
+def test_the_interview_target_aims_at_two_areas_and_a_twist() -> None:
+    prompt = problem_user_prompt(
+        "graphs and traversal", "python", "hard",
+        areas=("sliding window", "dynamic programming"),
+        twist="a budget that may be spent at most K times",
+    )
+
+    assert "sliding window" in prompt
+    assert "dynamic programming" in prompt
+    assert "a budget that may be spent at most K times" in prompt
+    assert "That is a direction, not a recipe" in prompt
+    # The complaint that prompted this: naming one classic produced a direct question.
+    assert "reskinned Two Sum" in prompt
+
+
+def test_the_target_forbids_handing_over_the_method() -> None:
+    prompt = problem_user_prompt(
+        "trees", "python", "hard", areas=("trees", "greedy choices"), twist="a budget",
+    )
+
+    assert "THE SOLVER MUST CHOOSE THE METHOD" in prompt
+    assert "is a stack" in prompt and "is a sort" in prompt
+
+
+def test_an_ordinary_lesson_problem_carries_no_interview_target() -> None:
+    """The lesson path must not silently become a test question."""
+    prompt = problem_user_prompt("graphs", "python", "medium", ["Some Earlier Title"])
+
+    assert "TEST-MODE TARGET" not in prompt
+    assert "COMBINE THESE TWO" not in prompt
+    assert "Some Earlier Title" in prompt
+
+
+def test_the_target_never_reaches_the_system_prompt() -> None:
+    """It belongs in the user prompt: a second system prompt would be one more thing that
+    can drift from the rubric the critique and revision passes grade against."""
+    assert "TEST-MODE TARGET" not in problem_system_prompt("python")
+    assert "TEST-MODE TARGET" not in critique_system_prompt("python")
+    assert "TEST-MODE TARGET" not in revise_system_prompt("python")
+
+
+def test_the_authoring_prompt_demands_the_contest_statement_shape() -> None:
+    """The failure this replaced: statements read as case studies that explained a domain
+    before ever asking the question."""
+    prompt = problem_system_prompt("python")
+
+    assert "THE DIFFICULTY LIVES IN THE THINKING, NOT THE PROSE" in prompt
+    assert "MARKDOWN AND NAMES" in prompt
+    assert "backticks" in prompt
+    assert "80-180 words" in prompt
+    assert "no researchers, engineers, astronomers or analysts" in prompt
+
+
+def test_the_judge_flags_narrative_and_thinness_but_not_a_dry_statement() -> None:
+    rules = critique_system_prompt("python")
+
+    assert "NARRATIVE" in rules
+    assert "NOTHING TO WORK OUT, or CONDITIONS FOR THEIR OWN SAKE" in rules
+    assert "UNGROUNDED NAMES" in rules
+    assert "is memoisation" in rules
+    # A short question built on one real insight is wanted, not a defect.
+    assert "never be flagged merely for being short" in rules
+    # Otherwise a weak judge rejects exactly the flat contest register that is wanted.
+    assert "must never be flagged for lacking one" in rules
+    assert "Conditions that interact are the point of a test question" in rules
+
+
+def test_the_input_shape_is_nameable_even_though_the_method_is_not() -> None:
+    """Banning the machinery made the generator dodge into euphemism — a tree came back as
+    'a hierarchical branching network', which is the metaphor-decoding problem again."""
+    for prompt in (
+        problem_system_prompt("python"),
+        problem_user_prompt("trees", "python", "hard", areas=("trees", "greedy choices")),
+    ):
+        assert "a tree is a tree" in prompt
+    assert "hierarchical branching network" in critique_system_prompt("python")
+
+
+def test_the_question_must_be_hard_to_solve_not_hard_to_read() -> None:
+    prompt = problem_system_prompt("python")
+
+    assert "PLAIN WORDS" in prompt
+    assert "hard to SOLVE, never hard to READ" in prompt
+    assert "HARD TO READ RATHER THAN HARD TO SOLVE" in critique_system_prompt("python")
+
+
+def test_the_twist_is_an_instruction_not_a_sentence_to_copy() -> None:
+    """A generated statement came back reading 'a cost that depends on the previous choice
+    as well as the current one applies' — the brief leaking straight onto the page."""
+    prompt = problem_user_prompt(
+        "trees", "python", "hard",
+        areas=("trees", "greedy choices"),
+        twist="a cost that depends on the previous choice as well as the current one",
+    )
+
+    assert "instruction to you, NOT text for the statement" in prompt
+    assert "Never quote it" in prompt
+
+
+def test_a_plain_draw_asks_for_the_clean_version_not_invented_awkwardness() -> None:
+    """Without this the model treats every question as needing a complication, which is what
+    made them all read like the same puzzle."""
+    plain = problem_user_prompt(
+        "trees", "python", "medium", areas=("trees", "greedy choices"), twist=None
+    )
+    complicated = problem_user_prompt(
+        "trees", "python", "medium", areas=("trees", "greedy choices"), twist="a budget",
+    )
+
+    assert "NO EXTRA COMPLICATION THIS TIME" in plain
+    assert "BUILD IN THIS COMPLICATION" not in plain
+    assert "BUILD IN THIS COMPLICATION" in complicated
+    assert "NO EXTRA COMPLICATION" not in complicated
+
+
+def test_the_setup_may_be_a_toy_world_rather_than_a_realistic_one() -> None:
+    prompt = problem_system_prompt("python")
+
+    assert "Concrete does NOT mean realistic" in prompt
+    assert "lasers fired across a grid" in prompt
+    assert "USE THE FEWEST RULES THAT MAKE THE QUESTION INTERESTING" in prompt
+
+
+def test_a_plain_draw_may_not_fall_back_on_a_famous_question() -> None:
+    """Asking for the short clean version made one draw come back as Daily Temperatures
+    verbatim — brevity is exactly when the catalogue is most tempting."""
+    prompt = problem_user_prompt(
+        "monotonic stack", "python", "medium",
+        areas=("monotonic stack", "simulation"), twist=None,
+    )
+
+    assert "SHORT IS NOT A LICENCE TO REACH FOR A FAMOUS ONE" in prompt
+    assert "Daily Temperatures" in prompt

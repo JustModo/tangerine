@@ -5,6 +5,7 @@ import { CheckCircle2, Lock, MessageSquare, Play, RefreshCcw, Trash2 } from "luc
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
 import { useStatus } from "~/lib/status";
+import { STAGE_LABELS } from "~/lib/stages";
 import { ApiError, apiFetch, apiJson, consumeSSE } from "~/lib/api";
 import { cn } from "~/lib/utils";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -27,22 +28,6 @@ interface LessonPlan {
   level: string;
   nodes: LessonNode[];
 }
-
-/**
- * Real backend stages, not a timer - a bank hit is instant, while a miss can walk through
- * generation, sandbox validation, a repair attempt and a revalidation. The agent reports
- * which one it is actually in (agent/app/curriculum/api/router.py).
- */
-const STAGE_LABELS: Record<string, string> = {
-  selecting: "Selecting problem...",
-  generating: "Generating problem...",
-  evaluating: "Evaluating problem...",
-  revising: "Revising problem...",
-  validating: "Validating problem...",
-  patching: "Patching problem...",
-  revalidating: "Revalidating...",
-  regenerating: "Regenerating problem...",
-};
 
 export const meta: MetaFunction = () => [
   { title: "Learning Plan · Tangerine" },

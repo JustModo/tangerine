@@ -28,6 +28,7 @@ interface CodeWorkbenchProps {
   /** Enable the Notes and Helper tabs. Both absent in practice mode, which has neither a
    * lesson node nor a persisted problem session. */
   lessonNodeId?: string;
+  testMode?: boolean;
   problemSessionId?: string;
   /** True when the session was already passing before this page load - otherwise
    * revisiting a solved problem would hide the solution it had already earned. */
@@ -45,6 +46,7 @@ export function CodeWorkbench({
   onRun,
   onSubmit,
   lessonNodeId,
+  testMode = false,
   problemSessionId,
   initiallySolved = false,
   initiallyFlagged = false,
@@ -187,6 +189,7 @@ export function CodeWorkbench({
           <ProblemPanel
             problem={problem}
             lessonNodeId={lessonNodeId}
+            testMode={testMode}
             problemSessionId={problemSessionId}
             getContext={getHelperContext}
             onHintRevealed={onHintRevealed}

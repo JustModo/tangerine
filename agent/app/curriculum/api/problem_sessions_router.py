@@ -1,4 +1,6 @@
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -24,8 +26,11 @@ from app.execution.infrastructure.citron_adapter import CitronAdapter
 from app.llm.infrastructure.gemini.provider import GeminiProvider
 from app.problems.infrastructure.sqlite_repository import SqliteProblemRepository
 from app.shared.code_assembly import assemble_program
+from app.shared.errors import NotFoundError
 from app.shared.hashing import hash_output
+from app.shared.progress import stage_stream
 from app.shared.sse import sse_stream
+from app.shared.types import Language
 from app.users.domain.models import LOCAL_USER_ID
 
 router = APIRouter(prefix="/problem-sessions", tags=["problem-sessions"])
@@ -49,6 +54,12 @@ class FlagBody(BaseModel):
 
 class StartForProblemBody(BaseModel):
     problem_id: str
+
+
+class TestProblemBody(BaseModel):
+    language: Language
+    difficulty: Literal["easy", "medium", "hard"] | None = None
+    topic: str | None = None
 
 
 class FlagForProblemBody(BaseModel):
@@ -102,6 +113,35 @@ async def start_for_problem(
     """Opens a specific problem picked from the "all problems" list — resumes an existing
     session for it if the learner already has one."""
     return await service.start_for_problem(LOCAL_USER_ID, body.problem_id)
+
+
+async def _test_problem_events(service: ProblemSessionService, body: TestProblemBody):
+    try:
+        async for event in stage_stream(
+            lambda report: service.start_test_problem(
+                LOCAL_USER_ID,
+                body.language,
+                difficulty=body.difficulty,
+                topic=body.topic,
+                on_stage=report,
+            ),
+            lambda session: {"type": "session", **session.model_dump(mode="json")},
+        ):
+            yield event
+    except NotFoundError as exc:
+        yield {"type": "error", "message": str(exc)}
+
+
+@router.post("/test")
+async def start_test_problem(
+    body: TestProblemBody, service: ProblemSessionService = Depends(get_service)
+) -> StreamingResponse:
+    stream = sse_stream(
+        _test_problem_events(service, body),
+        context=f"test problem language={body.language.value}",
+        error_message="Couldn't prepare a test problem. Try again in a moment.",
+    )
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 
 @router.patch("/flag-for-problem")
