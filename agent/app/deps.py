@@ -26,7 +26,6 @@ def build_validation_service() -> ProblemValidationService:
         SqliteProblemRepository(),
         GeminiProvider(),
         CitronAdapter(),
-        llm_cache=SqliteLLMCache(),
     )
 
 

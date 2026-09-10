@@ -10,7 +10,6 @@ from app.curriculum.domain.repository import LessonPlanRepository
 from app.mastery.domain.repository import UserSkillStateRepository
 from app.problems.application.services import ProblemSelectionService
 from app.problems.application.validation import ProblemValidationService
-from app.problems.domain.models import ProblemCriteria
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.revision.application.services import suggest_difficulty
 from app.shared.errors import NotFoundError
@@ -101,7 +100,7 @@ class ProblemSessionService:
         difficulty = node.difficulty or suggest_difficulty(mastery_score, node.sequence_index)
 
         problem = await self._select_or_generate(
-            plan, node.skill_id, skill_name, plan.language, difficulty, user_id, on_stage
+            plan, skill_name, plan.language, difficulty, on_stage
         )
         if problem is None:
             raise NotFoundError(f"Could not generate a valid problem for skill {skill_name}")
@@ -111,31 +110,23 @@ class ProblemSessionService:
     async def _select_or_generate(
         self,
         plan,
-        skill_id: str,
         skill_name: str,
         language,
         difficulty: str,
-        user_id: str,
         on_stage: Callable[[str], None] | None = None,
     ):
-        """Find a suitable problem in the bank or generate and validate a new one."""
-        seen_problem_ids = await self._session_repository.list_problem_ids_for_user(user_id)
-        criteria = ProblemCriteria(
-            skill_id=skill_id,
-            language=language,
-            difficulty=difficulty,
-            exclude_problem_ids=seen_problem_ids,
-        )
-        problem = await self._problem_selection.find_suitable(criteria)
-        if problem is not None:
-            return problem
+        """Generate and validate a fresh problem for this node.
+
+        The bank is deliberately not consulted here. A lesson step is written for the
+        learner in front of it, and serving a stored problem instead was what made two
+        different steps land on the same question. Stored problems are still reachable
+        through revision and the library, which is where reuse belongs."""
         return await self._problem_validation.generate_and_validate(
             skill_name,
             language,
             difficulty,
             on_stage=on_stage,
             avoid_titles=[node.problem_title for node in plan.nodes if node.problem_title],
-            exclude_problem_ids=seen_problem_ids,
         )
 
     async def start_for_problem(self, user_id: str, problem_id: str) -> ProblemSession:

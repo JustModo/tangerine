@@ -6,12 +6,11 @@ from langgraph.graph import END, StateGraph
 
 from app.llm.domain.provider import LLMProvider
 from app.llm.domain.requests import StructuredGenerationRequest
-from app.llm.graphs.shared import MAX_SCHEMA_ATTEMPTS, attempt, cached_generate, run_graph
-from app.llm.infrastructure.cache import SqliteLLMCache
+from app.llm.graphs.shared import MAX_SCHEMA_ATTEMPTS, attempt, run_graph
 from app.llm.infrastructure.gemini.mapping import SchemaValidationError
 from app.llm.prompts.problem import (
-    PROBLEM_VERSION,
     adapt_problem_user_prompt,
+    adapt_system_prompt,
     critique_system_prompt,
     critique_user_prompt,
     patch_problem_user_prompt,
@@ -30,7 +29,7 @@ from app.llm.schemas.problem import (
 
 logger = logging.getLogger(__name__)
 
-MAX_REVISION_ROUNDS = 2
+MAX_REVISION_ROUNDS = 1
 
 
 class ProblemGraphState(TypedDict):
@@ -58,20 +57,27 @@ def build_problem_graph(provider: LLMProvider, on_stage: Callable[[str], None] |
     stage = on_stage or (lambda _: None)
 
     async def generate(state: ProblemGraphState) -> ProblemGraphState:
-        return await attempt(provider, state, problem_system_prompt(state["language"]), (
-                adapt_problem_user_prompt(state["source_problem"], state["language"])
-                if state["source_problem"]
-                else problem_user_prompt(
-                    state["skill"],
-                    state["language"],
-                    state["difficulty"],
-                    state["avoid_titles"],
-                )
-            ), GeneratedProblem)
+        source = state["source_problem"]
+        system_prompt = (
+            adapt_system_prompt(state["language"])
+            if source
+            else problem_system_prompt(state["language"])
+        )
+        user_prompt = (
+            adapt_problem_user_prompt(source, state["language"])
+            if source
+            else problem_user_prompt(
+                state["skill"],
+                state["language"],
+                state["difficulty"],
+                state["avoid_titles"],
+            )
+        )
+        return await attempt(provider, state, system_prompt, user_prompt, GeneratedProblem)
 
     async def critique(state: ProblemGraphState) -> ProblemGraphState:
         result = state["result"]
-        if result is None:
+        if result is None or state["revisions"] >= MAX_REVISION_ROUNDS:
             return state
         stage("evaluating")
         request = StructuredGenerationRequest(
@@ -84,13 +90,6 @@ def build_problem_graph(provider: LLMProvider, on_stage: Callable[[str], None] |
             logger.warning("Problem critique could not run", exc_info=True)
             return {**state, "violations": []}
         if verdict.approved or not verdict.violations:
-            return {**state, "violations": []}
-        if state["revisions"] >= MAX_REVISION_ROUNDS:
-            logger.warning(
-                "Serving problem %r with unresolved violations: %s",
-                result.title,
-                "; ".join(verdict.violations),
-            )
             return {**state, "violations": []}
         logger.info(
             "Problem %r rejected by critique: %s", result.title, "; ".join(verdict.violations)
@@ -111,7 +110,11 @@ def build_problem_graph(provider: LLMProvider, on_stage: Callable[[str], None] |
         except Exception:
             logger.warning("Problem revision could not run", exc_info=True)
             return {**state, "violations": [], "revisions": MAX_REVISION_ROUNDS}
-        update = revision.model_dump(exclude_unset=True, exclude_none=True)
+        update = {
+            name: value
+            for name in revision.model_fields_set
+            if (value := getattr(revision, name)) is not None
+        }
         if state["source_problem"]:
             update.pop("statement_md", None)
         return {
@@ -139,39 +142,26 @@ async def generate_problem(
     skill: str,
     language: str,
     difficulty: str,
-    cache: SqliteLLMCache | None = None,
     source_problem: str | None = None,
     avoid_titles: list[str] | None = None,
     on_stage: Callable[[str], None] | None = None,
 ) -> GeneratedProblem:
-    # Pasted problems not cached; avoid_titles part of key (not just prompt). The version
-    # segment retires entries generated before the critique gate existed.
-    return await cached_generate(
-        cache,
-        None
-        if source_problem
-        else [
-            "problem",
-            PROBLEM_VERSION,
-            skill,
-            language,
-            difficulty,
-            *sorted(avoid_titles or []),
-        ],
-        GeneratedProblem,
-        lambda: run_graph(
-            build_problem_graph(provider, on_stage),
-            {
-                "skill": skill,
-                "language": language,
-                "difficulty": difficulty,
-                "source_problem": source_problem,
-                "avoid_titles": avoid_titles or [],
-                "violations": [],
-                "revisions": 0,
-            },
-            "Problem generation",
-        ),
+    """Deliberately uncached. A cache key of (skill, language, difficulty, avoid titles) is
+    identical for the first step of every new plan on a skill, so caching handed every
+    learner the byte-identical question — the repetition this is meant to avoid. Lesson
+    notes and curricula are still cached; they are reference material, not the exercise."""
+    return await run_graph(
+        build_problem_graph(provider, on_stage),
+        {
+            "skill": skill,
+            "language": language,
+            "difficulty": difficulty,
+            "source_problem": source_problem,
+            "avoid_titles": avoid_titles or [],
+            "violations": [],
+            "revisions": 0,
+        },
+        "Problem generation",
     )
 
 

@@ -214,37 +214,11 @@ async def test_trailing_whitespace_alone_is_not_a_disagreement(db_path: str) -> 
     assert problem is not None and problem.status == ProblemStatus.AVAILABLE
 
 
-async def test_a_repeat_of_an_existing_problem_is_not_stored_twice(db_path: str) -> None:
-    repo = SqliteProblemRepository(db_path)
-    passing = [
-        TestResult(id="0", status=ExecutionStatus.PASSED, input="1 2 3", actual_output="6\n"),
-        TestResult(id="1", status=ExecutionStatus.PASSED, input="0", actual_output="0\n"),
-        TestResult(id="2", status=ExecutionStatus.PASSED, input="5", actual_output="5\n"),
-        TestResult(id="3", status=ExecutionStatus.PASSED, input="-1 -2", actual_output="-3\n"),
-    ]
-    skill_repo = SqliteSkillRepository(db_path)
-    first = await ProblemValidationService(
-        repo, FakeLLMProvider(structured_responses=[_generated_problem()]),
-        FakeCodeExecutor(passing), skill_repo,
-    ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
-    assert first is not None
-
-    # One queued response, not two: a duplicate is served from the bank, so the regeneration
-    # that used to run before falling back to this same row never happens.
-    second = await ProblemValidationService(
-        repo,
-        FakeLLMProvider(structured_responses=[_generated_problem()]),
-        FakeCodeExecutor(passing),
-        skill_repo,
-    ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
-
-    assert second is not None and second.id == first.id
-    assert len(_rows_for_skill(db_path, await skill_repo.ensure_skill("prefix-sum"))) == 1
-
-
-async def test_a_near_duplicate_title_is_served_from_the_bank(db_path: str) -> None:
-    """The reported bug: one plan served "Climbing Stairs", "Min Cost Climbing Stairs" and
-    "Climbing Stairs" as three separate steps. An exact title hash caught none of them."""
+async def test_the_same_concept_in_a_different_situation_is_a_different_problem(
+    db_path: str,
+) -> None:
+    """Two questions may both come down to two-sum; dressed in genuinely different
+    situations they are different exercises, and the bank keeps both."""
     repo = SqliteProblemRepository(db_path)
     skill_repo = SqliteSkillRepository(db_path)
     first = await ProblemValidationService(
@@ -254,54 +228,49 @@ async def test_a_near_duplicate_title_is_served_from_the_bank(db_path: str) -> N
     assert first is not None
 
     variant = _generated_problem()
-    variant.title = "Minimum Cost Static Range Sum"
+    variant.title = "Warehouse Shelf Restocking"
     second = await ProblemValidationService(
         repo, FakeLLMProvider(structured_responses=[variant]),
-        FakeCodeExecutor(_passing_results()), skill_repo,
-    ).generate_and_validate("dynamic programming", Language.PYTHON, "easy")
-
-    assert second is not None and second.id == first.id
-
-
-async def test_a_problem_the_learner_has_seen_is_not_reused(db_path: str) -> None:
-    repo = SqliteProblemRepository(db_path)
-    skill_repo = SqliteSkillRepository(db_path)
-    first = await ProblemValidationService(
-        repo, FakeLLMProvider(structured_responses=[_generated_problem()]),
-        FakeCodeExecutor(_passing_results()), skill_repo,
-    ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
-    assert first is not None
-
-    variant = _generated_problem()
-    variant.title = "Minimum Cost Static Range Sum"
-    second = await ProblemValidationService(
-        repo, FakeLLMProvider(structured_responses=[variant]),
-        FakeCodeExecutor(_passing_results()), skill_repo,
-    ).generate_and_validate(
-        "prefix-sum", Language.PYTHON, "easy", exclude_problem_ids=[first.id]
-    )
-
-    assert second is not None and second.id != first.id
-
-
-async def test_an_unrelated_title_is_not_treated_as_a_duplicate(db_path: str) -> None:
-    repo = SqliteProblemRepository(db_path)
-    skill_repo = SqliteSkillRepository(db_path)
-    first = await ProblemValidationService(
-        repo, FakeLLMProvider(structured_responses=[_generated_problem()]),
-        FakeCodeExecutor(_passing_results()), skill_repo,
-    ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
-    assert first is not None
-
-    unrelated = _generated_problem()
-    unrelated.title = "Climbing Stairs"
-    second = await ProblemValidationService(
-        repo, FakeLLMProvider(structured_responses=[unrelated]),
         FakeCodeExecutor(_passing_results()), skill_repo,
     ).generate_and_validate("prefix-sum", Language.PYTHON, "easy")
 
     assert second is not None and second.id != first.id
     assert len(_rows_for_skill(db_path, await skill_repo.ensure_skill("prefix-sum"))) == 2
+
+
+async def test_a_step_that_restates_another_step_in_the_same_plan_is_regenerated(
+    db_path: str,
+) -> None:
+    """The reported bug: one plan served "Climbing Stairs", "Min Cost Climbing Stairs" and
+    "Climbing Stairs" as three separate steps."""
+    repeat = _generated_problem()
+    repeat.title = "Minimum Cost Climbing Stairs"
+    fresh = _generated_problem()
+    fresh.title = "Delivery Van Fuel Stops"
+    llm = FakeLLMProvider(structured_responses=[repeat, fresh])
+
+    problem = await ProblemValidationService(
+        SqliteProblemRepository(db_path), llm,
+        FakeCodeExecutor(_passing_results()), SqliteSkillRepository(db_path),
+    ).generate_and_validate(
+        "prefix-sum", Language.PYTHON, "easy", avoid_titles=["Climbing Stairs"]
+    )
+
+    assert problem is not None and problem.title == "Delivery Van Fuel Stops"
+
+
+async def test_a_step_unlike_the_rest_of_its_plan_is_kept_as_generated(db_path: str) -> None:
+    """Only one response is queued, so a needless regeneration would raise from the fake."""
+    llm = FakeLLMProvider(structured_responses=[_generated_problem()])
+
+    problem = await ProblemValidationService(
+        SqliteProblemRepository(db_path), llm,
+        FakeCodeExecutor(_passing_results()), SqliteSkillRepository(db_path),
+    ).generate_and_validate(
+        "prefix-sum", Language.PYTHON, "easy", avoid_titles=["Climbing Stairs"]
+    )
+
+    assert problem is not None and problem.title == "Static Range Sum"
 
 
 async def test_the_plan_scoped_avoid_list_reaches_the_prompt(db_path: str) -> None:
@@ -555,3 +524,25 @@ async def test_a_reference_that_prints_nothing_on_every_input_is_still_rejected(
     problem = await service.generate_and_validate("topological-sort", Language.PYTHON, "medium")
 
     assert problem is None
+
+
+async def test_two_plans_on_the_same_skill_do_not_get_the_identical_question(
+    db_path: str,
+) -> None:
+    """Problem generation is uncached on purpose: a cache key of skill/language/difficulty
+    plus an empty avoid list is the same for the first step of every new plan, which handed
+    every learner the byte-identical question."""
+    repo = SqliteProblemRepository(db_path)
+    skill_repo = SqliteSkillRepository(db_path)
+    second_problem = _generated_problem()
+    second_problem.title = "Warehouse Shelf Restocking"
+    llm = FakeLLMProvider(structured_responses=[_generated_problem(), second_problem])
+    service = ProblemValidationService(
+        repo, llm, FakeCodeExecutor(_passing_results()), skill_repo
+    )
+
+    first = await service.generate_and_validate("prefix-sum", Language.PYTHON, "easy")
+    second = await service.generate_and_validate("prefix-sum", Language.PYTHON, "easy")
+
+    assert first is not None and second is not None
+    assert first.title != second.title

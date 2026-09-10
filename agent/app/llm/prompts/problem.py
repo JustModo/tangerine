@@ -1,21 +1,56 @@
 from app.llm.schemas.problem import GeneratedProblem
 from app.shared.code_assembly import annotated_program, assemble_program
 
-PROBLEM_VERSION = "2"
-
 _PROBLEM_INTRO = (
     "You write a single DSA practice problem for a given skill, language, and difficulty. "
     "Produce a clear statement (markdown), 2-4 worked examples, and the problem's code as "
     "four separate fragments: pre_code, user_code, post_code, and reference_user_code.\n\n"
 
-    "title: concise, 5-6 words maximum (e.g. 'Reverse a Linked List', 'Two Sum with Hash "
-    "Map') — never a full sentence or a restatement of the whole problem.\n\n"
+    "WRITE A SITUATION, NOT A SPECIFICATION. The classics endure because they hand the "
+    "solver a concrete world and let them discover the structure hiding in it: rainwater "
+    "pooling between walls of different heights, a car circling a ring of petrol stations, "
+    "courses that cannot be taken before their prerequisites, meeting rooms double-booked "
+    "across a day. Not one of them opens with 'given an array of integers'. Yours must not "
+    "either.\n\n"
 
-    "statement_md: state the task exactly once, in one consistent framing, and stop. "
-    "Never think out loud while writing it — no 'wait', no second-guessing the definition "
-    "mid-paragraph, no 'more precisely' or 'specifically' walkback that redefines what was "
-    "just said. Decide what the problem asks before writing the first sentence, then write "
-    "only that finished statement.\n\n"
+    "Every problem you write is therefore built on a concrete scenario with real actors and "
+    "a real setting — a warehouse, a train timetable, a game leaderboard, a delivery route, "
+    "a ledger of transactions, a network of servers. Pick a setting where the underlying "
+    "structure is genuinely present, never a decorative wrapper bolted onto an abstract "
+    "task. Rainwater trapped between walls IS a prefix-maximum problem; calling an array "
+    "'the heights of Bob's fence' and then asking for its maximum is not a scenario, it is "
+    "a costume.\n\n"
+
+    "title: NAME THE SITUATION, 3-6 words. 'Trapping Rain Water', 'Gas Station Circuit', "
+    "'Course Schedule', 'Meeting Rooms II' — the reader should picture the scene and have "
+    "no idea yet which technique solves it. NEVER name the data structure or the algorithm "
+    "in the title ('Two Sum with Hash Map', 'Sliding Window Maximum', 'DP Coin Change' are "
+    "all forbidden): the title is the first hint you give away, and naming the tool "
+    "finishes the exercise before it starts. Never a full sentence, never a restatement of "
+    "the whole problem.\n\n"
+
+    "statement_md: 3-6 sentences over two short paragraphs. The first paragraph sets the "
+    "scene and introduces the actors concretely. The second says exactly what must be "
+    "computed and states the rule that makes the answer non-obvious — the constraint the "
+    "solver has to reason around. End there.\n\n"
+
+    "The scenario is setup, not a story. Every sentence must carry information the solver "
+    "needs; cut anything that is only colour. No named characters with backstories, no "
+    "dialogue, no jokes, no framing that takes longer to read than the task it describes. "
+    "A reader must be able to restate the task in one sentence after reading it once.\n\n"
+
+    "Make the solver think, but never mislead. The statement describes WHAT the situation "
+    "is and WHAT must be computed; it never suggests HOW. Do not name a technique, a data "
+    "structure or a complexity target anywhere in the statement, and never nudge with "
+    "phrases like 'consider processing from the right' or 'you may want to track a running "
+    "maximum' — discovering that is the entire exercise. Equally, never state something "
+    "false or impossible about the situation to manufacture difficulty.\n\n"
+
+    "State the task exactly once, in one consistent framing, and stop. Never think out loud "
+    "while writing it — no 'wait', no second-guessing the definition mid-paragraph, no "
+    "'more precisely' or 'specifically' walkback that redefines what was just said. Decide "
+    "what the problem asks before writing the first sentence, then write only that finished "
+    "statement.\n\n"
 )
 
 _EXAMPLE_FORMAT = (
@@ -502,14 +537,70 @@ def patch_problem_user_prompt(
     return "\n\n".join(sections)
 
 
+_ADAPT_INTRO = (
+    "The learner has given you a problem they already have and want to solve. You are NOT "
+    "authoring a problem — you are wrapping theirs in the harness that makes it runnable, "
+    "and the question they pasted is the question they get.\n\n"
+
+    "statement_md: REPRODUCE THE ORIGINAL VERBATIM. Copy the learner's text across "
+    "character for character, keeping their wording, their order, their examples, their "
+    "notation and any LaTeX exactly as written. You may only fix markdown so it renders "
+    "(fencing code, escaping a bare `*` or `_`) and drop material that is not part of the "
+    "question at all — a site header, a difficulty badge, 'Accepted: 42.1%', a 'Companies' "
+    "list, navigation text.\n\n"
+
+    "Do NOT rewrite it into a scenario, do NOT add a setting or a story, do NOT tighten, "
+    "expand, re-order, re-phrase or 'improve' a single sentence, and do NOT strip a "
+    "technique name the original chose to state. The authoring rules about writing a "
+    "situation apply to problems you invent; this one is already written.\n\n"
+
+    "THE ONE EXCEPTION IS A LOGICAL ERROR. If the original genuinely contradicts itself, "
+    "states an example output that does not follow from its own input, or omits a "
+    "constraint without which the task is impossible or ambiguous, correct exactly that and "
+    "leave every other word untouched. A wording choice you dislike is not a logical error, "
+    "and neither is a missing scenario, a terse statement, or a technique the original "
+    "names outright.\n\n"
+
+    "title: the original's own name for it if it gives one, otherwise a concise 3-6 word "
+    "name taken from what the question actually asks. Do not invent a scenario title for a "
+    "problem that has no scenario.\n\n"
+
+    "IF THE ORIGINAL ALLOWS SEVERAL VALID ANSWERS — 'return them in any order', 'return any "
+    "valid pair' — do NOT edit the statement to remove that freedom. Grading compares "
+    "printed output character for character, so make post_code print a CANONICAL form "
+    "instead: sort the collection before printing it. Every valid answer then prints "
+    "identically and the learner's own wording survives untouched. Only when no canonical "
+    "form exists (an arbitrary path, one of several unrelated structures) is this a logical "
+    "error you may fix in the statement by fixing the tie-break rule.\n\n"
+)
+
+
+def adapt_system_prompt(language: str) -> str:
+    """The authoring intro is deliberately absent. A pasted question is the learner's own,
+    so the rules that make a NEW problem case-based would rewrite the very thing they asked
+    to practise. Everything about the code shape, examples and grading inputs still holds —
+    that is the part being built around their text."""
+    return (
+        _ADAPT_INTRO
+        + _EXAMPLE_FORMAT
+        + _CODE_SHAPE
+        + _language_block(language)
+        + _AUTHORING_EXTRAS
+        + _HIDDEN_TESTS
+        + _INPUT_RULES
+    )
+
+
 def adapt_problem_user_prompt(source_problem: str, language: str) -> str:
     """Format user prompt to adapt a user-provided problem statement."""
     return (
         f"Language: {language}\n\n"
-        "Do NOT invent a new problem. Adapt the exact problem below into the required "
-        "format, keeping its meaning, constraints and examples faithful to the original.\n"
-        "- statement_md: the same problem, lightly cleaned up as markdown. Keep any LaTeX.\n"
-        "- title: a concise 5-6 word name for it.\n"
+        "Do NOT invent a new problem. Wrap the exact problem below in the required format.\n"
+        "- statement_md: the learner's text, VERBATIM. Their wording, their examples, their "
+        "notation, their LaTeX. No rewriting, no scenario, no re-phrasing — only markdown "
+        "repair, removal of page furniture, and the correction of an outright logical "
+        "error.\n"
+        "- title: the original's own name if it has one, else a concise 3-6 word name.\n"
         "- difficulty: your honest rating of the original ('easy', 'medium' or 'hard').\n"
         "- examples: use the original's worked examples where it gives them; add one only "
         "if it gives none. Every example's input must match the stdin format your pre_code "
@@ -536,27 +627,44 @@ _CRITIQUE_RULES = (
     "explanation asserts numbers that do not follow from its own input, a constraint that "
     "contradicts the input_format or the examples, a statement referring to a parameter, a "
     "field or a guarantee that appears nowhere else, an input_format line for a variable "
-    "that is not a parameter of the function in user_code.\n"
+    "that is not a parameter of the function in user_code, or a scenario that describes "
+    "something the code does not actually compute.\n"
     "2. RAMBLING AND THINKING OUT LOUD. 'wait', 'let us check', 'more precisely', "
     "'specifically', a definition restated differently the second time, a hedge, a question "
-    "mark, a closing sentence that repeats the answer as prose, a walkback that redefines "
-    "the task mid-paragraph. The statement must ask the question exactly once, in one "
-    "framing, and stop.\n"
+    "mark, a mid-paragraph walkback that redefines the task. The statement must ask the "
+    "question exactly once, in one framing, and stop.\n"
     "3. WRONG ARITHMETIC. Work every example explanation through by hand against its own "
     "input. A single wrong intermediate value is a violation.\n"
-    "4. UNPROFESSIONAL CRAFT. An untyped or stringly-typed signature in user_code, a "
+    "4. NO SITUATION, OR A FAKE ONE. A statement that opens 'Given an array of integers' "
+    "and never establishes a concrete setting is a specification, not a problem, and is a "
+    "violation. So is a costume: a setting mentioned in the first sentence and then "
+    "abandoned, or one whose story has nothing to do with the structure being tested. So is "
+    "a title that names the data structure, the algorithm or the complexity instead of the "
+    "situation.\n"
+    "5. THE STATEMENT GIVES THE APPROACH AWAY. Any naming of a technique, data structure or "
+    "complexity target in statement_md, constraints or the title, and any nudge toward the "
+    "method ('process from the right', 'track a running maximum').\n"
+    "6. UNPROFESSIONAL CRAFT. An untyped or stringly-typed signature in user_code, a "
     "signature that differs from reference_user_code, a missing structure comment where a "
     "non-trivial type is involved, parsing logic inside user_code, formatting inside the "
     "function instead of post_code, a stub that would not run, a question admitting several "
-    "equally valid answers, an explanation that names the technique the learner is meant to "
-    "discover, or a complexity target stated in constraints.\n\n"
+    "equally valid answers, or an example explanation that names the technique.\n\n"
 
     "DO NOT REJECT FOR:\n"
+    "- A hint naming a technique. The hints are the ONE place the approach is allowed to be "
+    "named — that is what they are for. Only the statement, the title, the constraints and "
+    "the example explanations must stay free of it.\n"
+    "- A scenario being vivid, specific or long-ish, as long as every sentence carries "
+    "information the solver needs. Concrete setting and named quantities are REQUIRED here; "
+    "do not confuse them with rambling. Rambling is the writer visibly changing their mind; "
+    "a well-drawn situation is not.\n"
     "- Style, tone or wording you would merely have written differently.\n"
     "- Difficulty being easier or harder than the label suggests.\n"
     "- The reference solving the problem by a different but valid algorithm, or being "
     "unoptimised, as long as it is correct.\n"
-    "- The topic being unoriginal or resembling a well-known problem.\n"
+    "- The topic resembling a well-known problem, or resembling another problem you have "
+    "seen. A familiar underlying task dressed in a genuinely different situation is exactly "
+    "what is wanted, and is never a violation.\n"
     "- Anything only running the code could settle. You do not execute anything; you read "
     "it. A sandbox already checks that the program compiles, runs and matches its examples, "
     "so never guess at runtime behaviour and never flag a suspicion you cannot point at a "
@@ -609,11 +717,19 @@ def critique_user_prompt(problem: GeneratedProblem, source_problem: str | None =
     sections = [f"difficulty as claimed: {problem.difficulty}", *_problem_evidence(problem)]
     if source_problem:
         sections.append(
-            "THIS PROBLEM IS AN ADAPTATION. The learner supplied the original below and the "
-            "problem above must ask the SAME question — same task, same semantics, same "
-            "stated constraints. Flag any place the adaptation quietly changed, softened or "
-            "invented part of it. Do not flag the format or wording differences the "
-            f"adaptation is supposed to introduce.\n\nTHE LEARNER'S ORIGINAL:\n{source_problem}"
+            "THIS PROBLEM IS THE LEARNER'S OWN, PASTED. statement_md is required to "
+            "reproduce the original below VERBATIM, so judge it only against that original "
+            "and never against the house style.\n"
+            "- Flag statement_md if it rewrites, re-phrases, re-orders, summarises, expands "
+            "or adds a scenario to the original, or if it quietly changes, softens or "
+            "invents part of the task. Quote the words that differ.\n"
+            "- Do NOT flag statement_md for lacking a situation, for being terse, for "
+            "opening 'Given an array', or for naming a technique. Those are the learner's "
+            "choices and reproducing them is correct. Removing page furniture (a difficulty "
+            "badge, an acceptance rate, a company list) is also correct.\n"
+            "- Everything BUILT AROUND the statement — the code fragments, examples, "
+            "constraints, formats, hints, grading inputs — is judged normally.\n\n"
+            f"THE LEARNER'S ORIGINAL:\n{source_problem}"
         )
     return "\n\n".join(sections)
 
@@ -666,5 +782,4 @@ def revise_problem_user_prompt(
             "statement_md — the question stays exactly as the learner wrote it, and any "
             f"violation must be fixed elsewhere.\n\nTHE LEARNER'S ORIGINAL:\n{source_problem}"
         )
-    sections.append(_REVISION_RULES)
     return "\n\n".join(sections)

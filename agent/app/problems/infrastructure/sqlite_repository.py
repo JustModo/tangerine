@@ -14,8 +14,6 @@ from app.shared.errors import ConflictError
 from app.shared.fuzzy import match_score
 from app.shared.types import Language
 
-SIMILAR_TITLE_THRESHOLD = 0.6
-
 
 def _problem(row: aiosqlite.Row, skill_ids: list[str]) -> Problem:
     examples_raw = json.loads(row["examples_json"] or "[]")
@@ -136,33 +134,6 @@ class SqliteProblemRepository:
         async with connect(self._database_path) as db:
             items = [await self._hydrate(db, row) for row in page_rows]
         return items, total
-
-    async def find_similar(
-        self, title: str, language: Language, exclude_problem_ids: list[str] | None = None
-    ) -> Problem | None:
-        """The bank's closest question to one just generated, or None."""
-        query = "SELECT id, title FROM problems WHERE language = ? AND status = ?"
-        params: list[object] = [language.value, ProblemStatus.AVAILABLE.value]
-        if exclude_problem_ids:
-            placeholders = ",".join("?" for _ in exclude_problem_ids)
-            query += f" AND id NOT IN ({placeholders})"
-            params.extend(exclude_problem_ids)
-
-        async with connect(self._database_path) as db:
-            cursor = await db.execute(query, params)
-            rows = await cursor.fetchall()
-
-            best_id, best_score = None, 0.0
-            for row in rows:
-                score = max(match_score(title, row["title"]), match_score(row["title"], title))
-                if score > best_score:
-                    best_id, best_score = row["id"], score
-            if best_id is None or best_score < SIMILAR_TITLE_THRESHOLD:
-                return None
-
-            cursor = await db.execute("SELECT * FROM problems WHERE id = ?", (best_id,))
-            row = await cursor.fetchone()
-            return await self._hydrate(db, row) if row else None
 
     async def list_titles(self, skill_id: str, language: Language) -> list[str]:
         """Titles already in the bank for a skill."""

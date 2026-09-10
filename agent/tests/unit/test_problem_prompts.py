@@ -12,6 +12,8 @@ from app.execution.domain.models import ExecutionStatus, TestResult
 from app.llm.prompts.problem import (
     _DIAGNOSIS,
     _LANGUAGE_BLOCKS,
+    adapt_problem_user_prompt,
+    adapt_system_prompt,
     critique_system_prompt,
     critique_user_prompt,
     patch_problem_user_prompt,
@@ -159,6 +161,7 @@ def test_the_judge_grades_against_the_rules_the_generator_was_given(sentinel: st
     assert sentinel in problem_system_prompt("python")
     assert sentinel in critique_system_prompt("python")
     assert sentinel in revise_system_prompt("python")
+    assert sentinel in adapt_system_prompt("python")
 
 
 def test_the_critique_prompt_carries_the_evidence_it_must_judge() -> None:
@@ -188,3 +191,47 @@ def test_a_revision_prompt_names_every_violation_it_must_fix() -> None:
 
     for violation in violations:
         assert violation in prompt
+
+
+def test_a_pasted_question_is_never_put_through_the_scenario_authoring_rules() -> None:
+    """The rules that make a new problem case-based would rewrite the learner's own
+    question, which is the one thing adaptation must not do."""
+    authoring = "WRITE A SITUATION, NOT A SPECIFICATION"
+
+    assert authoring in problem_system_prompt("python")
+    assert authoring not in adapt_system_prompt("python")
+    assert "VERBATIM" in adapt_system_prompt("python")
+
+
+def test_the_adapt_prompt_allows_only_markdown_repair_and_logical_fixes() -> None:
+    prompt = adapt_system_prompt("python")
+
+    assert "LOGICAL ERROR" in prompt
+    assert "do NOT add a setting or a story" in prompt
+    assert "Do NOT rewrite it into a scenario" in prompt
+
+
+def test_the_judge_grades_a_pasted_statement_against_the_original_not_the_house_style() -> None:
+    prompt = critique_user_prompt(_problem(), "Given an array, return the two indices.")
+
+    assert "VERBATIM" in prompt
+    assert "Do NOT flag statement_md for lacking a situation" in prompt
+    assert "Given an array, return the two indices." in prompt
+
+
+def test_the_adapt_user_prompt_carries_the_original_and_demands_it_back() -> None:
+    prompt = adapt_problem_user_prompt("Return the k-th largest element.", "python")
+
+    assert "Return the k-th largest element." in prompt
+    assert "VERBATIM" in prompt
+
+
+def test_a_pasted_multi_answer_question_is_normalised_in_post_code_not_in_the_statement() -> None:
+    """Grading compares printed output character for character, so 'return them in any
+    order' has to be reconciled somewhere. It is reconciled in the harness, not by editing
+    the learner's question."""
+    prompt = adapt_system_prompt("python")
+
+    assert "SEVERAL VALID ANSWERS" in prompt
+    assert "do NOT edit the statement to remove that freedom" in prompt
+    assert "sort the collection before printing it" in prompt

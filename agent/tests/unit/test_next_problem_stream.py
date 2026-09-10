@@ -1,10 +1,11 @@
 """The next-problem endpoint streams what it is really doing.
 
-Preparing a problem is a bank lookup on a good day and generate -> validate -> patch ->
-revalidate on a bad one. The UI used to guess at that with timers; these tests pin the
-contract that lets it stop guessing.
+Preparing a problem is an already-assigned problem on a good day and generate -> evaluate
+-> revise -> validate -> patch -> revalidate on a bad one. The UI used to guess at that
+with timers; these tests pin the contract that lets it stop guessing.
 """
 
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,7 +31,7 @@ def db_path(tmp_path: Path, monkeypatch) -> str:
     get_settings.cache_clear()
 
 
-async def test_a_bank_hit_streams_a_stage_then_the_session(db_path: str) -> None:
+async def test_an_assigned_problem_streams_a_stage_then_the_session(db_path: str) -> None:
     seed_lesson_node(db_path, "node-1")
     await SqliteProblemRepository(db_path).save(
         Problem(
@@ -39,6 +40,10 @@ async def test_a_bank_hit_streams_a_stage_then_the_session(db_path: str) -> None
             created_at=datetime.now(UTC),
         )
     )
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE lesson_nodes SET problem_id = 'p1' WHERE id = 'node-1'")
+    conn.commit()
+    conn.close()
 
     with TestClient(app) as client:
         response = client.post("/api/learning-plans/lp-node-1/problems/next")

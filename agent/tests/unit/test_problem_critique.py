@@ -116,3 +116,41 @@ async def test_a_revision_never_rewrites_a_pasted_question() -> None:
 
     assert problem.statement_md == "Given an array, answer sum queries."
     assert problem.hints == ["Try a loop."]
+
+
+async def test_a_revision_keeps_examples_as_model_instances() -> None:
+    """model_dump() would hand back plain dicts here, and validation reads ex.input."""
+    llm = FakeLLMProvider(
+        structured_responses=[_generated_problem()],
+        critiques=[_reject("examples[0].explanation: says 1 + 2 + 3 = 7")],
+        revisions=[
+            ProblemRevision(
+                examples=[GeneratedExample(input="1 2 3", output="6", explanation="1 + 2 + 3 = 6")]
+            )
+        ],
+    )
+
+    problem = await generate_problem(llm, "prefix-sum", "python", "easy")
+
+    assert isinstance(problem.examples[0], GeneratedExample)
+    assert problem.examples[0].explanation == "1 + 2 + 3 = 6"
+
+
+async def test_a_pasted_question_is_generated_with_the_adaptation_prompt() -> None:
+    llm = FakeLLMProvider(structured_responses=[_generated_problem()])
+
+    await generate_problem(
+        llm, "prefix-sum", "python", "easy", source_problem="Return the k-th largest element."
+    )
+
+    system_prompt = llm.last_structured_request.system_prompt
+    assert "WRITE A SITUATION, NOT A SPECIFICATION" not in system_prompt
+    assert "VERBATIM" in system_prompt
+
+
+async def test_a_generated_question_is_generated_with_the_authoring_prompt() -> None:
+    llm = FakeLLMProvider(structured_responses=[_generated_problem()])
+
+    await generate_problem(llm, "prefix-sum", "python", "easy")
+
+    assert "WRITE A SITUATION, NOT A SPECIFICATION" in llm.last_structured_request.system_prompt

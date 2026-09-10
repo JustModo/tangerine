@@ -12,11 +12,16 @@ class GeneratedExample(BaseModel):
 
 
 class GeneratedProblem(BaseModel):
-    title: str = Field(description="Concise title, 5-6 words maximum.")
+    title: str = Field(
+        description="Names the SITUATION in 3-6 words, the way 'Trapping Rain Water' or "
+        "'Gas Station Circuit' does. Never names the data structure, the algorithm or the "
+        "complexity — that hands the solver the answer."
+    )
     statement_md: str = Field(
-        description="The problem, stated exactly once in one consistent framing. No "
-        "thinking out loud, no 'wait'/'more precisely' walkbacks that redefine the task "
-        "mid-paragraph."
+        description="3-6 sentences in two short paragraphs: the concrete scenario, then "
+        "exactly what must be computed and the rule that makes it non-obvious. Stated once "
+        "in one consistent framing, no thinking out loud, no 'wait'/'more precisely' "
+        "walkbacks, and no hint at how to solve it."
     )
     difficulty: str
     skills: list[str]

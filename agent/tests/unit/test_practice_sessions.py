@@ -38,10 +38,34 @@ def db_path(tmp_path: Path) -> str:
 
 
 class _NeverGenerates:
-    """Generation is not what these tests are about — every case seeds the bank instead."""
+    """Asserts a path reaches the bank and never the generator."""
 
     async def generate_and_validate(self, *args, **kwargs):
-        raise AssertionError("should have found a bank problem")
+        raise AssertionError("should not have generated")
+
+
+class _GeneratesFreshProblems:
+    """A lesson step always generates now — the bank is only read by revision and the
+    library — so lifecycle tests need a generator handing back a distinct problem each
+    time, not a seeded bank."""
+
+    def __init__(self, db_path: str) -> None:
+        self._db_path = db_path
+        self.calls = 0
+
+    async def generate_and_validate(self, skill, language, difficulty, *args, **kwargs):
+        self.calls += 1
+        problem = Problem(
+            id=f"generated-{self.calls}",
+            title=f"Generated Problem {self.calls}",
+            language=language,
+            difficulty=difficulty,
+            status=ProblemStatus.AVAILABLE,
+            skill_ids=["skill-1"],
+            created_at=datetime.now(UTC),
+        )
+        await SqliteProblemRepository(self._db_path).save(problem)
+        return problem
 
 
 async def _seed_bank_problem(db_path: str, problem_id: str = "p1") -> Problem:
@@ -63,7 +87,7 @@ def _service(db_path: str, validation=None) -> ProblemSessionService:
         SqliteLessonPlanRepository(db_path),
         SqliteProblemSessionRepository(db_path),
         ProblemSelectionService(SqliteProblemRepository(db_path)),
-        validation or _NeverGenerates(),
+        validation or _GeneratesFreshProblems(db_path),
         SqliteSkillRepository(db_path),
         mastery_repository=SqliteUserSkillStateRepository(db_path),
     )
@@ -94,17 +118,16 @@ async def test_submitting_a_node_less_session_touches_no_plan(db_path: str) -> N
     assert updated.status == ProblemSessionStatus.COMPLETED
 
 
-async def test_selection_never_repeats_a_problem_the_learner_has_seen(db_path: str) -> None:
+async def test_a_lesson_step_generates_instead_of_serving_a_bank_problem(db_path: str) -> None:
+    """Serving a stored problem is what made two steps land on the same question. The bank
+    stays reachable through revision and the library; a lesson step always writes a new one."""
     from tests.db import seed_lesson_node
 
     await _seed_bank_problem(db_path, "p1")
     seed_lesson_node(db_path, "node-1", user_id="local-user", skill_id="skill-1")
-    service = _service(db_path)
-    await service.start_for_problem("local-user", "p1")
+    service = _service(db_path, validation=_NeverGenerates())
 
-    # The bank's only problem has already been served, so selection misses and generation
-    # is required — which the fake refuses, proving the exclusion reached the query.
-    with pytest.raises(AssertionError, match="bank problem"):
+    with pytest.raises(AssertionError, match="should not have generated"):
         await service.next_problem("lp-node-1", "local-user")
 
 
@@ -185,17 +208,18 @@ async def test_edit_plan_regenerates_a_step_whose_difficulty_actually_changed(db
 
     problem_sessions = ProblemSessionService(
         plan_repo, SqliteProblemSessionRepository(db_path),
-        ProblemSelectionService(SqliteProblemRepository(db_path)), _NeverGenerates(),
+        ProblemSelectionService(SqliteProblemRepository(db_path)),
+        _GeneratesFreshProblems(db_path),
         SqliteSkillRepository(db_path), mastery_repository=SqliteUserSkillStateRepository(db_path),
     )
     first = await problem_sessions.next_problem(plan.id, "local-user")
-    assert first.problem_id == "p-easy"
+    assert (await SqliteProblemRepository(db_path).get(first.problem_id)).difficulty == "easy"
 
     await curriculum.edit_plan(plan.id, "make step 1 very hard")
     second = await problem_sessions.next_problem(plan.id, "local-user")
 
     assert second.id != first.id
-    assert second.problem_id == "p-hard"
+    assert (await SqliteProblemRepository(db_path).get(second.problem_id)).difficulty == "hard"
 
 
 async def test_edit_plan_leaves_an_unchanged_step_alone(db_path: str) -> None:
@@ -216,7 +240,8 @@ async def test_edit_plan_leaves_an_unchanged_step_alone(db_path: str) -> None:
 
     problem_sessions = ProblemSessionService(
         plan_repo, SqliteProblemSessionRepository(db_path),
-        ProblemSelectionService(SqliteProblemRepository(db_path)), _NeverGenerates(),
+        ProblemSelectionService(SqliteProblemRepository(db_path)),
+        _GeneratesFreshProblems(db_path),
         SqliteSkillRepository(db_path), mastery_repository=SqliteUserSkillStateRepository(db_path),
     )
     first = await problem_sessions.next_problem(plan.id, "local-user")
@@ -249,11 +274,12 @@ async def test_set_step_difficulty_regenerates_only_the_targeted_step(db_path: s
 
     problem_sessions = ProblemSessionService(
         plan_repo, SqliteProblemSessionRepository(db_path),
-        ProblemSelectionService(SqliteProblemRepository(db_path)), _NeverGenerates(),
+        ProblemSelectionService(SqliteProblemRepository(db_path)),
+        _GeneratesFreshProblems(db_path),
         SqliteSkillRepository(db_path), mastery_repository=SqliteUserSkillStateRepository(db_path),
     )
     first = await problem_sessions.next_problem(plan.id, "local-user")
-    assert first.problem_id == "p-easy"
+    assert (await SqliteProblemRepository(db_path).get(first.problem_id)).difficulty == "easy"
 
     # No LLM response is queued beyond create_draft's — this must not call the LLM at all.
     updated = await curriculum.set_step_difficulty(plan.id, "1", "hard")
@@ -261,7 +287,7 @@ async def test_set_step_difficulty_regenerates_only_the_targeted_step(db_path: s
 
     second = await problem_sessions.next_problem(plan.id, "local-user")
     assert second.id != first.id
-    assert second.problem_id == "p-hard"
+    assert (await SqliteProblemRepository(db_path).get(second.problem_id)).difficulty == "hard"
 
 
 async def test_set_step_difficulty_is_a_no_op_when_difficulty_is_unchanged(db_path: str) -> None:
@@ -278,7 +304,8 @@ async def test_set_step_difficulty_is_a_no_op_when_difficulty_is_unchanged(db_pa
     plan = await curriculum.create_draft(session.id, "topic", Language.PYTHON, "beginner")
     problem_sessions = ProblemSessionService(
         plan_repo, SqliteProblemSessionRepository(db_path),
-        ProblemSelectionService(SqliteProblemRepository(db_path)), _NeverGenerates(),
+        ProblemSelectionService(SqliteProblemRepository(db_path)),
+        _GeneratesFreshProblems(db_path),
         SqliteSkillRepository(db_path), mastery_repository=SqliteUserSkillStateRepository(db_path),
     )
     first = await problem_sessions.next_problem(plan.id, "local-user")
@@ -345,13 +372,13 @@ async def test_set_plan_language_regenerates_an_untouched_next_problem(db_path: 
     )
 
     first = await problem_sessions.next_problem("lp-node-1", "local-user")
-    assert first.problem_id == "p-py"
+    assert (await SqliteProblemRepository(db_path).get(first.problem_id)).language == Language.PYTHON
 
     await curriculum.set_plan_language("lp-node-1", Language.JAVA)
     second = await problem_sessions.next_problem("lp-node-1", "local-user")
 
     assert second.id != first.id
-    assert second.problem_id == "p-java"
+    assert (await SqliteProblemRepository(db_path).get(second.problem_id)).language == Language.JAVA
 
 
 async def test_set_plan_language_also_regenerates_an_in_progress_session(db_path: str) -> None:
@@ -380,7 +407,7 @@ async def test_set_plan_language_also_regenerates_an_in_progress_session(db_path
     second = await problem_sessions.next_problem("lp-node-1", "local-user")
 
     assert second.id != first.id
-    assert second.problem_id == "p-java"
+    assert (await SqliteProblemRepository(db_path).get(second.problem_id)).language == Language.JAVA
 
 
 async def test_set_plan_language_preserves_a_submitted_session(db_path: str) -> None:
@@ -402,7 +429,7 @@ async def test_set_plan_language_preserves_a_submitted_session(db_path: str) -> 
     second = await problem_sessions.next_problem("lp-node-1", "local-user")
 
     assert second.id == first.id
-    assert second.problem_id == "p-py"
+    assert second.problem_id == first.problem_id
 
 
 async def test_flagging_round_trips(db_path: str) -> None:
@@ -432,7 +459,7 @@ async def test_starting_a_node_twice_resumes_instead_of_regenerating(db_path: st
         plan_repo,
         SqliteProblemSessionRepository(db_path),
         ProblemSelectionService(SqliteProblemRepository(db_path)),
-        _NeverGenerates(),
+        _GeneratesFreshProblems(db_path),
         SqliteSkillRepository(db_path),
         mastery_repository=SqliteUserSkillStateRepository(db_path),
     )

@@ -8,7 +8,6 @@ from app.execution.domain.models import ExecutionRequest, ExecutionStatus
 from app.execution.domain.models import TestCase as ExecutionTestCase
 from app.llm.domain.provider import LLMProvider
 from app.llm.graphs.problem import generate_problem, patch_problem
-from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.schemas.problem import GeneratedProblem
 from app.problems.application.repair import (
     ValidationFailure,
@@ -26,6 +25,7 @@ from app.problems.domain.models import (
 from app.problems.domain.repository import ProblemRepository
 from app.problems.infrastructure.sqlite_skill_repository import SqliteSkillRepository
 from app.shared.code_assembly import assemble_program
+from app.shared.fuzzy import match_score
 from app.shared.hashing import comparable_output, hash_output
 from app.shared.types import Language
 
@@ -33,6 +33,18 @@ logger = logging.getLogger(__name__)
 
 # Most recent titles to avoid repeating
 MAX_AVOID_TITLES = 8
+
+# How close two titles in the SAME plan may be before the second is a repeat. Deliberately
+# high: the same underlying task dressed in a genuinely different situation is wanted, and
+# only a near-restatement of a step the learner already has counts as a duplicate.
+REPEAT_TITLE_THRESHOLD = 0.75
+
+
+def _repeats_a_plan_title(title: str, plan_titles: list[str]) -> bool:
+    return any(
+        max(match_score(title, other), match_score(other, title)) >= REPEAT_TITLE_THRESHOLD
+        for other in plan_titles
+    )
 
 
 class ProblemValidationService:
@@ -44,13 +56,11 @@ class ProblemValidationService:
         llm_provider: LLMProvider,
         executor: CodeExecutor,
         skill_repository: SqliteSkillRepository | None = None,
-        llm_cache: SqliteLLMCache | None = None,
     ) -> None:
         self._repository = repository
         self._llm_provider = llm_provider
         self._executor = executor
         self._skill_repository = skill_repository or SqliteSkillRepository()
-        self._llm_cache = llm_cache
 
     async def generate_and_validate(
         self,
@@ -60,10 +70,10 @@ class ProblemValidationService:
         source_problem: str | None = None,
         on_stage: Callable[[str], None] | None = None,
         avoid_titles: list[str] | None = None,
-        exclude_problem_ids: list[str] | None = None,
     ) -> Problem | None:
         """Generate problem candidate, validate against sandbox, and attempt repair if rejected."""
         stage = on_stage or (lambda _: None)
+        plan_titles = [] if source_problem else list(avoid_titles or [])
 
         if source_problem:
             avoid_titles = []
@@ -80,17 +90,17 @@ class ProblemValidationService:
                 skill,
                 language.value,
                 difficulty,
-                cache=self._llm_cache if attempt == 0 else None,
                 source_problem=source_problem,
                 avoid_titles=avoid_titles if attempt == 0 else avoid_titles + [generated.title],
                 on_stage=stage,
             )
 
-            duplicate_of = await self._find_duplicate(
-                generated, source_problem, language, exclude_problem_ids
-            )
-            if duplicate_of is not None:
-                return duplicate_of
+            if attempt == 0 and _repeats_a_plan_title(generated.title, plan_titles):
+                logger.info(
+                    "Problem %r repeats a step already in this plan, regenerating",
+                    generated.title,
+                )
+                continue
 
             problem = await self._validate_or_repair(
                 generated, skill, language, difficulty, source_problem, stage
@@ -125,18 +135,6 @@ class ProblemValidationService:
         stage("revalidating")
         repaired = await self._validate(patched, skill, language, difficulty)
         return repaired if isinstance(repaired, Problem) else None
-
-    async def _find_duplicate(
-        self,
-        generated: GeneratedProblem,
-        source_problem: str | None,
-        language: Language,
-        exclude_problem_ids: list[str] | None,
-    ) -> Problem | None:
-        """Check for existing similar problems in the problem repository."""
-        if source_problem:
-            return None
-        return await self._repository.find_similar(generated.title, language, exclude_problem_ids)
 
     async def _validate(
         self,
