@@ -83,6 +83,7 @@ class ProblemValidationService:
                 cache=self._llm_cache if attempt == 0 else None,
                 source_problem=source_problem,
                 avoid_titles=avoid_titles if attempt == 0 else avoid_titles + [generated.title],
+                on_stage=stage,
             )
 
             duplicate_of = await self._find_duplicate(

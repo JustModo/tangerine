@@ -1,5 +1,7 @@
 from app.llm.schemas.problem import GeneratedProblem
-from app.shared.code_assembly import annotated_program
+from app.shared.code_assembly import annotated_program, assemble_program
+
+PROBLEM_VERSION = "2"
 
 _PROBLEM_INTRO = (
     "You write a single DSA practice problem for a given skill, language, and difficulty. "
@@ -519,3 +521,150 @@ def adapt_problem_user_prompt(source_problem: str, language: str) -> str:
         "rules as always.\n\n"
         f"The learner's problem:\n{source_problem}"
     )
+
+
+_CRITIQUE_INTRO = (
+    "You are the editor who signs off DSA practice problems before a paying learner ever "
+    "sees them. Someone else wrote the problem below against the rules that follow. Your "
+    "only job is to decide whether it meets those rules, and to list precisely where it "
+    "does not.\n\n"
+)
+
+_CRITIQUE_RULES = (
+    "WHAT YOU ARE LOOKING FOR, in rough order of how badly it hurts:\n"
+    "1. HALLUCINATION. Any claim the problem itself does not support: an example whose "
+    "explanation asserts numbers that do not follow from its own input, a constraint that "
+    "contradicts the input_format or the examples, a statement referring to a parameter, a "
+    "field or a guarantee that appears nowhere else, an input_format line for a variable "
+    "that is not a parameter of the function in user_code.\n"
+    "2. RAMBLING AND THINKING OUT LOUD. 'wait', 'let us check', 'more precisely', "
+    "'specifically', a definition restated differently the second time, a hedge, a question "
+    "mark, a closing sentence that repeats the answer as prose, a walkback that redefines "
+    "the task mid-paragraph. The statement must ask the question exactly once, in one "
+    "framing, and stop.\n"
+    "3. WRONG ARITHMETIC. Work every example explanation through by hand against its own "
+    "input. A single wrong intermediate value is a violation.\n"
+    "4. UNPROFESSIONAL CRAFT. An untyped or stringly-typed signature in user_code, a "
+    "signature that differs from reference_user_code, a missing structure comment where a "
+    "non-trivial type is involved, parsing logic inside user_code, formatting inside the "
+    "function instead of post_code, a stub that would not run, a question admitting several "
+    "equally valid answers, an explanation that names the technique the learner is meant to "
+    "discover, or a complexity target stated in constraints.\n\n"
+
+    "DO NOT REJECT FOR:\n"
+    "- Style, tone or wording you would merely have written differently.\n"
+    "- Difficulty being easier or harder than the label suggests.\n"
+    "- The reference solving the problem by a different but valid algorithm, or being "
+    "unoptimised, as long as it is correct.\n"
+    "- The topic being unoriginal or resembling a well-known problem.\n"
+    "- Anything only running the code could settle. You do not execute anything; you read "
+    "it. A sandbox already checks that the program compiles, runs and matches its examples, "
+    "so never guess at runtime behaviour and never flag a suspicion you cannot point at a "
+    "specific line for.\n\n"
+
+    "Report one violation per line, each naming the offending field first. Be specific "
+    "enough that someone can fix it without seeing your reasoning: quote the offending "
+    "phrase or the wrong number. If nothing above applies, approve it — a problem with no "
+    "defects is the expected case, and inventing a violation to look thorough is worse than "
+    "missing one."
+)
+
+
+def critique_system_prompt(language: str) -> str:
+    return (
+        _CRITIQUE_INTRO
+        + _EXAMPLE_FORMAT
+        + _CODE_SHAPE
+        + _language_block(language)
+        + _AUTHORING_EXTRAS
+        + _HIDDEN_TESTS
+        + _INPUT_RULES
+        + "\n\n"
+        + _CRITIQUE_RULES
+    )
+
+
+def _problem_evidence(problem: GeneratedProblem) -> list[str]:
+    return [
+        f"title:\n{problem.title}",
+        f"statement_md:\n{problem.statement_md}",
+        f"constraints:\n{problem.constraints}",
+        f"input_format:\n{problem.input_format}",
+        f"output_format:\n{problem.output_format}",
+        "examples:\n"
+        + "\n".join(
+            f"- input={ex.input!r} output={ex.output!r} explanation={ex.explanation!r}"
+            for ex in problem.examples
+        ),
+        "hidden_tests (inputs only):\n"
+        + "\n".join(f"- {value!r}" for value in problem.hidden_tests),
+        "hints:\n" + "\n".join(f"- {hint}" for hint in problem.hints),
+        f"user_code (the only fragment the learner is shown):\n{problem.user_code}",
+        "THE PROGRAM THAT WILL BE RUN (pre_code + reference_user_code + post_code):\n"
+        + assemble_program(problem.pre_code, problem.reference_user_code, problem.post_code),
+    ]
+
+
+def critique_user_prompt(problem: GeneratedProblem, source_problem: str | None = None) -> str:
+    sections = [f"difficulty as claimed: {problem.difficulty}", *_problem_evidence(problem)]
+    if source_problem:
+        sections.append(
+            "THIS PROBLEM IS AN ADAPTATION. The learner supplied the original below and the "
+            "problem above must ask the SAME question — same task, same semantics, same "
+            "stated constraints. Flag any place the adaptation quietly changed, softened or "
+            "invented part of it. Do not flag the format or wording differences the "
+            f"adaptation is supposed to introduce.\n\nTHE LEARNER'S ORIGINAL:\n{source_problem}"
+        )
+    return "\n\n".join(sections)
+
+
+_REVISION_RULES = (
+    "REVISION RULES:\n"
+    "1. Return ONLY the fields you actually changed. Leave everything else null — it is kept "
+    "as-is. A revision that restates unchanged content is wasted.\n"
+    "2. Fix exactly what was flagged and nothing else. You are not rewriting the problem, "
+    "improving its style, or making it harder. Every violation must be addressed; nothing "
+    "else may move.\n"
+    "3. Do NOT change the question. Same task, same input format, same example INPUTS. A "
+    "wrong stated output or a wrong explanation is corrected; the question never is.\n"
+    "4. Never resolve a violation by deleting the content it names — do not drop an "
+    "explanation to avoid fixing its arithmetic, drop a hint to avoid rewording it, or weaken "
+    "a test. Fix the actual defect.\n"
+    "5. The CONSISTENCY RULES and the PER-LANGUAGE SHAPE from your instructions still apply "
+    "to anything you return: fragments must still concatenate into one valid program, and the "
+    "typed signature and structure comment stay."
+)
+
+
+def revise_system_prompt(language: str) -> str:
+    return (
+        "You repair one DSA practice problem that an editor has just rejected. The problem "
+        "is sound apart from the defects listed — you are correcting those, not writing a new "
+        "problem.\n\n"
+        + _EXAMPLE_FORMAT
+        + _CODE_SHAPE
+        + _language_block(language)
+        + _AUTHORING_EXTRAS
+        + _HIDDEN_TESTS
+        + _INPUT_RULES
+        + "\n\n"
+        + _REVISION_RULES
+    )
+
+
+def revise_problem_user_prompt(
+    problem: GeneratedProblem, violations: list[str], source_problem: str | None = None
+) -> str:
+    listed = "\n".join(f"- {violation}" for violation in violations)
+    sections = [
+        f"THIS PROBLEM WAS REJECTED. The editor found:\n{listed}",
+        *_problem_evidence(problem),
+    ]
+    if source_problem:
+        sections.append(
+            "This problem is an adaptation of the learner's own question below. Do NOT return "
+            "statement_md — the question stays exactly as the learner wrote it, and any "
+            f"violation must be fixed elsewhere.\n\nTHE LEARNER'S ORIGINAL:\n{source_problem}"
+        )
+    sections.append(_REVISION_RULES)
+    return "\n\n".join(sections)

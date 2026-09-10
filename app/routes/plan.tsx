@@ -36,6 +36,8 @@ interface LessonPlan {
 const STAGE_LABELS: Record<string, string> = {
   selecting: "Selecting problem...",
   generating: "Generating problem...",
+  evaluating: "Evaluating problem...",
+  revising: "Revising problem...",
   validating: "Validating problem...",
   patching: "Patching problem...",
   revalidating: "Revalidating...",

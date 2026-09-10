@@ -1,21 +1,36 @@
 import logging
+from collections.abc import Callable
 from typing import TypedDict
+
+from langgraph.graph import END, StateGraph
 
 from app.llm.domain.provider import LLMProvider
 from app.llm.domain.requests import StructuredGenerationRequest
-from app.llm.graphs.shared import attempt, cached_generate, compile_retry_graph, run_graph
+from app.llm.graphs.shared import MAX_SCHEMA_ATTEMPTS, attempt, cached_generate, run_graph
 from app.llm.infrastructure.cache import SqliteLLMCache
 from app.llm.infrastructure.gemini.mapping import SchemaValidationError
 from app.llm.prompts.problem import (
+    PROBLEM_VERSION,
     adapt_problem_user_prompt,
+    critique_system_prompt,
+    critique_user_prompt,
     patch_problem_user_prompt,
     patch_system_prompt,
     problem_system_prompt,
     problem_user_prompt,
+    revise_problem_user_prompt,
+    revise_system_prompt,
 )
-from app.llm.schemas.problem import GeneratedProblem, ProblemPatch
+from app.llm.schemas.problem import (
+    GeneratedProblem,
+    ProblemCritique,
+    ProblemPatch,
+    ProblemRevision,
+)
 
 logger = logging.getLogger(__name__)
+
+MAX_REVISION_ROUNDS = 2
 
 
 class ProblemGraphState(TypedDict):
@@ -27,9 +42,21 @@ class ProblemGraphState(TypedDict):
     result: GeneratedProblem | None
     error: str | None
     attempts: int
+    violations: list[str]
+    revisions: int
 
 
-def build_problem_graph(provider: LLMProvider):
+def _route_problem(state: ProblemGraphState) -> str:
+    if state["result"] is None:
+        return "done" if state["attempts"] >= MAX_SCHEMA_ATTEMPTS else "generate"
+    if state["violations"] and state["revisions"] < MAX_REVISION_ROUNDS:
+        return "revise"
+    return "done"
+
+
+def build_problem_graph(provider: LLMProvider, on_stage: Callable[[str], None] | None = None):
+    stage = on_stage or (lambda _: None)
+
     async def generate(state: ProblemGraphState) -> ProblemGraphState:
         return await attempt(provider, state, problem_system_prompt(state["language"]), (
                 adapt_problem_user_prompt(state["source_problem"], state["language"])
@@ -42,7 +69,69 @@ def build_problem_graph(provider: LLMProvider):
                 )
             ), GeneratedProblem)
 
-    return compile_retry_graph(ProblemGraphState, generate)
+    async def critique(state: ProblemGraphState) -> ProblemGraphState:
+        result = state["result"]
+        if result is None:
+            return state
+        stage("evaluating")
+        request = StructuredGenerationRequest(
+            system_prompt=critique_system_prompt(state["language"]),
+            user_prompt=critique_user_prompt(result, state["source_problem"]),
+        )
+        try:
+            verdict = await provider.generate_structured(request, ProblemCritique)
+        except Exception:
+            logger.warning("Problem critique could not run", exc_info=True)
+            return {**state, "violations": []}
+        if verdict.approved or not verdict.violations:
+            return {**state, "violations": []}
+        if state["revisions"] >= MAX_REVISION_ROUNDS:
+            logger.warning(
+                "Serving problem %r with unresolved violations: %s",
+                result.title,
+                "; ".join(verdict.violations),
+            )
+            return {**state, "violations": []}
+        logger.info(
+            "Problem %r rejected by critique: %s", result.title, "; ".join(verdict.violations)
+        )
+        return {**state, "violations": verdict.violations}
+
+    async def revise(state: ProblemGraphState) -> ProblemGraphState:
+        result = state["result"]
+        stage("revising")
+        request = StructuredGenerationRequest(
+            system_prompt=revise_system_prompt(state["language"]),
+            user_prompt=revise_problem_user_prompt(
+                result, state["violations"], state["source_problem"]
+            ),
+        )
+        try:
+            revision = await provider.generate_structured(request, ProblemRevision)
+        except Exception:
+            logger.warning("Problem revision could not run", exc_info=True)
+            return {**state, "violations": [], "revisions": MAX_REVISION_ROUNDS}
+        update = revision.model_dump(exclude_unset=True, exclude_none=True)
+        if state["source_problem"]:
+            update.pop("statement_md", None)
+        return {
+            **state,
+            "result": result.model_copy(update=update) if update else result,
+            "violations": [],
+            "revisions": state["revisions"] + 1,
+        }
+
+    graph = StateGraph(ProblemGraphState)
+    graph.add_node("generate", generate)
+    graph.add_node("critique", critique)
+    graph.add_node("revise", revise)
+    graph.set_entry_point("generate")
+    graph.add_edge("generate", "critique")
+    graph.add_edge("revise", "critique")
+    graph.add_conditional_edges(
+        "critique", _route_problem, {"generate": "generate", "revise": "revise", "done": END}
+    )
+    return graph.compile()
 
 
 async def generate_problem(
@@ -53,22 +142,33 @@ async def generate_problem(
     cache: SqliteLLMCache | None = None,
     source_problem: str | None = None,
     avoid_titles: list[str] | None = None,
+    on_stage: Callable[[str], None] | None = None,
 ) -> GeneratedProblem:
-    # Pasted problems not cached; avoid_titles part of key (not just prompt).
+    # Pasted problems not cached; avoid_titles part of key (not just prompt). The version
+    # segment retires entries generated before the critique gate existed.
     return await cached_generate(
         cache,
         None
         if source_problem
-        else ["problem", skill, language, difficulty, *sorted(avoid_titles or [])],
+        else [
+            "problem",
+            PROBLEM_VERSION,
+            skill,
+            language,
+            difficulty,
+            *sorted(avoid_titles or []),
+        ],
         GeneratedProblem,
         lambda: run_graph(
-            build_problem_graph(provider),
+            build_problem_graph(provider, on_stage),
             {
                 "skill": skill,
                 "language": language,
                 "difficulty": difficulty,
                 "source_problem": source_problem,
                 "avoid_titles": avoid_titles or [],
+                "violations": [],
+                "revisions": 0,
             },
             "Problem generation",
         ),

@@ -406,7 +406,7 @@ async def test_a_repair_rescues_a_problem_the_first_run_rejected(db_path: str) -
     )
 
     assert problem is not None and problem.status == ProblemStatus.AVAILABLE
-    assert stages == ["generating", "validating", "patching", "revalidating"]
+    assert stages == ["generating", "evaluating", "validating", "patching", "revalidating"]
     problem = await repo.get(problem.id)
     assert problem is not None and "# repaired" in problem.reference_solution
     # Patch only replaces named fields, rest carry over.
@@ -453,7 +453,7 @@ async def test_a_problem_that_validates_first_time_is_never_patched(db_path: str
     )
 
     assert problem is not None
-    assert stages == ["generating", "validating"]
+    assert stages == ["generating", "evaluating", "validating"]
 
 
 async def test_an_unusable_repair_falls_through_to_a_fresh_generation(db_path: str) -> None:
@@ -470,7 +470,15 @@ async def test_an_unusable_repair_falls_through_to_a_fresh_generation(db_path: s
         "prefix-sum", Language.PYTHON, "easy", on_stage=stages.append
     )
 
-    assert stages == ["generating", "validating", "patching", "regenerating", "validating"]
+    assert stages == [
+        "generating",
+        "evaluating",
+        "validating",
+        "patching",
+        "regenerating",
+        "evaluating",
+        "validating",
+    ]
     assert problem is not None and problem.status == ProblemStatus.AVAILABLE
 
 

@@ -12,9 +12,13 @@ from app.execution.domain.models import ExecutionStatus, TestResult
 from app.llm.prompts.problem import (
     _DIAGNOSIS,
     _LANGUAGE_BLOCKS,
+    critique_system_prompt,
+    critique_user_prompt,
     patch_problem_user_prompt,
     patch_system_prompt,
     problem_system_prompt,
+    revise_problem_user_prompt,
+    revise_system_prompt,
 )
 from app.llm.schemas.problem import GeneratedExample, GeneratedProblem
 from app.problems.application.repair import FailureKind, execution_failure
@@ -137,3 +141,50 @@ def test_numbered_lines_match_the_program_the_compiler_saw(
     assert len(numbered) == len(real)
     for index, (rendered, expected) in enumerate(zip(numbered, real, strict=True), start=1):
         assert rendered == f"{index:4} | {expected}"
+
+
+_SHARED_RUBRIC_SENTINELS = [
+    "Never think out loud",
+    "EXACTLY ONE CORRECT OUTPUT PER INPUT",
+    "Do NOT state the expected time or space complexity",
+    "NEVER give a completely empty input",
+]
+
+
+@pytest.mark.parametrize("sentinel", _SHARED_RUBRIC_SENTINELS)
+def test_the_judge_grades_against_the_rules_the_generator_was_given(sentinel: str) -> None:
+    """A rule inlined into one prompt instead of composed from the shared constants is a
+    rubric the other side never saw, and that is exactly how a judge starts rejecting
+    problems for rules the generator was never told about."""
+    assert sentinel in problem_system_prompt("python")
+    assert sentinel in critique_system_prompt("python")
+    assert sentinel in revise_system_prompt("python")
+
+
+def test_the_critique_prompt_carries_the_evidence_it_must_judge() -> None:
+    problem = _problem(
+        examples=[GeneratedExample(input="2 3", output="5", explanation="2 + 3 = 5")]
+    )
+    prompt = critique_user_prompt(problem, None)
+
+    assert problem.statement_md in prompt
+    assert problem.examples[0].explanation in prompt
+    assert problem.constraints in prompt
+    assert problem.user_code in prompt
+    assert problem.reference_user_code in prompt
+
+
+def test_only_an_adapted_problem_shows_the_judge_the_original() -> None:
+    problem = _problem()
+
+    assert "Sum the numbers." not in critique_user_prompt(problem, None)
+    assert "Sum the numbers." in critique_user_prompt(problem, "Sum the numbers.")
+
+
+def test_a_revision_prompt_names_every_violation_it_must_fix() -> None:
+    violations = ["statement_md: redefines subarray", "hints[0]: names the technique"]
+
+    prompt = revise_problem_user_prompt(_problem(), violations, None)
+
+    for violation in violations:
+        assert violation in prompt

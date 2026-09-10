@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from app.execution.domain.models import ExecutionRequest, TestResult
 from app.llm.domain.requests import ChatStreamRequest, StructuredGenerationRequest
 from app.llm.schemas.lesson_notes import MIN_STEPS, GeneratedLessonNotes, LessonNoteStep
+from app.llm.schemas.problem import ProblemCritique, ProblemRevision
 
 _LESSON_PROSE = (
     "You want the running total as it grows, so print it inside the loop where every "
@@ -23,17 +24,40 @@ class FakeLLMProvider:
     """Test double for LLMProvider — returns/raises queued canned responses in order,
     so graph logic (retry loops, schema handling) can be tested without a live API key."""
 
-    def __init__(self, structured_responses=None, chat_streams=None) -> None:
+    def __init__(
+        self, structured_responses=None, chat_streams=None, critiques=None, revisions=None
+    ) -> None:
         self._structured_responses = list(structured_responses or [])
         # Each item is a list[ChatChunk] (one queued call to stream_chat()).
         self._chat_streams = list(chat_streams or [])
+        # The critique gate draws from its own queues and defaults to approving, so the
+        # tests that predate it still queue exactly the generations they care about.
+        self._side_queues = {
+            ProblemCritique: (list(critiques or []), ProblemCritique(approved=True)),
+            ProblemRevision: (list(revisions or []), ProblemRevision()),
+        }
         # Captured for test assertions on prompt content.
         self.last_chat_request: ChatStreamRequest | None = None
         self.last_structured_request: StructuredGenerationRequest | None = None
+        self.last_critique_request: StructuredGenerationRequest | None = None
+        self.last_revision_request: StructuredGenerationRequest | None = None
 
     async def generate_structured(
         self, request: StructuredGenerationRequest, response_model: type[BaseModel]
     ) -> BaseModel:
+        if response_model in self._side_queues:
+            queued, default = self._side_queues[response_model]
+            if response_model is ProblemCritique:
+                self.last_critique_request = request
+            else:
+                self.last_revision_request = request
+            if not queued:
+                return default
+            next_side = queued.pop(0)
+            if isinstance(next_side, Exception):
+                raise next_side
+            return next_side
+
         self.last_structured_request = request
         if not self._structured_responses:
             raise AssertionError("FakeLLMProvider: no more structured responses queued")

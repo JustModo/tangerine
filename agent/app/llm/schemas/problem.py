@@ -60,6 +60,48 @@ class GeneratedProblem(BaseModel):
     tags: list[str] = []
 
 
+class ProblemCritique(BaseModel):
+    violations: list[str] = Field(
+        default=[],
+        description="One line per defect, each naming the offending field first, e.g. "
+        "'examples[1].explanation: says 3 x 4 = 14' or 'statement_md: redefines subarray "
+        "mid-paragraph'. Say what is wrong and where, never how to rewrite it. Empty when "
+        "the problem is publishable as it stands.",
+    )
+    approved: bool = Field(
+        description="true only when violations is empty and the problem could be handed to "
+        "a paying learner unchanged."
+    )
+
+
+class ProblemRevision(BaseModel):
+    title: str | None = Field(default=None, description="Only if the title was flagged.")
+    statement_md: str | None = Field(
+        default=None,
+        description="Only if the statement was flagged. Fix the flagged defect and nothing "
+        "else — the task being asked stays identical.",
+    )
+    constraints: str | None = Field(default=None, description="Only if constraints were flagged.")
+    input_format: str | None = Field(default=None, description="Only if input_format was flagged.")
+    output_format: str | None = Field(default=None, description="Only if output_format was flagged.")
+    hints: list[str] | None = Field(default=None, description="ALL hints in order, or null.")
+    tags: list[str] | None = Field(default=None, description="ALL tags, or null.")
+    examples: list[GeneratedExample] | None = Field(
+        default=None,
+        description="ALL examples in their original order, or null. Inputs must stay exactly "
+        "as they were — only a stated output or an explanation may be corrected.",
+    )
+    hidden_tests: list[str] | None = Field(
+        default=None, description="Replacement grading inputs, only if the originals were flagged."
+    )
+    pre_code: str | None = Field(default=None, description="Only if pre_code was flagged.")
+    user_code: str | None = Field(default=None, description="Only if the learner's stub was flagged.")
+    post_code: str | None = Field(default=None, description="Only if post_code was flagged.")
+    reference_user_code: str | None = Field(
+        default=None, description="Only if the reference solution was flagged."
+    )
+
+
 class ProblemPatch(BaseModel):
     """A repair for a problem that failed sandbox validation. Only the fields that were
     actually wrong — anything left null keeps its original value.
